@@ -2324,6 +2324,12 @@ Every milestone ends with one `python Scripts/CI.py` green on Windows: every sta
 | M40 | Music across scenes (phase 6) | music owned by the session, kept or crossfaded across scene loads; voice fades, an intro then its loop; the `Music` group under the world pause |
 | M41 | Bone attachments (phase 7) | an entity placed on a bone of the Animator above it in the fixed step, hashed, and drawn at its Animator's rendered pose as the skin is (ADR 0058) |
 | M42 | Planar reflections (phase 7, after M41) | a flat surface that is a true mirror: the view rendered again from the camera mirrored in its plane, clipped at it, capped per view, sampled by the glass's material (ADR 0059) |
+| M43 | Static scenery (phase 8, first) | static scenery that costs nothing when nothing changed: change-tracked transforms and per-tick visits of only what moved, a `Static` component, and a render static set culled per cell on the CPU with GPU-resident instances and static shadow casters batched after the cull (ADR 0061) |
+| M44 | Wheeled vehicles (phase 8) | Jolt's wheeled vehicles through `WheeledVehicle` and `VehicleWheel` components, deterministic at every thread count and hashed, and a `MassProperties` component for a body's centre of mass and inertia (ADR 0062) |
+| M45 | Sky and time of day (phase 8) | a physically based `Sky` with a sun, a moon, stars and a 2D cloud layer, its image-based light regenerated as it turns, and sky-relit probes from one bake (irradiance volume format 2) (ADR 0063) |
+| M46 | Mesh LODs, draw distance and wind (phase 8, after M43) | mesh levels of detail, authored or generated at import (meshoptimizer), cross-faded per view; a `RenderDistance` cull distance; a scene `Wind` that sways plants in every pass alike (ADR 0064) |
+| M47 | Water (phase 8) | a `Water` surface (an ocean or bounded waters) with deterministic waves, height queries, physical buoyancy, refraction, reflections and an underwater view (ADR 0065) |
+| M48 | Characters off the ground and on light bodies (phase 8, last) | `CharacterController:MoveFree` for swimming and climbing, and a light Dynamic body that supports the character standing on it (ADR 0066) |
 
 ---
 

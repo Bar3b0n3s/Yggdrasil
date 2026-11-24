@@ -62,6 +62,12 @@ The roadmap goes from an empty repository to a finished engine and editor (M15),
 | M40 Music across scenes (phase 6) | phase 5 | M36 to M39 |
 | M41 Bone attachments (phase 7, lands before M42) | phase 6 | M42 |
 | M42 Planar reflections (phase 7, lands after M41) | phase 6 | M41 |
+| M43 Static scenery (phase 8, lands first) | phase 7 and the program's setup | M44 to M48 |
+| M44 Wheeled vehicles (phase 8, lands second) | phase 7 and the program's setup | M43, M45 to M48 |
+| M45 Sky and time of day (phase 8, lands third) | phase 7 and the program's setup | M43, M44, M46 to M48 |
+| M46 Mesh LODs, draw distance and wind (phase 8, lands fourth, adapting to M43 at its landing) | phase 7 and the program's setup | M43 to M45, M47, M48 |
+| M47 Water (phase 8, lands fifth) | phase 7 and the program's setup | M43 to M46, M48 |
+| M48 Characters off the ground and on light bodies (phase 8, lands last) | phase 7 and the program's setup | M43 to M47 |
 
 Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last; phase 5 (M28 to M35, one phase without a hardened gate, `Docs/Decisions/0042-world-tree-engine-program.md` decision 2) M28, M29, M31, M32, M34 and M35 in readiness order, M32 before M33, then M30 and M33 in readiness order, landing in two batch gates (`Docs/Decisions/0051-gates-in-proportion.md`); phase 6 (M36 to M40, `Docs/Decisions/0052-world-tree-phase-6.md`) M36 before M37, and M38, M39 and M40 in readiness order with them, landing in at most two batch gates, the last with the hardening stage (`CI.py --milestone`); phase 7 (`Docs/Decisions/0058-m41-bone-attachments.md`, as amended) M41 then M42, after brief 21's three fixes reach main, in one batch with the hardening stage (`CI.py --milestone`) unless M41 lands ahead of a late M42 with `CI.py --require-clang-cl`. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
 
@@ -962,3 +968,418 @@ Its milestone end is phase 7's batch gate: `CI.py --milestone`.
 - **Every suite and replay passes unchanged.** No engine hash moves. The game records again only the replays of the scenes it adds the component to.
 
 **Parallelization**: W42.1 (CPU), then W42.2 (GPU, after `milestone/m42` merges main with brief 21's first fix), then W42.3 (coverage and documents).
+
+## M43 — Static scenery
+
+**Scope.** Phase 8, its first lander (`Docs/Decisions/0060-skerries-engine-program.md` decision 2; `Docs/Decisions/0061-m43-static-scenery.md` decisions 2 to 4). Skerries' S16: static scenery that costs nothing when nothing changed, so a tick and a view cost what changed and what is seen, not the scene's size. It amends Architecture §5.2's "no dirty flags" and §5.7. Delivered in three waves:
+- **W43.1:** change-tracked transforms with a Debug full-recompute check and a Lint rule; a structure revision and canonical segments, so every per-tick system visits only what it needs; the `Static` component.
+- **W43.2:** the render static set: cells culled on the CPU, GPU-resident instance records drawn through per-view indices in every mesh view, and static shadow casters batched per face after the cull.
+- **W43.3:** stats, the readout, Perf.py's metrics, FeatureTest, the Python case and the documents.
+
+The render thread and GPU-driven rendering stay cut (ADR 0028 decision 2; ADR 0060 question 5). Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
+
+**Deliverables**
+- **Change tracking.** `TransformSystem::Update` recomputes only the subtrees written since the last update, bit-identical to a full pass; the interpolation snapshot and the frame-phase write tagging follow the changed list. `Scene::MarkTransformWritten` for the physics writers, the `banned-transform-write` Lint rule, and a Debug check that recomputes everything and verifies it.
+- **Incremental systems.** `Scene::GetStructureRevision()`, canonical order in per-root segments, `Scene::CollectCanonical<T...>`: physics, audio, UI layout, animation, particles, the script lifecycle order and `Scene.Find*` visit their components, in today's order.
+- **The component.** `Static {Scope: Subtree | EntityOnly | NotStatic}` (Core): one `Static` on an island's scenery root covers its subtree.
+- **The static set.** `RenderSnapshot::StaticSet`: 32 m cells of cached mesh items, culled per view; their records live on the GPU (`GpuResourceCache`) and draw through `InstanceIndices` (t22) into `StaticInstances` (t21) under `DrawConstantsStaticInstances`. Every mesh view takes it: the camera, picking, the debug views, mirror views and captures.
+- **Shadows.** Static casters are prepared once per cell version and drawn once per key per cascade, spot tile and point face.
+- **Stats and perf.**
+  - `stats.get`'s `transformsUpdated`, `entitiesVisited` and `staticCellRebuilds`, and its views' `staticItems`, `staticCells`, `staticCellsVisible` and `dynamicItems`.
+  - The readout's `TransformsUpdated`, `EntitiesVisited`, `StaticCellRebuilds`, `StaticItems` and `StaticCellsVisible`.
+  - Perf.py's `staticScenery/20000Entities/cpuMs` (budget 2.0 ms) and `stateHash/20000Entities/ms`, warning-only, in a new capture part `staticScenery`.
+- **Validation.** `SCENE_STATIC_MOVES` (Warning): a static entity with a Dynamic or Kinematic body, a CharacterController, a BoneAttachment or root motion applied.
+
+**Acceptance**
+- "TransformSystem: an incremental update equals the full recompute bit for bit after any sequence of edits"
+- "TransformSystem: an update of a scene where nothing changed recomputes no matrix"
+- "TransformSystem: a Transform written past change tracking fails the Debug full-recompute check"
+- "Scene: the structure revision moves with structural changes only"
+- "Scene: canonical segments equal the full canonical order after any structural edit"
+- "Scene: Static marks its subtree, its entity alone, or no part of a subtree"
+- "PlaySession: an unchanged static scene visits no entity in a tick"
+- "PlaySession: an entity written to the same bits in the frame phase is not tagged"
+- "PhysicsSystem: a tick visits only the moving bodies and the bodies whose transforms changed"
+- "RenderStaticCache: a write to a static entity rebuilds only its cell"
+- "RenderExtraction: a static subtree's meshes are in the snapshot's static set, not its mesh list"
+- "RenderExtraction: a scene without Static extracts as before"
+- "ProjectValidator: SCENE_STATIC_MOVES reports a static entity that moves every tick"
+- "StaticScenery: a scene renders the same bytes with its scenery static and without"
+- "StaticScenery: a view culls whole cells, so its static work follows what it sees"
+- "StaticScenery: each shadow face draws one draw per key of its visible static casters"
+- "StaticScenery: a moved static entity's cell rebuilds and its draw follows"
+- "StaticScenery: mirror views, captures, picking and selection draw static items"
+- "StaticScenery: the wireframe overlay and RENDER_NO_LIGHTING see static meshes"
+- "StaticScenery: a static scene renders the same bytes after a device loss"
+- `Lint.py --self-test` with the `TransformDirectWrite` fixture.
+- Every existing golden byte-identical (56), and every existing interpolation case and FeatureTest's `Timing` suite unchanged.
+- `test_static_scenery.py` passes.
+- The `StaticScenery` suite passes in the editor, Release and Dist, and `StaticScenery.replay` verifies at one hash in Debug, Release and Dist.
+- Perf.py's `staticScenery/20000Entities/cpuMs` is within 2.0 ms at the gate's perf capture, and `stateHash/20000Entities/ms` is recorded (warning-only).
+
+**How the game will check it**
+- **Dense Landfall (17,193 entities) at 60 fps in a Release export, about 2 ms for 20,000 static entities in one view.**
+  - The gate: "PlaySession: an unchanged static scene visits no entity in a tick" and "StaticScenery: a view culls whole cells, so its static work follows what it sees".
+  - The measure: Perf.py's `staticScenery/20000Entities/cpuMs`. The export's frame rate is the game's own check.
+- **`DirectionalShadows` draws of the order of `ForwardOpaque`'s:** "StaticScenery: each shadow face draws one draw per key of its visible static casters", and `stats.get`'s pass rows.
+- **Replays still verify, and a static entity that a script moves is handled:** "StaticScenery: a moved static entity's cell rebuilds and its draw follows", the `StaticScenery` suite and replay in every mode, and every committed replay at its hash. No engine hash moves.
+
+## M44 — Wheeled vehicles
+
+**Scope.** Phase 8, second in its fixed train order (M43, M44, M45, M46, M47, M48), merging over M43's regions. It owns `PhysicsSystem.{h,cpp}`, `PhysicsWorld.{h,cpp}` and the physics state headers for the phase, and M47 and M48 append after its entries (`Docs/Decisions/0060-skerries-engine-program.md` decisions 2 and 4; `Docs/Decisions/0062-m44-wheeled-vehicles.md`). Skerries' brief S02 is delivered in three waves:
+- **W44.1:** a `MassProperties` component (a centre-of-mass offset and an inertia scale on any Dynamic body) as its first checkpoint, then Jolt's wheeled vehicles in the world: lifetimes, refusals, priorities and the friction hook M54 extends.
+- **W44.2:** vehicles in the session: composition, kept wheel frames, driver input, wheel poses and the physics hash's vehicle part.
+- **W44.3:** scripts, `physics.vehicleInfo`, the debug view, FeatureTest and the documents.
+
+Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
+
+**Deliverables**
+- **`MassProperties {CenterOfMassOffset, InertiaScale}`** (Physics). It wraps the body's shape in Jolt's `OffsetCenterOfMassShape`, with every collider still named rightly in contacts, the ground and bounds. `PHYSICS_MASS_UNUSED` (Warning) reports one on a body that is not Dynamic, and `physics.bodyInfo` gains `centerOfMass`.
+- **`WheeledVehicle`** (Vehicles) on the body's entity:
+  - driver input: `Throttle`, `Steering`, `Brake`, `HandBrake`, and Manual's `Gear` and `Clutch`;
+  - an engine with a torque curve;
+  - an Auto or Manual transmission;
+  - differentials and anti-roll bars naming wheels;
+  - a pitch and roll limit;
+  - a Ray, Sphere or Cylinder wheel cast.
+- **`VehicleWheel`** (Vehicles) on each wheel child: radius, width, suspension, spring, steer, brakes, inertia and tyre friction curves. The child's authored pose is the wheel's neutral pose, and the engine writes the child's pose every tick from the wheel's suspension, steer and spin.
+- **Grip by surface.** The ground collider's `ColliderSurface` friction, or the body's (a `TerrainCollider`'s), through one resolver that M54's terrain layers extend.
+- **Reads.**
+  - `WheeledVehicle:GetSpeed()`, `GetEngineRpm()`, `GetGear()` and `IsShifting()`.
+  - `VehicleWheel:IsTouching()`, `GetContact()`, `GetSuspensionLength()`, `GetSuspensionForce()`, `GetRotation()`, `GetSteerAngle()`, `GetAngularVelocity()` and `GetSlip()`.
+  - `physics.vehicleInfo`.
+- **The rest.** Vehicles drawn with the colliders; `PHYSICS_VEHICLE_INVALID` (Error); deterministic at any Jolt thread count, the drivetrain and wheel state in the physics hash.
+
+**Acceptance**
+- "PhysicsWorld: a centre-of-mass offset moves the body's centre of mass and keeps its origin's pose"
+- "PhysicsWorld: SetShape keeps a body's mass override and tells its joints the wrapped centres of mass"
+- "PhysicsShape: CheckDynamicBody refuses the bodies whose mass override the world refuses"
+- "PhysicsWorld: bodies without a mass override simulate bit for bit as before", with the 200-body pile at `CommittedWorldPileHash`.
+- "PhysicsWorld: a compound with a centre-of-mass offset names each collider in its contacts, its ground and its sub-shape bounds"
+- "PhysicsWorld: a vehicle at rest touches with every wheel within 1 cm of its rest length"
+- "PhysicsWorld: full throttle reaches the analytic top speed and holds it within 2 %"
+- "PhysicsWorld: a full-lock turn at 15 m/s rolls a buggy over without its lowered centre of mass and not with it"
+- "PhysicsWorld: a vehicle dropped 2 m lands on its wheels"
+- "PhysicsWorld: twenty-four vehicles step identically with 0, 1 and 8 Jolt threads"
+- "PhysicsWorld: destroying a body destroys its vehicle first, and the vehicle's handle goes invalid"
+- "PhysicsWorld: vehicle descriptions and settings Jolt would assert on are refused, and nothing reaches Jolt"
+- "PhysicsWorld: a wheel's grip follows the friction of the collider it stands on"
+- "PhysicsVehicles: every path that removes a vehicle's body removes its vehicle first", one case per path, under Jolt's asserts in Debug and Release.
+- "PhysicsSystem: random vehicles and edits never reach a Jolt assert"
+- "PhysicsVehicles: a vehicle keeps its wheels' frames when its body is created again"
+- "PhysicsVehicles: wheel entities take their wheel's suspension, steer and spin, written only when they change"
+- "PhysicsVehicles: a driver-input write wakes a sleeping vehicle and composes nothing"
+- "PhysicsVehicles: the same buggy stops shorter on a rough surface than on a slick one, a ColliderSurface's and a TerrainCollider's alike"
+- "PhysicsVehicles: one state reached through two histories steps identically"
+- "PhysicsVehicles: a scene without vehicles hashes as before"
+- "PhysicsVehicles: a convoy driven by planned input ends in one state with 0, 1 and 8 Jolt threads"
+- "PhysicsVehicles: the convoy's state hash equals the committed constant in every configuration", in the Debug and Release unit runs.
+- "ProjectValidator: PHYSICS_VEHICLE_INVALID reports a vehicle without a Dynamic body, without wheels or with a collider on a wheel"
+- "PhysicsVehicles: each vehicle that cannot be made gets one PHYSICS_VEHICLE_INVALID naming its reason"
+- "ProjectValidator: PHYSICS_MASS_UNUSED reports MassProperties on a body that is not Dynamic"
+- "VehicleBindings: a vehicle reads its speed, revs and gear, and each wheel its contact, suspension, spin, steer and slip after the last step"
+- "VehicleBindings: a vehicle not in force and a session without physics raise instead of reading"
+- "PhysicsMethods: physics.vehicleInfo reports a vehicle's drivetrain and wheels in play"
+- "PhysicsMethods: physics.bodyInfo reports the body's centre of mass"
+- "RuntimeAutomationServer: physics.vehicleInfo reports a vehicle of the Runtime's session"
+- "VehicleDebugDraw: a play session draws each wheel at its suspension with its contact, and a vehicle it did not make as refused"
+- `test_physics.py`'s `test_vehicle_info_reads_a_vehicle_in_play` passes. The `Vehicles` suite passes in the editor, Release and Dist. `Vehicles.replay` verifies at one hash in Debug, Release and Dist and fails without its input.
+
+**How the game will check it**
+- **The buggy at rest has all four wheels touching, each within 1 cm of its rest length:** "PhysicsWorld: a vehicle at rest touches with every wheel within 1 cm of its rest length" and the `Vehicles` suite.
+- **At full throttle it reaches its top speed and holds it:** "PhysicsWorld: full throttle reaches the analytic top speed and holds it within 2 %".
+- **A full-lock turn at 15 m/s does not roll it with the centre of mass lowered:** "PhysicsWorld: a full-lock turn at 15 m/s rolls a buggy over without its lowered centre of mass and not with it", with `MassProperties` on the buggy.
+- **It lands a 2 m drop on its wheels:** "PhysicsWorld: a vehicle dropped 2 m lands on its wheels" and the suite's ledge.
+- **The trial's autopilot replay verifies with `strictHash` in Debug, Release and Dist:**
+  - "PhysicsVehicles: a convoy driven by planned input ends in one state with 0, 1 and 8 Jolt threads" and its committed hash;
+  - `Vehicles.replay` in the determinism suite;
+  - Ridgeback's own replay is the game's.
+- **Screenshots of the suspension compressed on landing and the wheels steered:** "PhysicsVehicles: wheel entities take their wheel's suspension, steer and spin, written only when they change". The screenshots are the game's.
+- **Sand and rock feel different:** "PhysicsVehicles: the same buggy stops shorter on a rough surface than on a slick one, a ColliderSurface's and a TerrainCollider's alike". Per-layer surfaces come with M54.
+
+**Parallelization**: W44.1 (its first checkpoint `MassProperties`, then the world's vehicles), then W44.2 (the session), then W44.3 (coverage and documents). At the landing M44 merges second, after M43: its per-tick pass moves to M43's `CollectCanonical`, its composition keys on M43's structure revision, and it appends `VehicleWheel` to `SCENE_STATIC_MOVES`' list.
+
+## M45 — Sky and time of day
+
+**Scope.** Phase 8, third in its one batch's fixed train order, after M43 and M44 (`Docs/Decisions/0060-skerries-engine-program.md` decision 2; `Docs/Decisions/0063-m45-sky-and-time-of-day.md` decisions 2 to 4). Skerries' S03 is a sky that follows the sun, day and night, delivered in four waves:
+- **W45.1:** a `Sky` component with its Sun and Moon roles, the atmosphere on the CPU, light driving, validation, and the proof that a GPU copy reaches the view's constant buffers.
+- **W45.2:** the sky on the GPU: Hillaire's LUTs, the Sky pass (sun disc, moon, stars, a 2D cloud layer), and the run-time image-based light in the existing environment slots.
+- **W45.3:** probes under a moving sun: relightable bakes (irradiance volume format 2) relit by the sky, with reflection probes scaled with them.
+- **W45.4:** stats, perf, FeatureTest, the Python case and the documents.
+
+Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
+
+**Deliverables**
+- **The component.** `Sky {Sun, Moon, Intensity, DriveLights, Haze, Overcast, GroundAlbedo, SunDisc, MoonSize, Stars, Latitude, NorthAngle, Clouds, CloudSpeed}` (Rendering, unique per scene), extracted with its resolved Sun and Moon in every view. With `DriveLights` the Sun's and Moon light's rendered colours take the atmosphere's transmittance (the moon's also its phase); the components keep their authored colours.
+- **The roles.** With a Sky, its Sun owns the fog glow, and the cascades go to the Sun above the horizon and to the Moon below it.
+- **The passes.** `SkyLighting` at the end of the Ambient stage (rows `SkyLuts`, `SkyIbl`, `ProbeRelight`) and `Sky` in the Forward stage directly after `Skybox`, which M47's `Water` follows. The sky's image-based light is regenerated only when its key changes, and its SH9, fog colour and reflection scales are copied into the existing constant buffers, so no forward, terrain, SSR, probe or fog shader changes.
+- **Relit probes.** `lighting.bake` under a Sky stores each irradiance probe's local light and sky transfer (format 2; version 1 is still written without a Sky). The renderer relights them as the sky changes, with no sun or sky bounce (an accepted limit). Its result names each volume `relightable`.
+- **Validation.** `SKY_LIGHT_INVALID`, `SKY_ENVIRONMENT_IGNORED` and `PROBE_NOT_RELIGHTABLE` (Warnings).
+- **Stats and perf.**
+  - `stats.get`'s `skyUpdates` and `relitIrradianceVolumes`, and the readout's `SkyUpdates`.
+  - Perf.py's `sky/Static/gpuMs` (budget 0.3 ms) and `sky/Turning/gpuMs` (0.6 ms).
+
+**Acceptance**
+- "SkyAtmosphere: the transmittance toward the sun falls with the zenith angle, reddens at the horizon and is zero below it"
+- "SkyAtmosphere: the moon's illuminated fraction follows its elongation from the sun"
+- "SkyAtmosphere: the stars turn about the celestial pole by the sun's hour angle"
+- "SkyAtmosphere: driving the lights is idempotent and leaves the components' colours as authored"
+- "SkyAtmosphere: the cascades go to the Sun above the horizon and to the Moon below it"
+- "Fog: with a Sky, the glow follows its Sun"
+- "RenderExtraction: a Sky is extracted with its Sun and Moon in every view, and a scene without one extracts as before"
+- "SkyValidation: a Sun or Moon that names no usable light, and an Environment beside a Sky, are reported"
+- "SkyLighting: a buffer copied into a view's constant buffers after their CPU writes reaches the passes that read them"
+- "SkyLighting: the transmittance and multiple-scattering LUTs match their CPU reference"
+- "SkyLighting: the run-time prefilter of a cube matches the environment bake's"
+- "SkyLighting: a constant sky gives a constant irradiance"
+- "SkyLighting: the view's ambient light, reflections and fog colour follow the sun"
+- "SkyLighting: the sky's lighting is regenerated only when its key changes"
+- "SkyPass: a mirror view and a probe capture draw the sky"
+- "SkyLighting: a sky scene renders the same bytes after a device loss"
+- "SkyLighting: a sky whose cubes cannot be created lights with the Environment and the render returns its error"
+- "IrradianceVolumeData: a relightable payload round-trips, a version 1 source still reads, and a volume without a relight block writes version 1"
+- "ProbeCapture: an open probe's sky transfer is the identity and a closed one's is zero"
+- "ProbeRelight: an open probe relights to the sky's irradiance and a closed one to its local light"
+- "ProbeRelight: the GPU relight matches its CPU reference"
+- "LightingBake: a volume baked under a Sky is relightable, bakes byte-identically twice, and relights to its bake at the bake's sky"
+- "ProbeRelight: a cave darkens at night and lights at noon with no bake between"
+- "ProbeRelight: a reflection probe inside a relit volume dims with it"
+- "ProbeValidation: a volume without a relight block under a Sky is reported"
+- `Golden: SkyDay`, `Golden: SkyOvercast` and `Golden: SkyProbes`, with every existing golden byte-identical.
+- `test_sky.py` passes.
+- The `Sky` suite passes in the editor, Release and Dist; `Sky.replay` verifies at one hash in Debug, Release and Dist and fails without its input.
+- The frozen-layout cases: `RenderPassDeclarationTests`' rows (45), the pipeline count (88), "Shaders: SharedStructsMatchReflection" with `SkyConstants`, and the existing `IrradianceVolumeData` fuzz case on its new seed.
+- Perf.py's `sky/Static/gpuMs` is within 0.3 ms and `sky/Turning/gpuMs` within 0.6 ms (warning-only).
+
+**How the game will check it**
+- **Six screenshots of Landfall's cove across a day agree** (sky, sun light, ambient, the water's reflections):
+  - `Golden: SkyDay`, whose glossy floor reflects the sky's cube, as M47's water will;
+  - "SkyLighting: the view's ambient light, reflections and fog colour follow the sun".
+- **The ranger station and the cave mouth darken at night with no bake between:**
+  - `Golden: SkyProbes`;
+  - "ProbeRelight: a cave darkens at night and lights at noon with no bake between";
+  - "ProbeRelight: a reflection probe inside a relit volume dims with it".
+
+  The game bakes once with its Sky in the scene.
+- **The time-lapse runs without hitches, its per-frame cost at 1080p measured:** `sky/Turning/gpuMs` and `stats.get`'s `SkyLuts`, `SkyIbl`, `ProbeRelight` and `Sky` rows. The game turns its sun in its own script rather than raising the time scale.
+- **Replays still verify.** `Sky.replay` verifies at one hash in renderer-none editors and rendering exports, and no committed hash moves. The Sky is hashed component data; its rendering is not.
+
+**Parallelization**: W45.1 (CPU, and the copy's one GPU case), then W45.2 (the sky on the GPU), then W45.3 (relit probes), then W45.4 (coverage and documents). At the batch landing, M45 merges third, after M43 and M44, and adapts its single-call hunks in M43's extraction and Prepare.
+
+## M46 — Mesh LODs, draw distance and wind
+
+**Scope.** Phase 8 of the Skerries program, fourth in its one batch's fixed train order, after M43, M44 and M45 (`Docs/Decisions/0060-skerries-engine-program.md` decision 2; `Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md` decisions 2 to 4). Skerries' brief S04, items 1 and 3: mesh levels of detail with a cull distance per renderer, and a scene wind. Item 2, the scatter, is M49. It is delivered in four waves:
+- **W46.1:** the data, disjoint from M43: meshoptimizer vendored; cooked mesh version 3 with levels and a wind stream; `GltfImporter` version 4 with authored (`MSFT_lod`, `_LOD<n>`) and generated levels and the `_WIND` attribute; Material version 3 with the demos' materials upgraded; the `RenderDistance` and `Wind` components and `Wind:Sample`.
+- **W46.2:** the renderer: levels chosen per view by screen size and cross-faded with complementary dither, shadows from a coarser level, and wind displacement bit-identical in every pipeline.
+- **W46.3:** stats, perf, the goldens, FeatureTest and the documents.
+- **W46.4:** the adaptation to M43's static path at landing.
+
+Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
+
+**Deliverables**
+- **Mesh levels.** Up to five levels per mesh in the cooked mesh, level 0 unchanged, so colliders, the navigation bake and raycasts read level 0 alone.
+  - Import settings `Lods` (`None`, `FromGltf`, `Generate`), `LodScreenSizes`, `LodTriangleRatios`, `LodMaxError` and `Wind`.
+  - Generated levels are index-only, made by meshoptimizer's simplifier.
+- **The selection.** Per view, stateless, by projected screen size:
+  - inside a `FadeWidth` band both levels draw with complementary dither that composes with `Opacity`;
+  - casters draw the view's level plus `ShadowLodOffset`, never faded;
+  - M43's static items carry their level and fade in its per-view index entries.
+- **`RenderDistance {CullDistance, LodBias, ShadowLodOffset, FadeWidth}`** in a category of its own, requiring `MeshRenderer`: beyond `CullDistance` an item fades out, then draws and casts nothing.
+- **`Wind {Direction, Strength, GustStrength, GustFrequency, Turbulence}`,** one per scene.
+  - The material's `Wind` block (`Enabled`, `Bend`, `Branch`, `Flutter`, `Stiffness`) and the mesh's `_WIND` weights (branch, branch phase, flutter, bend mask) bend vegetation.
+  - The displacement uses `NoContraction` arithmetic without transcendental functions, so the prepass and the forward pass compute bit-identical positions, and the motion vectors follow the sway.
+  - `Wind:Sample(position, time?)` reads the gusted velocity through DetMath at the world's clock.
+- **Validation.** `ASSET_LOD_INVALID` (Warning): an authored or generated level dropped at import, with its reason.
+- **Stats and perf.**
+  - `stats.get`'s `meshLodDraws`, `lodCrossFades` and `distanceCulledMeshes`, the Stats panel's row, and the readout's `LodCrossFades` and `DistanceCulledMeshes`.
+  - Perf.py's `lod/Forest/gpuMs`, with a budget of 3.0 ms, in the `look` part.
+- **The library.** meshoptimizer (MIT) in `Vendor/meshoptimizer/`, linked by AssetPipeline only.
+
+**Acceptance**
+- "MeshData: a version 3 payload with levels and a wind stream reads back equal"
+- "MeshData: a payload whose level addresses a vertex beyond the mesh is refused"
+- "GltfImporter: MSFT_lod nodes become their mesh's levels with their screen coverage"
+- "GltfImporter: sibling nodes named _LOD<n> become one mesh's levels"
+- "GltfImporter: a level whose submeshes differ from level 0 is dropped with ASSET_LOD_INVALID"
+- "GltfImporter: generated levels share level 0's vertices and match their committed checksum", in Debug and Release
+- "GltfImporter: an import without levels gives each fixture's mesh as version 3 did"
+- "GltfImporter: a _WIND attribute becomes the mesh's wind stream, and the Wind setting reaches every material"
+- "PhysicsComposition: a mesh collider of a mesh with levels holds level 0's triangles only"
+- "MaterialData: a version 2 material loads without wind and saves as version 3"
+- "MeshLod: a mesh's level follows its projected screen size times LodBias"
+- "MeshLod: inside a fade band the two levels take complementary fades"
+- "MeshLod: an item fades out across FadeWidth before its CullDistance and is culled beyond it"
+- "MeshLod: a caster draws its view's level plus ShadowLodOffset"
+- "Wind: Sample gives the committed velocity at fixed points and times", in Debug and Release
+- "RenderExtraction: a mesh's RenderDistance and the scene's Wind reach the snapshot at the request's time"
+- "MeshLods: across a fade band the two levels cover every pixel exactly once"
+- "MeshLods: a mesh draws its coarser level below its switch's screen size"
+- "MeshLods: a caster's shadow comes from its coarser level"
+- "MeshLods: a mesh beyond its CullDistance draws nothing and casts no shadow"
+- "Wind: the forward pass leaves no hole where the prepass covered a wind-swept mesh"
+- "Wind: a calm Wind renders the same bytes as no Wind"
+- "Wind: a wind-swept caster's shadow sways with it"
+- "Wind: the prepass's motion vectors follow the sway"
+- "MeshLods: a scene with levels and wind renders the same bytes after a device loss"
+- After W46.4, the `MeshLods` and `Wind` gpu cases pass with their meshes `Static`, and M43's "StaticScenery: a scene renders the same bytes with its scenery static and without" passes on a scene with levels and wind.
+- `Golden: MeshLods` and `Golden: Wind`, with every existing golden byte-identical.
+- `test_mesh_lods.py` and `test_wind.py` pass.
+- The `MeshLods` and `Wind` suites pass in the editor, Release and Dist, and `Wind.replay` verifies at one hash in Debug, Release and Dist and fails without its input.
+- Perf.py's `lod/Forest/gpuMs` is within 3.0 ms at the gate's perf capture (warning-only).
+
+**How the game will check it**
+- **Landfall's trees and rocks within the frame budget,** with `stats.get` showing the draws:
+  - Perf.py's `lod/Forest/gpuMs` on 2,000 trees and 4,000 rocks;
+  - `stats.get`'s `meshLodDraws`, `lodCrossFades` and `distanceCulledMeshes`.
+
+  The 20,000 grass clumps and the scatter's draws are M49's; the Release export's frame time is the game's check.
+- **Ridgeback's trees visible at 1 km from Landfall's beacon:**
+  - the camera's `FarClip` raised to 3,000 m;
+  - "MeshLods: a mesh draws its coarser level below its switch's screen size";
+  - `Golden: MeshLods`'s farthest level.
+
+  The screenshot is the game's.
+- **The cartographer collides with tree trunks, and a replay through the trees verifies:** "PhysicsComposition: a mesh collider of a mesh with levels holds level 0's triangles only", and `Wind.replay` in all three configurations. The scatter's trunks are M49's.
+- **Screenshots at wind 0 and in the storm's gale:** `Golden: Wind`, "Wind: a calm Wind renders the same bytes as no Wind" and the `Wind` suite. The storm's screenshots are the game's.
+- **Every suite and replay passes unchanged.** No engine hash moves. The games upgrade their materials to version 3 in their own sessions.
+
+**Parallelization**: W46.1 (data, disjoint from M43), then W46.2 (renderer), then W46.3 (coverage and documents), then W46.4 at landing, after `landing/phase8` holds M43, M44 and M45.
+
+## M47 — Water
+
+**Scope.** Phase 8, fifth in its one batch's fixed train order: after M43, M44, M45 and M46, whose entries it appends to, and before M48 (`Docs/Decisions/0060-skerries-engine-program.md` decisions 2 and 4; `Docs/Decisions/0065-m47-water.md` decisions 2 to 4). Skerries' S01 is the sea, pools and cave lakes the game floats on, with S05's grotto lake as a Rectangle under the rock. It is delivered in three waves with one internal contract:
+- **W47.1:** the `Water` and `Buoyancy` components, the wave function, the point rule, the queries, `water.sample`, validation and the snapshot item. It ends with the contract checkpoint C47, which freezes the components, the wave function and the snapshot item, with the streams' interfaces stubbed (`ENGINE_CONTRACT_STUB();`), their cases marked `doctest::skip` and contract-mode checks.
+- **W47.2:** two streams in parallel from C47. The physics stream builds buoyancy per collider through Jolt in PreStep. The render stream builds the `Water` pass in the Forward stage after the sky. The wave's integration replaces every stub and skip.
+- **W47.3:** the `Underwater` pass, M42's planar reflection as an opt-in, stats, perf, goldens, FeatureTest and the documents.
+
+Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
+
+**Deliverables**
+- **The components** (a new category, Water):
+  - `Water`: `Shape` Ocean or Rectangle (`Size`, `Depth`, `Headroom`); up to 8 Gerstner `Waves` scaled by `WaveScale`; `Current`; `Density`; the look's fields. The base height is the entity's world Y, so the tide is a Translation write.
+  - `Buoyancy`: `Water`, `BuoyancyScale`, `LinearDrag`, `AngularDrag`; it requires a RigidBody.
+  - One Ocean per scene. A Rectangle's volume masks the Ocean, and the scene view's annotations outline it.
+- **The waves.** A pure function of the water and the world's time, in double precision with DetMath, the same in every configuration. Edit scenes show them at time 0.
+- **The queries.**
+  - `Water:SampleHeight`, `SampleNormal`, `SampleVelocity` and `IsUnderwater`;
+  - `Physics.SampleWater`, which takes the topmost Rectangle holding the point, else the Ocean;
+  - `water.sample`, and `physics.bodyInfo`'s buoyancy block.
+- **Buoyancy.** PreStep item 4c, after M44's vehicles (4b): each collider submerged against the surface under its centre through Jolt's submerged volume, at the physical force `ρ g V` against the water's `Density`.
+- **The look.** The `Water` pass after the sky, before SSR:
+  - refraction of the opaque scene and absorption by depth;
+  - shore and crest foam, drifting detail normals;
+  - the light loop, shadows and fog;
+  - the environment, the probes and SSR on the surface;
+  - a clipmap to the horizon at a fixed cost.
+
+  The `Underwater` pass, first in HdrPost, gives the view under any water and the waterline. A `PlanarReflection` on a Water reflects in its base plane. The sea stays out of mirror views and probe bakes.
+- **Stats and perf.**
+  - `stats.get`'s `waterSurfaces` and `underwater`, the `WaterRefraction`, `Water` and `Underwater` rows, and the readout's `WaterSurfaces`;
+  - Perf.py's `water/Ocean/gpuMs` (1.0 ms), `water/Underwater/gpuMs` (0.3 ms) and `water/Buoyancy64/tickMs` (1.0 ms), warning-only: the first two in the `look` part, the third in a new `water` part.
+- **Validation.** `WATER_INVALID`, `WATER_WAVES_TOO_STEEP` and `PHYSICS_BUOYANCY_INVALID` (Warnings).
+
+**Acceptance**
+- "WaterWaves: a calm water is flat at its base height"
+- "WaterWaves: a Gerstner surface's sampled height lies on the displaced surface within 1 mm"
+- "WaterWaves: the normal is the height's gradient and the velocity its time derivative"
+- "WaterWaves: the steepness is scaled so the surface never folds"
+- "WaterQueries: the topmost Rectangle holds a point, ties by canonical order"
+- "WaterQueries: a Rectangle's volume masks the Ocean, so a cave below the sea is dry"
+- "WaterQueries: a water's height follows its entity's Translation"
+- "PhysicsWorld: a box of known mass floats at its analytic draft within 1 cm"
+- "PhysicsWorld: each collider is submerged against its own plane"
+- "Buoyancy: two pontoons pitch with a swell's slope"
+- "Buoyancy: a buoyant body on calm water sleeps and a tide wakes it"
+- "Buoyancy: 16 bodies on a swell end at their committed hash at Jolt thread counts 0, 1 and 8", in Debug and Release.
+- "Buoyancy: a scene without Buoyancy steps as before"
+- "PhysicsWorld: a body with an offset centre of mass floats at its analytic draft", added at M47's merge, on the first tree that holds M44's `MassProperties`
+- "WaterBindings: Water:SampleHeight and Physics.SampleWater read the surface at the world's time"
+- "RenderExtraction: a water is extracted at its rendered pose with its waves at the request's time, and at time 0 in an edit scene"
+- "Water: the GPU surface equals the CPU surface within 1 mm"
+- "Water: a scene without water renders the same bytes"
+- "Water: shallow water shows the bottom and deep water absorbs it"
+- "Water: SSR traces and composites over the water"
+- "Water: a Rectangle's volume masks the Ocean"
+- "Water: mirror views and probe captures leave the water out"
+- "Water: a planar reflection on a water reflects the scene in its base plane"
+- "Underwater: a camera under the surface sees the underwater view, and one above it does not"
+- "Underwater: a camera straddling the surface draws one waterline"
+- "RenderAnnotations: a Rectangle Water's volume is outlined, and an Ocean draws no outline"
+- "Water: a water scene renders the same bytes after a device loss"
+- `Golden: Water`, `Golden: WaterUnderwater` and `Golden: WaterWaterline`, with every existing golden byte-identical.
+- `test_water.py` passes.
+- The `Water` suite passes in the editor, Release and Dist.
+- `Water.replay` verifies at one hash in Debug, Release and Dist.
+- Perf.py's three water metrics are within their budgets at the gate's perf capture (warning-only).
+
+**How the game will check it**
+- **A 400 kg boat with four float points settles at its waterline within 2 cm after 5 s, pitches and rolls on the storm's swell, and its replay verifies with `strictHash` everywhere:**
+  - the `Water` suite's boat cases, "PhysicsWorld: a box of known mass floats at its analytic draft within 1 cm" and "Buoyancy: two pontoons pitch with a swell's slope";
+  - `Water.replay` in the determinism suite's four runs.
+- **Landfall's cove at noon and dusk** shows sand through the shallows, foam on the beach, the swell to the horizon and the islands reflected far out: `Golden: Water`, "shallow water shows the bottom and deep water absorbs it" and "SSR traces and composites over the water".
+- **The cartographer reads the height under its feet:** `Physics.SampleWater`'s `Depth` and "WaterBindings: Water:SampleHeight and Physics.SampleWater read the surface at the world's time".
+- **The cost of a full-screen sea at 1080p:** Perf.py's `water/Ocean/gpuMs` and `stats.get`'s `WaterRefraction` and `Water` rows.
+- **The Hollows' grotto lake (S05)** is a Rectangle under the plateau: "WaterQueries: a Rectangle's volume masks the Ocean, so a cave below the sea is dry" and "Water: a Rectangle's volume masks the Ocean".
+- **No committed hash moves.** The game records again only the replays of the scenes it adds water or buoyancy to.
+
+**Parallelization**: W47.1 (the CPU half, ending with the contract C47), then W47.2's physics stream and render stream in parallel, integrated, then W47.3 (the views, coverage and documents). At the landing M47 merges fifth and adds the floating case with M44's offset centre of mass.
+
+## M48 — Characters off the ground and on light bodies
+
+**Scope.** Phase 8, its last lander, in one batch with M43 to M47 (`Docs/Decisions/0060-skerries-engine-program.md` decisions 2, 4 and 7; `Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md` decisions 2 to 4). It covers two Skerries briefs. S17 gives a character a vertical velocity off the ground: a per-tick free move, with no field and no hash move. S19 lets a character stand on a Dynamic body lighter than it: a light body supports the character standing on it, which M34's rule did not allow. It lands in three waves:
+- **W48.1:** `CharacterController:MoveFree(velocity)`. In the air the character takes the velocity whole, with no gravity and no floor sticking; on the ground it is `Move`. `physics.bodyInfo` reports `lastMove`.
+- **W48.2:** S19's investigation first: a four-crossing bridge case of the brief's shape that fails on the base, with the cause recorded. Then the fix, which is outcome (a): the walkable surface of the light body a character stands on holds it on top, and the body's velocity never becomes the character's.
+- **W48.3:** FeatureTest's scene, suite and replay, the Python case, the documents, the skills and the generated references.
+
+Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
+
+**Deliverables**
+- **The free move.** `CharacterController:MoveFree(velocity: vector)`, consumed by the next PreStep. The last `Move` or `MoveFree` of a tick wins. It is checked as `Move` is (each component at most `MaxCharacterSpeed`).
+  - **In the air:** the whole velocity, vertical part included, with no gravity and stick-to-floor off. The stair step stays.
+  - **Grounded:** exactly `Move`, so a swimmer reaching the bottom stands, and a climber steps off at the top with a forward `Move`.
+  - **The interfaces.** `CharacterController::Update` takes a `CharacterMoveMode` (Walk by default), a reviewed change to the frozen `CharacterController.h`. No field is added, so M55's `RideGround` stays the next one.
+- **Characters on light bodies.** A Dynamic body lighter than the character's `Mass` supports the character standing on it. Its walkable surface lifts the character as it rises, and an overlap is pushed out within the update, so the character never sinks into it.
+  - **No launch.** Its velocity never becomes the character's.
+  - **What stays M34's.** Its other faces and every other light body still never push the character. A light body is never a stair and never squeezes. It takes at most its own weight. The walk pushes it with at most `Mass` × 9.81 N.
+  - **The changed test.** M34's "passes up through it" case becomes "lifts it on its surface and gives it none of its velocity".
+  - **Outcome (b) is not taken.** No validation code is added.
+- **Observability.** `physics.bodyInfo`'s `lastMove` ("Walk" or "Free"). `GetVelocity`'s description says it is the velocity the update asked for.
+- **FeatureTest.** `CharacterMoves.scene` with its suite `Physics.CharacterMoves` and `CharacterMoves.replay`:
+  - a swim held 1.3 m under a computed swell;
+  - a 6 m ladder;
+  - four crossings of a bridge of thirteen hinged 25 kg planks.
+
+**Acceptance**
+- "CharacterController: a free move in the air takes the whole velocity asked, and no gravity acts"
+- "CharacterController: a free move while grounded is a Move"
+- "CharacterController: a free move in the air is not stuck to the floor"
+- "CharacterController: a character free-moved toward a moving target height follows it within 1 mm"
+- "CharacterController: a climber free-moved along a wall rises along it and steps off at the top onto the floor"
+- "CharacterController: a Move in the air after a free move continues from its velocity plus gravity"
+- "PhysicsSystem: a free move faster than MaxCharacterSpeed is refused"
+- "PhysicsSystem: the last Move or MoveFree of a tick decides the next update"
+- "PhysicsBindings: CharacterController:MoveFree reaches the next update as a free move and refuses what Move refuses"
+- "PhysicsMethods: physics.bodyInfo reports a character's last move"
+- "CharacterController: a character crosses a bridge of thirteen hinged 25 kg planks four times, each onto the far rim, and never sinks into a plank" (fails on the base)
+- "CharacterController: a character on a light Dynamic plank that swings up under it rides its surface and keeps none of its velocity"
+- "CharacterController: a light Dynamic platform rising under a character lifts it on its surface and gives it none of its velocity"
+- "CharacterController: only the walkable surface of the light body a character stands on supports it, and no light body pushes it sideways"
+- "CharacterController: four bridge crossings end at one pose at Jolt thread counts 0, 1 and 8"
+- Every other M34 and M36 character case passes unchanged.
+- `test_physics.py`'s `lastMove` case passes.
+- The `Physics.CharacterMoves` suite passes in the editor, Release and Dist.
+- `CharacterMoves.replay` verifies at one hash in Debug, Release and Dist.
+- No committed hash moves: `Scaffold.py --check`, the determinism suite and the games suite.
+
+**How the game will check it**
+- **The swim: 20 m out and back, the feet 1.3 m (± 5 cm) under the sea for 10 s, standing in the shallows.**
+  - "follows it within 1 mm" and "a free move while grounded is a Move";
+  - the suite's swim against a computed swell;
+  - over M47's water, the game's own suite after phase 8 lands.
+- **The ladder: 6 m up, off at the top, down again.** "a climber free-moved along a wall …" and the suite's climb.
+- **The autopilot's replays still verify.** A scene without `MoveFree` simulates as before, and `CharacterMoves.replay` verifies in every configuration.
+- **`Ridgeback: the rope bridge carries the cartographer back again, and again`, with `PLANK_MASS` 25.**
+  - The four-crossing case and the suite's bridge play the brief's numbers.
+  - With its planks back at 25 kg, the game's suite is its own check.
+
+**Parallelization**: W48.1 (S17), then W48.2 (S19: the base run before the fix), then W48.3 (coverage and documents). The milestone lands last in phase 8's batch: in PreStep its change is inside item 5, after M44's 4b and M47's 4c. At its merge it sets `EngineVersionString` to 0.9.0 and regenerates FeatureTest.
