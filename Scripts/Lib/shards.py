@@ -1,7 +1,8 @@
 """Sharded Tests runs (Docs/Architecture.md §2.3, §15.8): Scripts/Test.py --parallel <n> splits the unit suite's run
 into shards, each run by its own Tests process, n of them at a time, which the hardening stage's sanitized unit run uses
-(Scripts/Hardening.py asan-unit; ADR 0060 decision 3). Test.py starts and watches the processes; this module plans the
-shards, orders them, reads and keeps the measured costs that size them, and merges their reports.
+(Scripts/Hardening.py asan-unit; Docs/Decisions/0060-skerries-engine-program.md decision 3). Test.py starts and
+watches the processes; this module plans the shards, orders them, reads and keeps the measured costs that size them, and
+merges their reports.
 
 The selection: the test cases the run's filters select that doctest::skip does not leave out, in the order the Tests
 binary runs them (doctest's default order, by file, line and template), as one listing with --no-skip
@@ -11,10 +12,12 @@ not skipped, in that same order (Vendor/doctest), so every case of the selection
 twice. check_shard_cases compares each shard's JUnit report with its range, so a shard that ran other cases than
 planned fails.
 
-The costs: each case's seconds as the last full, passing sharded run of the same report measured them, in the merged
-report it kept in <git common directory>/test-costs/<report stem>.xml (machine_costs_path, shared by every checkout of
-the repository, written only by a run of the whole selection whose shards all passed). A case that report lacks costs
-the measured cases' average; without any measurement, every case costs the same, so the shards hold equal case counts
+The costs: each case's seconds as the last passing sharded run of the same report stem that ran it measured them,
+kept in <git common directory>/test-costs/<report stem>.xml (machine_costs_path, shared by every checkout of the
+repository). A run whose shards all passed keeps its merged report there with the earlier entries of the cases it did
+not select (keep_costs), so a run of part of the suite (a filter, more excluded test suites, a contract run's skipped
+cases) replaces only the costs of the cases it ran, and a failed run keeps nothing. A case that report lacks costs the
+measured cases' average; without any measurement, every case costs the same, so the shards hold equal case counts
 and have no expected time. The cuts fall where the summed costs reach each k/n of the total, so the shards' expected
 times are as even as the order allows, and each shard's timeout follows its expected time (shard_timeout).
 
@@ -30,6 +33,7 @@ run's end close to the work over n.
 from __future__ import annotations
 
 import bisect
+import copy
 import dataclasses
 import math
 import os
@@ -45,11 +49,13 @@ from Lib import paths, vendor_cache
 # load may differ: a case took 1.15 s under phase 6's load against 0.59 s on phase 7's quiet machine (the sanitized unit
 # run, Docs/Backlog.md), and in the setup's second sharded run, which shared the machine with another checkout's 12-job
 # build, shards of about 120 s measured took up to 5.1 times that (2.4 times at the median), and two of them met the
-# timeout of three times their measured time, at least 600 s, that the setup first gave them. A hung test case is ended
-# by the Tests binary's own per-case limit (600 s under the sanitized run's --test-timeout-scale 5), which names it, so
-# the shard's timeout only bounds a process that hangs outside a case and can be generous: five times the expected
-# time, and at least ten times a shard's measured work (SHARD_SECONDS), which also covers the process start and the
-# fixed setup that the per-case costs leave out.
+# timeout of three times their measured time, at least 600 s, that the setup first gave them. A hung test case is
+# mostly ended by the Tests binary's own per-case limit (120 s, 600 s under the sanitized run's --test-timeout-scale 5),
+# which names it, so the shard's timeout mostly bounds a process that hangs outside a case and can be generous: five
+# times the expected time, and at least ten times a shard's measured work (SHARD_SECONDS), which also covers the process
+# start and the fixed setup that the per-case costs leave out. A case that raises its own limit (SetTestCaseTimeLimit:
+# six cases to 600 s, 3,000 s under that scale) can meet its shard's timeout first, and the shard's detail names it
+# from the log.
 SHARD_TIMEOUT_FACTOR = 5.0
 SHARD_MINIMUM_TIMEOUT_SECONDS = 1200.0
 # The measured work of a shard (shard_count): with the costs, a run has at least its work over SHARD_SECONDS shards;
@@ -63,6 +69,8 @@ COSTS_DIRECTORY_NAME = "test-costs"
 # The name of the property that names a shard in the merged report: one <testsuite> per shard, carrying
 # <properties><property name="shard" value="<k>/<n>"/></properties>.
 SHARD_PROPERTY = "shard"
+# The test suite of the kept costs (keep_costs) that holds the earlier entries of the cases the last run did not select.
+EARLIER_SUITE = "kept from earlier runs"
 # The separator doctest's JUnit reporter puts between a test case's name and the subcases of one pass through it: each
 # pass is one <testcase>, named "<case>/<subcase>/<nested subcase>" when it entered subcases.
 SUBCASE_SEPARATOR = "/"
@@ -260,6 +268,26 @@ def write_report(root: ElementTree.Element, destination: Path) -> None:
         os.replace(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def keep_costs(report: ElementTree.Element, destination: Path, selection: Iterable[str]) -> None:
+    """Keeps the costs of a run whose shards all passed in `destination` (machine_costs_path): its merged report
+    `report` (merge_reports) and, in a test suite named EARLIER_SUITE, every entry of the report kept there before that
+    is a pass through none of `selection` (the run's selection), so the cases the run did not select keep their earlier
+    costs and the cases it ran take its own. A kept report that does not exist or cannot be read adds nothing; `report`
+    is not changed. Raises OSError when `destination` cannot be written."""
+    names = frozenset(selection)
+    try:
+        earlier = [case for case in ElementTree.parse(destination).getroot().iter("testcase")
+                   if case_of_entry(case.get("name", ""), names) is None]
+    except (OSError, ElementTree.ParseError):
+        earlier = []
+    document = copy.deepcopy(report)
+    if earlier:
+        suite = ElementTree.SubElement(document, "testsuite", {"name": EARLIER_SUITE, "tests": str(len(earlier))})
+        suite.extend(earlier)
+    ElementTree.indent(document, space="\t")
+    write_report(document, destination)
 
 
 def machine_costs_path(report_stem: str) -> Path:

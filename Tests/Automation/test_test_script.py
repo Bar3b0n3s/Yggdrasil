@@ -468,17 +468,22 @@ class FakeShardProcess:
 
 
 class ShardedRun:
-    """What run_sharded returns: the step, each shard's command, the run's results root, the kept costs and the
-    console's text."""
+    """What run_sharded returns: the step, each shard's command, the stand-in processes, the run's results root, the
+    kept costs and the console's text."""
 
-    def __init__(self, step: Step, commands: list[list[str]], results: Path, kept: Path, output: str,
-                 most_at_once: int) -> None:
+    def __init__(self, step: Step, commands: list[list[str]], processes: list[FakeShardProcess], results: Path,
+                 kept: Path, output: str, most_at_once: int) -> None:
         self.step = step
         self.commands = commands
+        self.processes = processes
         self.results = results
         self.kept = kept
         self.output = output
         self.most_at_once = most_at_once  # the most stand-ins that ran at once
+
+    def shard(self, index: int) -> dict[str, Any]:
+        """The --json entry of shard `index`."""
+        return next(shard for shard in self.step.data["shards"] if shard["shard"] == index)
 
 
 class ShardedRunTests(unittest.TestCase):
@@ -489,6 +494,7 @@ class ShardedRunTests(unittest.TestCase):
     CHILD_TARGET = "Shards: the child-process target"
     PID_BASE = 4000
     SHARD_SECONDS = 10.0  # how long a stand-in that ends runs, so the run samples its memory
+    SANITIZER_LINE = "==4001==ERROR: AddressSanitizer: heap-use-after-free on address 0x1234 at pc 0x5678"
 
     @classmethod
     def listing(cls) -> list[Any]:
@@ -497,19 +503,36 @@ class ShardedRunTests(unittest.TestCase):
         cases.insert(4, test_script.ListedTestCase(cls.CHILD_TARGET, test_script.CHILD_TARGET_SUITE, True))
         return cases
 
+    @classmethod
+    def selection(cls) -> list[str]:
+        return [case.name for case in cls.listing() if not case.skipped]
+
+    def new_directory(self) -> Path:
+        directory = Path(tempfile.mkdtemp(prefix="ShardedRun-")).resolve()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        return directory
+
+    @staticmethod
+    def kept_path(directory: Path) -> Path:
+        """Where run_sharded keeps the costs of the runs in `directory`."""
+        return directory / "Machine" / shards.COSTS_DIRECTORY_NAME / "Unit-Release.xml"
+
     def run_sharded(self, argv: tuple[str, ...] = (), behaviour: dict[int, str] | None = None,
                     seconds: Callable[[str], float] = lambda name: 1.0, listing: list[Any] | None = None,
-                    directory: Path | None = None) -> ShardedRun:
+                    directory: Path | None = None, listing_error: Exception | None = None,
+                    unwritable_kept: bool = False) -> ShardedRun:
         """Runs `Test.py --suite unit --config Release --parallel 3 <argv>` over `listing` (default: listing()) in
-        `directory` (a new one by default). Each shard's stand-in passes, or as `behaviour` says by the order in which
-        the shards start: "fail" (its first case fails), "crash" (it ends without a report), "hang" (it runs, its log
-        naming its first case, until it is ended) or "everything" (it ignores its range). A stand-in that ends runs
-        SHARD_SECONDS on the run's clock from its start; its cases take `seconds(name)` each in its report."""
-        if directory is None:
-            directory = Path(tempfile.mkdtemp(prefix="ShardedRun-")).resolve()
-            self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        `directory` (a new one by default), whose listing fails with `listing_error` when one is given and whose kept
+        costs cannot be written with `unwritable_kept`. Each shard's stand-in passes, or as `behaviour` says by the
+        order in which the shards start: "fail" (its first case fails), "crash" (it ends with exit code 3 without a
+        report), "crash report" (it ends with exit code 4 without a report, leaving a crash report of its own), "no
+        report" (it ends with exit code 0 without a report), "sanitizer" (it passes, its output holding an
+        AddressSanitizer report), "hang" (it runs, its log naming its first case, until it is ended), "everything" (it
+        ignores its range) or "unstartable" (it cannot start). A stand-in that ends runs SHARD_SECONDS on the run's
+        clock from its start; its cases take `seconds(name)` each in its report."""
+        directory = directory if directory is not None else self.new_directory()
         results = directory / "TestResults"
-        kept = directory / "Machine" / shards.COSTS_DIRECTORY_NAME / "Unit-Release.xml"
+        kept = self.kept_path(directory)
         executable = directory / test_script.paths.executable_name("Tests")
         executable.write_bytes(b"")
         listed = listing if listing is not None else self.listing()
@@ -531,17 +554,26 @@ class ShardedRunTests(unittest.TestCase):
             values = {part.split("=", 1)[0]: part.split("=", 1)[1] for part in command if "=" in part}
             first, last = int(values["--first"]), int(values["--last"])
             kind = (behaviour or {}).get(index, "pass")
+            if kind == "unstartable":
+                raise test_script.ToolNotFoundError(f"could not start '{command[0]}'")
             ran = selection if kind == "everything" else selection[first - 1:last]
-            output.write_text(f"shard {index}'s output\n", encoding="utf-8")
+            text = f"shard {index}'s output\n" + (f"{self.SANITIZER_LINE}\n" if kind == "sanitizer" else "")
+            output.write_bytes(text.encode("utf-8"))
             pid = self.PID_BASE + index
+            user_data = Path(values["--user-data-dir"])
             if kind == "hang":
-                logs = test_script.paths.log_folder(Path(values["--user-data-dir"]))
+                logs = test_script.paths.log_folder(user_data)
                 logs.mkdir(parents=True, exist_ok=True)
                 (logs / "Tests.log").write_text(f"[2026-11-24 10:00:00.000] [77] [Engine] [trace] Test case of process "
                                                 f"{pid}: {ran[0]}\n", encoding="utf-8")
                 return FakeShardProcess(pid, 1, clock, math.inf)
-            if kind == "crash":
-                return FakeShardProcess(pid, 3, clock, clock.now + self.SHARD_SECONDS)
+            if kind in ("crash", "crash report", "no report"):
+                if kind == "crash report":
+                    crashes = test_script.paths.crash_report_folder(user_data)
+                    crashes.mkdir(parents=True, exist_ok=True)
+                    (crashes / f"crash-1700000000-{pid}.txt").write_text("Reason: Fatal error\n", encoding="utf-8")
+                exit_code = {"crash": 3, "crash report": 4, "no report": 0}[kind]
+                return FakeShardProcess(pid, exit_code, clock, clock.now + self.SHARD_SECONDS)
             entries: list[tuple[str, float, str | None]] = []
             for name in ran:
                 failure = "CHECK( ok ) is NOT correct!" if kind == "fail" and name == ran[0] else None
@@ -557,25 +589,36 @@ class ShardedRunTests(unittest.TestCase):
             process.returncode = 1
             process.terminated = True
 
+        write_report = shards.write_report
+
+        def write_report_or_refuse(root: ElementTree.Element, destination: Path) -> None:
+            if unwritable_kept and destination == kept:
+                raise PermissionError(13, "Access is denied", str(destination))
+            write_report(root, destination)
+
         with contextlib.redirect_stderr(io.StringIO()):
             arguments = test_script.parse_arguments(["--suite", "unit", "--config", "Release", "--parallel", "3",
                                                      *argv])
         [run] = test_script.plan_runs("unit", "Release", arguments)
         console = Console()
         console.stream = io.StringIO()
+        listing_patch = (mock.patch.object(test_script, "list_test_cases", side_effect=listing_error)
+                         if listing_error is not None else
+                         mock.patch.object(test_script, "list_test_cases", return_value=listed))
         with mock.patch.object(test_script.paths, "TEST_RESULTS_ROOT", results), \
                 mock.patch.object(test_script, "tests_executable", return_value=executable), \
-                mock.patch.object(test_script, "list_test_cases", return_value=listed), \
+                listing_patch, \
                 mock.patch.object(test_script, "start_to_file", start), \
                 mock.patch.object(test_script, "terminate_tree", terminate), \
                 mock.patch.object(test_script, "query_process_memory",
                                   return_value=ProcessMemory(300 << 20, 250 << 20, 400 << 20)), \
                 mock.patch.object(test_script.hardening, "available_memory_bytes", return_value=32 << 30), \
                 mock.patch.object(shards, "machine_costs_path", return_value=kept), \
+                mock.patch.object(shards, "write_report", write_report_or_refuse), \
                 mock.patch.object(test_script, "time", types.SimpleNamespace(monotonic=clock.monotonic,
                                                                              sleep=clock.sleep)):
             step = test_script.run_sharded_tests(run, arguments, console)
-        return ShardedRun(step, commands, results, kept, console.stream.getvalue(), most_at_once[0])
+        return ShardedRun(step, commands, started, results, kept, console.stream.getvalue(), most_at_once[0])
 
     def merged_entries(self, report: Path, suite_name: str = "Unit.Release") -> list[tuple[str, str]]:
         """(shard property, test case name) of every <testcase> of the merged report `report`, in order; every test
@@ -592,7 +635,7 @@ class ShardedRunTests(unittest.TestCase):
         sharded = self.run_sharded(("--junit",))
         step = sharded.step
         self.assertEqual(step.status, Status.PASSED, step.detail)
-        selection = [case.name for case in self.listing() if not case.skipped]
+        selection = self.selection()
         # Three shards of three cases (no measurement yet), each with its own report, output and user-data root.
         self.assertEqual(len(sharded.commands), 3)
         for index, command in enumerate(sharded.commands):
@@ -610,12 +653,16 @@ class ShardedRunTests(unittest.TestCase):
         for case in selection:
             self.assertEqual(len({shard for shard, name in cases if name == case}), 1, case)
         self.assertEqual([shard for shard, _ in cases], ["0/3"] * 4 + ["1/3"] * 3 + ["2/3"] * 3)
-        self.assertEqual((step.data["testCases"], step.data["passed"], step.data["failed"]), (10, 10, 0))
+        # Nine cases, ten passes through their subcases.
+        self.assertEqual((step.data["selectedCases"], step.data["testCases"], step.data["passed"], step.data["failed"]),
+                         (9, 10, 10, 0))
+        self.assertEqual((step.data["shardCount"], step.data["parallel"]), (3, 3))
         self.assertEqual(step.data["junit"], test_script.paths.display_path(sharded.results / "Unit-Release.xml"))
         # The skip check is the listing's: the child-process target stays skipped.
         self.assertEqual(step.data["skipCheck"], {"skipped": 1, "childTargets": 1, "unexpected": [], "allowed": False})
-        self.assertIn("10 test case(s) passed in 3 shard(s), 3 at a time", step.detail)
-        self.assertIn("1 skipped, all of them among the 1 child-process target(s)", step.detail)
+        for index in range(3):
+            self.assertEqual((sharded.shard(index)["status"], sharded.shard(index)["outcome"]),
+                             ("passed", test_script.SHARD_PASSED))
         self.assertEqual([shard["peakPrivateBytes"] for shard in step.data["shards"]], [300 << 20] * 3)
         self.assertEqual(step.data["leastAvailableBytes"], 32 << 30)
 
@@ -624,26 +671,34 @@ class ShardedRunTests(unittest.TestCase):
         listing.insert(7, test_script.ListedTestCase("Shards: a contract case", "Shards", True))
         sharded = self.run_sharded(listing=listing)
         self.assertEqual(sharded.step.status, Status.FAILED, sharded.step.detail)
-        self.assertIn("1 skipped test case(s) outside the ChildTargets suite: 'Shards: a contract case'",
-                      sharded.step.detail)
+        self.assertEqual(sharded.step.data["skipCheck"]["unexpected"], ["Shards: a contract case"])
+        self.assertIn("Shards: a contract case", sharded.step.detail)
         self.assertIn("UNEXPECTED SKIP: Shards: a contract case", sharded.output)
         # Every shard still ran its cases, and only contract mode lets the run pass.
         self.assertEqual(sharded.step.data["passed"], 10)
         self.assertFalse(sharded.kept.exists())
         allowed = self.run_sharded(("--allow-skips",), listing=listing)
         self.assertEqual(allowed.step.status, Status.PASSED, allowed.step.detail)
-        self.assertIn("contract mode (--allow-skips): 2 skipped, 1 of them outside the ChildTargets suite",
-                      allowed.step.detail)
+        self.assertEqual(allowed.step.data["skipCheck"], {"skipped": 2, "childTargets": 1,
+                                                          "unexpected": ["Shards: a contract case"], "allowed": True})
 
     def test_a_failed_shard_is_named_with_its_failures(self) -> None:
         sharded = self.run_sharded(("--junit",), behaviour={1: "fail", 2: "crash"})
         step = sharded.step
         self.assertEqual(step.status, Status.FAILED, step.detail)
-        self.assertTrue(step.detail.startswith("2 of 3 shard(s) failed: shard 1/3: 1 of 3 test case(s) failed; "
-                                               "shard 2/3: Tests exited with code 3"), step.detail)
+        self.assertIn("shard 1/3", step.detail)
+        self.assertIn("shard 2/3", step.detail)
+        self.assertEqual((sharded.shard(1)["outcome"], sharded.shard(1)["failed"]), (test_script.SHARD_FAILED, 1))
+        self.assertEqual((sharded.shard(2)["outcome"], sharded.shard(2)["exitCode"]), (test_script.SHARD_CRASHED, 3))
+        self.assertEqual(sharded.shard(0)["outcome"], test_script.SHARD_PASSED)
+        # Each entry holds its status and detail beside its outcome, one of the documented ones.
+        for shard in step.data["shards"]:
+            self.assertIn(shard["outcome"], test_script.SHARD_OUTCOMES)
+            self.assertIn(shard["status"], ("passed", "failed"))
+            self.assertTrue(shard["detail"])
         self.assertEqual(len(step.data["failures"]), 1)
-        self.assertTrue(step.data["failures"][0].startswith("shard 1/3: Shards: case 3 works (ShardsTests.cpp): CHECK"),
-                        step.data["failures"])
+        self.assertTrue(step.data["failures"][0].startswith("shard 1/3: "), step.data["failures"])
+        self.assertIn("Shards: case 3 works", step.data["failures"][0])
         self.assertIn("FAILED: shard 1/3: Shards: case 3 works", sharded.output)
         # The merged report holds the failure in shard 1's suite and an error test case for shard 2, which left none.
         report = ElementTree.parse(sharded.results / "Unit-Release.xml").getroot()
@@ -656,51 +711,82 @@ class ShardedRunTests(unittest.TestCase):
         # A failed run measures nothing for the next one.
         self.assertFalse(sharded.kept.exists())
 
+    def test_an_address_sanitizer_report_in_a_shards_output_fails_it(self) -> None:
+        # A child process's report reaches the shard's output while its cases pass and it exits with code 0.
+        sharded = self.run_sharded(behaviour={1: "sanitizer"})
+        self.assertEqual(sharded.step.status, Status.FAILED, sharded.step.detail)
+        self.assertEqual((sharded.shard(1)["outcome"], sharded.shard(1)["exitCode"], sharded.shard(1)["failed"]),
+                         (test_script.SHARD_FAILED, 0, 0))
+        self.assertEqual(sharded.shard(1)["sanitizerErrors"], [self.SANITIZER_LINE])
+        self.assertIn("shard 1/3", sharded.step.detail)
+        self.assertIn(f"SANITIZER: shard 1/3: {self.SANITIZER_LINE}", sharded.output)
+        self.assertNotIn("sanitizerErrors", sharded.shard(0))
+
+    def test_a_shards_own_crash_report_is_named_and_an_earlier_one_is_not(self) -> None:
+        # The shard's user-data root is kept between runs, so it already holds an earlier run's report.
+        directory = self.new_directory()
+        user_data = directory / "TestResults" / "Unit-Release" / "Shard1" / "UserData"
+        earlier = test_script.paths.crash_report_folder(user_data) / "crash-1-1.txt"
+        earlier.parent.mkdir(parents=True)
+        earlier.write_text("an earlier run's report", encoding="utf-8")
+        sharded = self.run_sharded(behaviour={1: "crash report"}, directory=directory)
+        self.assertEqual(sharded.step.status, Status.FAILED, sharded.step.detail)
+        own = test_script.paths.crash_report_folder(user_data) / f"crash-1700000000-{self.PID_BASE + 1}.txt"
+        self.assertEqual((sharded.shard(1)["outcome"], sharded.shard(1)["exitCode"]), (test_script.SHARD_CRASHED, 4))
+        self.assertEqual(sharded.shard(1)["crashReports"], [test_script.paths.display_path(own)])
+        self.assertIn(test_script.paths.display_path(own), sharded.step.detail)
+        self.assertNotIn(earlier.name, sharded.step.detail)
+        self.assertIn(f"CRASH REPORT: {test_script.paths.display_path(own)}", sharded.output)
+
+    def test_a_shard_that_ends_with_exit_code_0_and_no_report_fails(self) -> None:
+        sharded = self.run_sharded(behaviour={0: "no report"})
+        self.assertEqual(sharded.step.status, Status.FAILED, sharded.step.detail)
+        self.assertEqual((sharded.shard(0)["outcome"], sharded.shard(0)["exitCode"]), (test_script.SHARD_FAILED, 0))
+        self.assertNotIn("passed", sharded.shard(0))
+        self.assertIn("shard 0/3", sharded.step.detail)
+
     def test_a_shard_that_ran_other_cases_than_its_range_fails(self) -> None:
         sharded = self.run_sharded(behaviour={0: "everything"})
         self.assertEqual(sharded.step.status, Status.FAILED, sharded.step.detail)
-        self.assertIn("shard 0/3: ran other test cases than its range 1..3: 6 problem(s), first: ran outside its "
-                      "range: Shards: case 3 works", sharded.step.detail)
+        self.assertEqual(sharded.shard(0)["outcome"], test_script.SHARD_FAILED)
+        problems = sharded.shard(0)["caseProblems"]
+        self.assertEqual(problems, [f"ran outside its range: Shards: case {index} works" for index in range(3, 9)])
+        self.assertIn("shard 0/3", sharded.step.detail)
 
     def test_a_shard_past_its_timeout_is_ended_naming_its_last_case(self) -> None:
         # Measured at 300 s a case, the nine cases make nine shards (2,700 s over 120 s a shard), each expecting 300 s,
-        # so each one's timeout is three times that; the other shards keep running beside the hung one.
-        directory = Path(tempfile.mkdtemp(prefix="ShardedRun-")).resolve()
-        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
-        kept = directory / "Machine" / shards.COSTS_DIRECTORY_NAME / "Unit-Release.xml"
-        selection = [case.name for case in self.listing() if not case.skipped]
-        write_shard_report(kept, [(name, 300.0, None) for name in selection])
+        # so each one's timeout is SHARD_TIMEOUT_FACTOR times that; the other shards keep running beside the hung one.
+        directory = self.new_directory()
+        write_shard_report(self.kept_path(directory), [(name, 300.0, None) for name in self.selection()])
         sharded = self.run_sharded(behaviour={0: "hang"}, directory=directory)
         step = sharded.step
         self.assertEqual(step.status, Status.TIMEOUT, step.detail)
         timeout = 300.0 * shards.SHARD_TIMEOUT_FACTOR
         self.assertEqual([shard["timeoutSeconds"] for shard in step.data["shards"]], [timeout] * 9)
         self.assertEqual([shard["expectedSeconds"] for shard in step.data["shards"]], [300.0] * 9)
-        self.assertEqual(step.data["shards"][0]["seconds"], timeout)
-        self.assertEqual(step.detail, f"1 of 9 shard(s) failed: shard 0/9: Tests timed out ({timeout:.0f} s from 0 s, "
-                                      f"expected 300 s, timeout {timeout:.0f} s); the last test case it started: "
-                                      f"'Shards: case 0 works'")
-        self.assertEqual(step.data["shards"][0]["lastTestCase"], "Shards: case 0 works")
+        self.assertEqual((sharded.shard(0)["seconds"], sharded.shard(0)["outcome"], sharded.shard(0)["status"]),
+                         (timeout, test_script.SHARD_TIMED_OUT, "timeout"))
+        self.assertEqual(sharded.shard(0)["lastTestCase"], "Shards: case 0 works")
+        self.assertTrue(sharded.processes[0].terminated)
+        self.assertIn("shard 0/9", step.detail)
+        self.assertIn("Shards: case 0 works", step.detail)
         self.assertEqual(step.data["passed"], 9)
         # A given --timeout bounds the listing and the shards together, so a shard's timeout is at most what is left of
         # it when the shard starts.
         capped = self.run_sharded(("--timeout", "700"), behaviour={0: "hang"}, directory=directory)
-        self.assertEqual(capped.step.data["shards"][0]["timeoutSeconds"], 700.0)
+        self.assertEqual(capped.shard(0)["timeoutSeconds"], 700.0)
         for shard in capped.step.data["shards"]:
             self.assertLessEqual(shard["startedAtSeconds"] + shard["timeoutSeconds"], 700.0, shard)
         # Without a measurement, a shard has no expected time, and what is left of the run's bound is its timeout.
         unmeasured = self.run_sharded(behaviour={0: "hang"})
-        self.assertEqual(unmeasured.step.data["shards"][0]["timeoutSeconds"], test_script.SUITE_TIMEOUT_SECONDS)
+        self.assertEqual(unmeasured.shard(0)["timeoutSeconds"], test_script.SUITE_TIMEOUT_SECONDS)
 
     def test_the_shards_run_n_at_a_time_the_dearest_first_within_the_runs_bound(self) -> None:
         # Measured at 300 s, 200 s and 100 s a case in turn: nine shards of one case each, three at a time, which start
         # in the order of their expected times, the next as one ends.
-        directory = Path(tempfile.mkdtemp(prefix="ShardedRun-")).resolve()
-        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
-        kept = directory / "Machine" / shards.COSTS_DIRECTORY_NAME / "Unit-Release.xml"
-        selection = [case.name for case in self.listing() if not case.skipped]
-        costs = {name: (300.0, 200.0, 100.0)[index % 3] for index, name in enumerate(selection)}
-        write_shard_report(kept, [(name, seconds, None) for name, seconds in costs.items()])
+        directory = self.new_directory()
+        costs = {name: (300.0, 200.0, 100.0)[index % 3] for index, name in enumerate(self.selection())}
+        write_shard_report(self.kept_path(directory), [(name, seconds, None) for name, seconds in costs.items()])
         # Each run measures the same costs again, so the kept measurement stays the same.
         sharded = self.run_sharded(seconds=costs.__getitem__, directory=directory)
         self.assertEqual(sharded.step.status, Status.PASSED, sharded.step.detail)
@@ -716,17 +802,17 @@ class ShardedRunTests(unittest.TestCase):
         short = self.run_sharded(("--timeout", "15"), seconds=costs.__getitem__, directory=directory)
         self.assertEqual(short.step.status, Status.TIMEOUT, short.step.detail)
         self.assertEqual(len(short.commands), 6)
-        self.assertIn("did not start: the run's 15 s ran out first", short.step.detail)
-        unstarted = [shard for shard in short.step.data["shards"] if "seconds" not in shard]
+        unstarted = [shard for shard in short.step.data["shards"] if shard["outcome"] == test_script.SHARD_NOT_STARTED]
         self.assertEqual(sorted(shard["first"] for shard in unstarted), [3, 6, 9])
+        self.assertTrue(all(shard["status"] == "timeout" and "seconds" not in shard for shard in unstarted), unstarted)
+        self.assertIn("shard 2/9", short.step.detail)
         unstarted_report = short.results / "Unit-Release" / "Shard2.xml"
         error = ElementTree.parse(unstarted_report).getroot().find("testsuite/testcase/error")
         self.assertIsNotNone(error)
-        self.assertIn("shard 2/9: did not start", error.get("message", "") if error is not None else "")
+        self.assertIn("shard 2/9", error.get("message", "") if error is not None else "")
 
-    def test_a_full_passing_run_keeps_the_costs_that_size_the_next_and_a_filtered_run_keeps_none(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="ShardedRun-")).resolve()
-        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+    def test_a_passing_run_keeps_the_costs_of_the_cases_it_ran_and_the_others_keep_theirs(self) -> None:
+        directory = self.new_directory()
 
         def seconds(name: str) -> float:
             return 30.0 if name == "Shards: case 0 works" else 1.0
@@ -743,12 +829,65 @@ class ShardedRunTests(unittest.TestCase):
                           for shard in second.step.data["shards"]], [(1, 1, 30.0), (2, 2, 1.0), (3, 9, 7.0)])
         self.assertEqual([next(part for part in command if part.startswith("--first=")) for command in second.commands],
                          ["--first=1", "--first=3", "--first=2"])
-        # A run of part of the selection measures only that part, so it leaves the kept costs alone.
-        kept = second.kept.read_bytes()
-        filtered = self.run_sharded(("--filter", "Shards: case 1*"), seconds=lambda name: 5.0, directory=directory)
-        self.assertEqual(filtered.step.status, Status.PASSED, filtered.step.detail)
-        self.assertNotIn("keptCosts", filtered.step.data)
-        self.assertEqual(second.kept.read_bytes(), kept)
+        # A run of part of the suite (here cases 1 to 4, as more excluded test suites or a filter would select) replaces
+        # only the costs of the cases it ran: the others keep the earlier run's.
+        ran = {f"Shards: case {index} works" for index in range(1, 5)}
+        part = [case for case in self.listing() if case.name in ran]
+        narrower = self.run_sharded(seconds=lambda name: 5.0, listing=part, directory=directory)
+        self.assertEqual(narrower.step.status, Status.PASSED, narrower.step.detail)
+        costs = shards.read_case_costs(narrower.kept, self.selection())
+        self.assertEqual(costs, {f"Shards: case {index} works": 5.0 if 1 <= index <= 4 else 30.0 if index == 0 else 1.0
+                                 for index in range(9)})
+        # A contract run's skipped case keeps its cost too.
+        dear = "Shards: case 0 works"
+        skipped = [test_script.ListedTestCase(case.name, case.suite, case.skipped or case.name == dear)
+                   for case in self.listing()]
+        contract = self.run_sharded(("--allow-skips",), seconds=lambda name: 2.0, listing=skipped, directory=directory)
+        self.assertEqual(contract.step.status, Status.PASSED, contract.step.detail)
+        self.assertEqual(shards.read_case_costs(contract.kept, [dear]), {dear: 30.0})
+
+    def test_unreadable_kept_costs_give_equal_case_counts_and_are_replaced(self) -> None:
+        directory = self.new_directory()
+        kept = self.kept_path(directory)
+        kept.parent.mkdir(parents=True)
+        kept.write_text("<testsuites><testsuite", encoding="utf-8")
+        sharded = self.run_sharded(directory=directory)
+        self.assertEqual(sharded.step.status, Status.PASSED, sharded.step.detail)
+        self.assertEqual(sharded.step.data["measuredCases"], 0)
+        self.assertEqual([(shard["first"], shard["last"]) for shard in sharded.step.data["shards"]],
+                         [(1, 3), (4, 6), (7, 9)])
+        self.assertEqual(set(shards.read_case_costs(kept, self.selection())), set(self.selection()))
+
+    def test_kept_costs_that_cannot_be_written_make_the_run_a_warning(self) -> None:
+        sharded = self.run_sharded(unwritable_kept=True)
+        self.assertEqual(sharded.step.status, Status.WARNING, sharded.step.detail)
+        self.assertNotIn("keptCosts", sharded.step.data)
+        self.assertFalse(sharded.kept.exists())
+        self.assertEqual(sharded.step.data["passed"], 10)
+
+    def test_a_run_that_fails_before_its_shards_end_leaves_no_earlier_report(self) -> None:
+        # A passing earlier run's report stands in bin/TestResults/Unit-Release.xml; a run that fails must replace it.
+        for failure, options in (("listing", {"listing_error": test_script.SkipCheckError("the listing failed")}),
+                                 ("start", {"behaviour": {1: "unstartable"}})):
+            with self.subTest(failure):
+                directory = self.new_directory()
+                report = directory / "TestResults" / "Unit-Release.xml"
+                write_shard_report(report, [(case, 1.0, None) for case in self.selection()])
+                sharded = self.run_sharded(("--junit",), directory=directory, **options)
+                self.assertEqual(sharded.step.status, Status.FAILED, sharded.step.detail)
+                cases = list(ElementTree.parse(report).getroot().iter("testcase"))
+                self.assertEqual(len(cases), 1)
+                self.assertIsNotNone(cases[0].find("error"))
+                self.assertFalse(sharded.kept.exists())
+        # A shard that cannot start fails the run as an initialization failure, and the shard already running is ended.
+        unstartable = self.run_sharded(behaviour={1: "unstartable"})
+        self.assertEqual(unstartable.step.exit_code, test_script.EXIT_INIT_FAILED)
+        self.assertEqual(len(unstartable.processes), 1)
+        self.assertTrue(unstartable.processes[0].terminated)
+        # A failed listing starts no shard.
+        unlisted = self.run_sharded(listing_error=test_script.SkipCheckError("the listing failed"))
+        self.assertEqual(unlisted.step.status, Status.FAILED)
+        self.assertEqual(unlisted.commands, [])
 
     def test_the_tests_binary_runs_each_case_of_the_selection_in_exactly_one_shard(self) -> None:
         # The real Tests binary of the automation suite's configuration: doctest's --first and --last over the listing's
@@ -774,6 +913,7 @@ class ShardedRunTests(unittest.TestCase):
         listed = test_script.list_test_cases(executable, [*run.filters, f"--test-case={selected}"])
         selection = [case.name for case in listed if not case.skipped]
         self.assertGreater(len(selection), 20)
+        self.assertEqual(step.data["selectedCases"], len(selection))
         self.assertEqual(step.data["skipCheck"]["skipped"], len(listed) - len(selection))
         self.assertGreater(step.data["skipCheck"]["skipped"], 0)
         # The merged report holds the selection's cases in the binary's order, each case's passes in one shard.
@@ -789,8 +929,8 @@ class ShardedRunTests(unittest.TestCase):
         passes = [shard for shard, name in cases if name == "JsonReader: ReadFormatHeader checks the format and the "
                                                               "version range"]
         self.assertGreater(len(passes), 1)
-        # A filtered run measures part of the selection, so it keeps no costs.
-        self.assertFalse(kept.exists())
+        # The passing run kept the costs of the cases it ran.
+        self.assertEqual(set(shards.read_case_costs(kept, selection)), set(selection))
 
     def test_shards_are_refused_where_they_mean_nothing(self) -> None:
         for argv in (["--suite", "unit", "--parallel", "0"], ["--suite", "gpu", "--parallel", "2"],

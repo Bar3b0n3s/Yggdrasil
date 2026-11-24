@@ -44,12 +44,13 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
                  address --exclude-test-suites Fuzz --parallel <n> --timeout 3600 --junit
                  (bin/TestResults/Unit-Release-Asan.xml); the Fuzz suite is left to the fuzz step, which runs its cases
                  over a superset of the same iterations. The run is split into shards, n =
-                 hardening.unit_process_count(logical CPUs, available memory, UNIT_PEAK_PROCESS_BYTES) at a time (ADR
-                 0060 decision 3): one per two logical CPUs, at most 16, and as many as the available memory holds at
-                 UNIT_PEAK_PROCESS_BYTES each. Test.py lists the selection once and cuts it into contiguous shards of
-                 about 120 s of work each, sized from the per-case costs that the last full, passing sharded run kept in
-                 <git common directory>/test-costs/Unit-Release-Asan.xml for every checkout (Lib/shards.py; 100 cases a
-                 shard before the first), since a sanitized process keeps the memory its work took; it starts the next
+                 hardening.unit_process_count(logical CPUs, available memory, UNIT_PEAK_PROCESS_BYTES) at a time
+                 (Docs/Decisions/0060-skerries-engine-program.md decision 3): one per two logical CPUs, at most 16, and
+                 as many as the available memory holds at UNIT_PEAK_PROCESS_BYTES each. Test.py lists the selection once
+                 and cuts it into contiguous shards of about 120 s of work each, sized from the per-case costs that
+                 passing sharded runs kept in <git common directory>/test-costs/Unit-Release-Asan.xml for every checkout
+                 (Lib/shards.py; each run replaces the costs of the cases it ran; 100 cases a shard before the first),
+                 since a sanitized process keeps the memory its work took; it starts the next
                  shard, the dearest first, as one ends, each shard's timeout five times its expected time, at least
                  1,200 s, within what is left of the step's 3,600 s, which bounds the listing and the shards together.
                  The skip check is the listing's, the shards' reports merge into Unit-Release-Asan.xml, and a failure
@@ -197,8 +198,8 @@ STEP_NAMES = {
 # The fuzz step's timeout follows its measured per-target costs and the shard count that runs
 # (hardening.fuzz_timeout_seconds; ADR 0028 decision 16, T-FUZZMODEL), within its budget of 5,400 s per 35 targets
 # (hardening.fuzz_budget_seconds). The sanitized unit step's 3,600 s bounds its sharded run, the listing and the shards
-# together, and each shard's own timeout follows its expected time within it (Test.py --parallel, Lib/shards.py; ADR
-# 0060 decision 3).
+# together, and each shard's own timeout follows its expected time within it (Test.py --parallel, Lib/shards.py;
+# Docs/Decisions/0060-skerries-engine-program.md decision 3).
 # Measured on the 24-thread workstation: perf 3 min, soak 16 min, ASan build 20 min from scratch and 2 min incremental,
 # ASan unit 21 min, ASan feature 1 min, fuzz 52 min (M17: 55 min at 18 shards); at phase 2's hardened gate (M23,
 # 2026-11-11): perf 4 min, soak 44 min (65 subjects), ASan build 6 min, ASan unit 39 min, ASan feature 2 min, debug heap
@@ -949,10 +950,11 @@ def sanitized_suite_step(name: str, suite: str, extra: list[str], arguments: arg
 
 def step_asan_unit(arguments: argparse.Namespace, console: Console) -> Step:
     """The sanitized unit suite in shards, hardening.unit_process_count of them at a time (Test.py --parallel,
-    Lib/shards.py; ADR 0060 decision 3): one per two logical CPUs, at most UNIT_MAX_PROCESSES, as many as the available
-    memory holds at UNIT_PEAK_PROCESS_BYTES each. Test.py sizes the shards from the costs the last full, passing run
-    kept, bounds each by its expected time within the step's TIMEOUTS["asan-unit"] (its --timeout, which bounds the
-    listing and the shards together) and merges their reports into Unit-Release-Asan.xml."""
+    Lib/shards.py; Docs/Decisions/0060-skerries-engine-program.md decision 3): one per two logical CPUs, at most
+    UNIT_MAX_PROCESSES, as many as the available memory holds at UNIT_PEAK_PROCESS_BYTES each. Test.py sizes the shards
+    from the per-case costs that passing runs kept, bounds each by its expected time within the step's
+    TIMEOUTS["asan-unit"] (its --timeout, which bounds the listing and the shards together) and merges their reports
+    into Unit-Release-Asan.xml."""
     # The Fuzz suite is left out: the fuzz step runs the same cases with the same binary over [0, 1,000,000), a superset
     # of the unit counts' iterations with the same index-derived inputs (ADR 0023: no duplicate work).
     name = STEP_NAMES["asan-unit"]
@@ -1379,7 +1381,7 @@ STEP_FUNCTIONS = {
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the hardening stage: perf capture, soak, AddressSanitizer build and suites (the unit suite in "
-                    "shards sized from the per-case costs the last passing run kept, as many at a time as one per "
+                    "shards sized from the per-case costs that passing runs kept, as many at a time as one per "
                     "two logical CPUs and the available memory allow), the gpu suite on the debug heap, long fuzz.",
         epilog="Exit codes: 0 every step passed (or warned), 1 a step failed, 2 usage error, 3 a build output, the "
                "AddressSanitizer runtime or a current export package is missing, or the machine has too little memory "

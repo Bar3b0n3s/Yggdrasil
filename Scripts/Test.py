@@ -228,27 +228,32 @@ under a debugger that detaches at the loader's initial breakpoint, so every heap
 included, checks block tails, fills freed blocks and validates parameters, while its crash handler still reports a
 crash; the processes it starts run on their own heaps). The step names gain " (debug heap)" and the reports the suffix
 -DebugHeap (Gpu-Debug-Vulkan14-DebugHeap.xml).
---parallel <n> (the unit suite; the hardening stage's sanitized unit run, ADR 0060 decision 3; Scripts/Lib/shards.py)
-lists the run's selection once, skipped cases included (list_test_cases: also the run's skip check, as above), then
-cuts the cases that are not skipped, in the order the Tests binary runs them, into contiguous shards, each run by its
-own Tests process with doctest's --first=<a> --last=<b> (which count only the unskipped cases that pass the filters, in
-that order), so every case runs in exactly one shard; n processes run at a time, and as one ends the next shard starts,
-the dearest expected first. The shards hold about 120 s of measured work each (shards.shard_count; at least n of them,
-100 cases each without a measurement): a sanitized process keeps the memory its work took, so small shards bound each
-process's memory. The cuts follow the per-case costs that the last full, passing sharded run of the report stem kept in
-<git common directory>/test-costs/<report stem>.xml for every checkout (a case it lacks at the measured average;
-without it, equal case counts); only a run without --filter whose shards all passed replaces it. Each shard has its own
-JUnit report, output and user-data root (bin/TestResults/<report stem>/Shard<k>.xml, Shard<k>.log and
-Shard<k>/UserData) and its own timeout, set as it starts: five times its expected time and at least 1,200 s
-(shards.shard_timeout), within what is left of the run's bound (--timeout or the default above, which the listing and
-the shards share); a shard past it is ended with its processes, one without a measurement gets what is left of the
-bound, and one the bound leaves unstarted fails as a timeout. A shard fails as a plain run does (a failed case, an exit
-code with its last test case, a crash report of its own, an AddressSanitizer line), when it times out (naming the last
-test case its log started) and when its report holds other cases than its range; the step fails naming each failed
-shard ("shard <k>/<n>: ..."), as its failures are named. The shards' reports merge into the run's (--junit), one test
-suite per shard naming it in a "shard" property; with --json the step holds "shards" (each one's range, start, expected
-and actual seconds, timeout, exit code, peak private and resident memory and outcome), the shards' wall time, the
-largest peak private memory of a shard and the least available memory of the machine seen.
+--parallel <n> (the unit suite; the hardening stage's sanitized unit run, Docs/Decisions/0060-skerries-engine-program.md
+decision 3; Scripts/Lib/shards.py) lists the run's selection once, skipped cases included (list_test_cases: also the
+run's skip check, as above), then cuts the cases that are not skipped, in the order the Tests binary runs them, into
+contiguous shards, each run by its own Tests process with doctest's --first=<a> --last=<b> (which count only the
+unskipped cases that pass the filters, in that order), so every case runs in exactly one shard; n processes run at a
+time, and as one ends the next shard starts, the dearest expected first. The shards hold about 120 s of measured work
+each (shards.shard_count; at least n of them, 100 cases each without a measurement): a sanitized process keeps the
+memory its work took, so small shards bound each process's memory. The cuts follow the per-case costs kept in
+<git common directory>/test-costs/<report stem>.xml for every checkout (a case they lack at the measured average;
+without them, equal case counts): a run whose shards all passed replaces the costs of the cases it ran and keeps the
+others' (shards.keep_costs), so a run of part of the suite (--filter, more --exclude-test-suites, a contract run's
+skipped cases) never drops the rest. Each shard has its own JUnit report, output and user-data root
+(bin/TestResults/<report stem>/Shard<k>.xml, Shard<k>.log and Shard<k>/UserData) and its own timeout, set as it starts:
+five times its expected time and at least 1,200 s (shards.shard_timeout), within what is left of the run's bound
+(--timeout or the default above, which the listing and the shards share); a shard past it is ended with its processes,
+one without a measurement gets what is left of the bound, and one the bound leaves unstarted fails as a timeout. A shard
+fails as a plain run does (a failed case, an exit code with its last test case, a crash report of its own, an
+AddressSanitizer line), when it times out (naming the last test case its log started) and when its report holds other
+cases than its range; the step fails naming each failed shard ("shard <k>/<n>: ..."), as its failures are named. The
+shards' reports merge into the run's (--junit), one test suite per shard naming it in a "shard" property; the run's
+report is removed before it starts, and a run that fails before the merge (no executable, a listing that fails, a shard
+that cannot start, a merge that fails) writes one naming the failure instead. The step counts its selection's test cases
+("selectedCases") apart from the passes through their subcases that the reports hold ("testCases", "passed", "failed").
+With --json it holds "shards", each one's range, start, expected and actual seconds, timeout, exit code, peak private
+and resident memory, "status", "outcome" (passed, failed, crashed, timed out or not started) and "detail"; the shards'
+wall time, the largest peak private memory of a shard and the least available memory of the machine seen.
 
 Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16): before its first suite, a
 run that includes a GPU-using suite (gpu, golden, feature, automation, export, determinism or games; --update-golden
@@ -389,6 +394,16 @@ NAMES_IN_DETAIL = 4
 # a failed shard's output it prints.
 SHARD_POLL_SECONDS = 2.0
 SHARD_OUTPUT_TAIL_LINES = 60
+# The outcome a shard's --json entry names (evaluate_shard): its cases passed; its report counts a failed case, its
+# output holds an AddressSanitizer report, it ran other cases than its range or it ended without a report and a
+# zero exit code; it ended with another exit code and without its report or with a crash report of its own; its
+# timeout ended it; or the run's bound ran out before it started.
+SHARD_PASSED = "passed"
+SHARD_FAILED = "failed"
+SHARD_CRASHED = "crashed"
+SHARD_TIMED_OUT = "timed out"
+SHARD_NOT_STARTED = "not started"
+SHARD_OUTCOMES = (SHARD_PASSED, SHARD_FAILED, SHARD_CRASHED, SHARD_TIMED_OUT, SHARD_NOT_STARTED)
 
 # The Vulkan API caps of the gpu suite (§8.1): the Tests option --vulkan-api=<cap>. 1.4 is also the cap of a run
 # without the option.
@@ -1249,16 +1264,23 @@ def evaluate_shard(shard: ShardProcess, run: TestRun, executable: Path, bound: f
     the crash reports its process wrote and, when it ended without a report, its log; a process that ended without a
     readable report, and a shard the run's `bound` left unstarted, get a report with an error test case naming the shard
     (write_crash_junit). A shard whose process ran to its end must also have run exactly its range
-    (shards.check_shard_cases). A timed-out shard names the last test case its log says it started."""
+    (shards.check_shard_cases). A timed-out shard names the last test case its log says it started. Its data hold its
+    "status", its "outcome" (SHARD_OUTCOMES) and its "detail"."""
     plan = shard.plan
     data: dict[str, Any] = {
         "shard": plan.index, "first": plan.first, "last": plan.last, "cases": len(plan.cases),
         "expectedSeconds": plan.expected_seconds, "junit": paths.display_path(shard.report),
         "output": paths.display_path(shard.output), "userData": paths.display_path(shard.user_data)}
+
+    def finish(status: Status, outcome: str, detail: str, counts: TestCounts | None = None,
+               entries: list[tuple[str, float]] | None = None) -> ShardOutcome:
+        data.update({"status": status.value, "outcome": outcome, "detail": detail})
+        return ShardOutcome(status, detail, counts, entries or [], data)
+
     if shard.process is None or shard.duration is None:
         detail = f"did not start: the run's {bound:.0f} s ran out first"
         write_crash_junit(shard.report, run.junit_suite_name, f"{plan.label}: {detail}", "")
-        return ShardOutcome(Status.TIMEOUT, detail, None, [], data)
+        return finish(Status.TIMEOUT, SHARD_NOT_STARTED, detail)
     process_id = shard.process.pid
     exit_code = None if shard.timed_out else shard.process.returncode
     tail, sanitizer_errors = read_shard_output(shard.output)
@@ -1305,48 +1327,65 @@ def evaluate_shard(shard: ShardProcess, run: TestRun, executable: Path, bound: f
             detail += f"; the last test case it started: '{log.last_test_case}'"
         if reports:
             detail += f"; {describe_crash_reports(reports)}"
-        return ShardOutcome(Status.TIMEOUT, detail, counts, entries, data)
+        return finish(Status.TIMEOUT, SHARD_TIMED_OUT, detail, counts, entries)
     if exit_code != 0 or sanitizer_errors:
         detail = describe_failed_tests(exit_code, process_id, counts, reports, sanitizer_errors, shard.user_data,
                                        executable, data)
-        return ShardOutcome(Status.FAILED, detail + (f"; {case_problems}" if problems else ""), counts, entries, data)
+        # A process that ended without its report, or with a crash report of its own, crashed; one whose report counts
+        # failed passes, or whose output holds an AddressSanitizer report, failed.
+        crashed = exit_code != 0 and (counts is None or bool(reports))
+        return finish(Status.FAILED, SHARD_CRASHED if crashed else SHARD_FAILED,
+                      detail + (f"; {case_problems}" if problems else ""), counts, entries)
     if counts is None:
-        return ShardOutcome(Status.FAILED, "Tests exited with code 0 without a JUnit report", counts, entries, data)
+        return finish(Status.FAILED, SHARD_FAILED, "Tests exited with code 0 without a JUnit report")
     if problems:
-        return ShardOutcome(Status.FAILED, case_problems, counts, entries, data)
-    return ShardOutcome(Status.PASSED, f"{counts.passed} test case(s) passed", counts, entries, data)
+        return finish(Status.FAILED, SHARD_FAILED, case_problems, counts, entries)
+    return finish(Status.PASSED, SHARD_PASSED, f"{len(plan.cases)} test case(s) passed ({counts.passed} pass(es) "
+                                               f"through their subcases)", counts, entries)
 
 
 def run_sharded_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> Step:
     """--parallel <n> (the unit suite): one listing of the run's selection (list_test_cases), then its unskipped cases
     in contiguous shards of about shards.SHARD_SECONDS of measured work each (Lib/shards.py shard_count and plan_shards,
-    sized from the costs the last full, passing sharded run of the report stem kept), each run by its own Tests process
-    with --first and --last, its own JUnit report, output and user-data root (shard_files), n at a time, dearest first
+    sized from the costs that passing sharded runs of the report stem kept), each run by its own Tests process with
+    --first and --last, its own JUnit report, output and user-data root (shard_files), n at a time, dearest first
     (run_shard_pool, shards.start_order), each with a timeout that follows its expected time within what is left of the
     run's bound (tests_timeout, which the listing and the shards share). The skip check is the listing's, the reports
-    merge into the run's (--junit), and the step fails naming every failed shard; a run of the whole selection (no
-    --filter) whose shards all passed keeps its merged report as the next run's costs (shards.machine_costs_path)."""
+    merge into the run's (--junit; removed first, and replaced by one naming the failure when the run fails before
+    the merge), and the step fails naming every failed shard; a run whose shards all passed merges its cases' costs into
+    the kept ones (shards.keep_costs, shards.machine_costs_path), whatever part of the suite it selected."""
     started = time.monotonic()
+    report = junit_path(run.report_stem) if arguments.junit else None
+    if report is not None:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.unlink(missing_ok=True)
+    data: dict[str, Any] = {"suite": run.suite, "config": run.config}
+
+    def failed_early(detail: str, exit_code: int | None = None) -> Step:
+        # The run's report names the failure, so no earlier run's report stands for this one.
+        if report is not None:
+            write_crash_junit(report, run.junit_suite_name, detail, "")
+            data["junit"] = paths.display_path(report)
+        return Step(run.name, Status.FAILED, detail, time.monotonic() - started, exit_code=exit_code, data=data)
+
     executable = tests_executable(run.config, arguments.build_root)
+    data["executable"] = paths.display_path(executable)
     if not executable.is_file():
-        return Step(run.name, Status.FAILED, f"{paths.display_path(executable)} not found: "
-                                             f"{build_hint(run.config, 'Tests', arguments)}",
-                    exit_code=EXIT_INIT_FAILED)
+        return failed_early(f"{paths.display_path(executable)} not found: "
+                            f"{build_hint(run.config, 'Tests', arguments)}", EXIT_INIT_FAILED)
     try:
         environment = suite_environment(arguments)
     except FileNotFoundError as error:
-        return missing_sanitizer_runtime(run.name, error)
+        return failed_early(missing_sanitizer_runtime(run.name, error).detail, EXIT_INIT_FAILED)
     filters = list(run.filters)
     if arguments.filter:
         filters.append(f"--test-case={arguments.filter}")
-    data: dict[str, Any] = {"suite": run.suite, "config": run.config, "executable": paths.display_path(executable)}
     if run.sanitizer:
         data["sanitizer"] = run.sanitizer
     try:
         listed = list_test_cases(executable, filters, environment)
     except SkipCheckError as error:
-        return Step(run.name, Status.FAILED, f"cannot list the test cases: {error}", time.monotonic() - started,
-                    data=data)
+        return failed_early(f"cannot list the test cases: {error}")
     skips = check_skips(listed)
     data["skipCheck"] = skips.to_json(arguments.allow_skips)
     if not arguments.allow_skips:
@@ -1354,8 +1393,7 @@ def run_sharded_tests(run: TestRun, arguments: argparse.Namespace, console: Cons
             console.print(f"UNEXPECTED SKIP: {skipped_case}")
     selection = [case.name for case in listed if not case.skipped]
     if not selection:
-        return Step(run.name, Status.FAILED, "no test case ran" + (" (check --filter)" if arguments.filter else ""),
-                    time.monotonic() - started, data=data)
+        return failed_early("no test case ran" + (" (check --filter)" if arguments.filter else ""))
 
     kept = shards.machine_costs_path(run.report_stem)
     try:
@@ -1369,15 +1407,16 @@ def run_sharded_tests(run: TestRun, arguments: argparse.Namespace, console: Cons
     plans = shards.plan_shards(selection, shards.shard_count(selection, arguments.parallel, costs), costs)
     processes: list[ShardProcess] = []
     for plan in plans:
-        report, user_data, output = shard_files(run, plan.index)
+        shard_report, user_data, output = shard_files(run, plan.index)
         command = [str(executable), *filters, *plan.options(), *run.options, f"--user-data-dir={user_data.resolve()}",
-                   "--reporters=junit", f"--out={report}"]
-        processes.append(ShardProcess(plan, command, report, user_data, output))
+                   "--reporters=junit", f"--out={shard_report}"]
+        processes.append(ShardProcess(plan, command, shard_report, user_data, output))
     bound = max(0.0, tests_timeout(run, arguments) - (time.monotonic() - started))
     parallel = min(arguments.parallel, len(plans))
     expected = [plan.expected_seconds for plan in plans if plan.expected_seconds is not None]
-    data.update({"shardCount": len(plans), "parallel": parallel, "sizing": sizing, "measuredCases": len(costs),
-                 "costs": paths.display_path(kept), "expectedSeconds": sum(expected) if expected else None})
+    data.update({"selectedCases": len(selection), "shardCount": len(plans), "parallel": parallel, "sizing": sizing,
+                 "measuredCases": len(costs), "costs": paths.display_path(kept),
+                 "expectedSeconds": sum(expected) if expected else None})
     console.heading(f"{run.name}: {len(selection)} test case(s) in {len(plans)} shard(s), {parallel} at a time "
                     f"({sizing}" + (f"; {sum(expected):.0f} s of work expected" if expected else "")
                     + f"; {bound:.0f} s left of the run's bound): "
@@ -1390,8 +1429,7 @@ def run_sharded_tests(run: TestRun, arguments: argparse.Namespace, console: Cons
         least_available = run_shard_pool(sorted(processes, key=lambda shard: order[shard.plan.index]), parallel, bound,
                                          environment)
     except (ToolNotFoundError, OSError) as error:
-        return Step(run.name, Status.FAILED, f"cannot run the shards: {error}", time.monotonic() - started,
-                    exit_code=EXIT_INIT_FAILED, data=data)
+        return failed_early(f"cannot run the shards: {error}", EXIT_INIT_FAILED)
     pool_seconds = time.monotonic() - pool_started
 
     outcomes = [evaluate_shard(shard, run, executable, bound, console) for shard in processes]
@@ -1420,14 +1458,14 @@ def run_sharded_tests(run: TestRun, arguments: argparse.Namespace, console: Cons
                  "leastAvailableBytes": least_available})
     if failures:
         data["failures"] = failures
-    duration = time.monotonic() - started
     try:
         merged = shards.merge_reports([(shard.plan, shard.report) for shard in processes], run.junit_suite_name)
-        if arguments.junit:
-            shards.write_report(merged, junit_path(run.report_stem))
-            data["junit"] = paths.display_path(junit_path(run.report_stem))
+        if report is not None:
+            shards.write_report(merged, report)
+            data["junit"] = paths.display_path(report)
     except (OSError, ElementTree.ParseError) as error:
-        return Step(run.name, Status.FAILED, f"cannot merge the shards' reports: {error}", duration, data=data)
+        return failed_early(f"cannot merge the shards' reports: {error}")
+    duration = time.monotonic() - started
 
     failed = [(shard, outcome) for shard, outcome in zip(processes, outcomes) if outcome.status != Status.PASSED]
     if failed:
@@ -1436,18 +1474,17 @@ def run_sharded_tests(run: TestRun, arguments: argparse.Namespace, console: Cons
         return Step(run.name, status, f"{len(failed)} of {len(plans)} shard(s) failed: {listed_failures}", duration,
                     data=data)
     longest = max(processes, key=lambda shard: shard.duration or 0.0)
-    passed = (f"{counts.passed} test case(s) passed in {len(plans)} shard(s), {parallel} at a time, in "
-              f"{pool_seconds:.0f} s (the longest shard {longest.duration or 0.0:.0f} s, {longest.plan.label}; the "
-              f"peak private memory of a shard {peak_private >> 20} MB)")
+    passed = (f"{len(selection)} test case(s) ({counts.passed} pass(es) through their subcases) passed in "
+              f"{len(plans)} shard(s), {parallel} at a time, in {pool_seconds:.0f} s (the longest shard "
+              f"{longest.duration or 0.0:.0f} s, {longest.plan.label}; the peak private memory of a shard "
+              f"{peak_private >> 20} MB)")
     status, detail = describe_skip_check(skips, passed, arguments.allow_skips)
     if status == Status.FAILED:
         return Step(run.name, status, detail, duration, data=data)
-    if arguments.filter:
-        return Step(run.name, Status.PASSED, detail, duration, data=data)
-    # Only a passing run of the whole selection measures every case: it sizes every checkout's next sharded run of the
-    # report stem, and a filtered or failed run leaves the kept measurement alone.
+    # A passing run measured the cases it ran: they replace those cases' kept costs for every checkout's next sharded
+    # run of the report stem, and the cases it did not select keep theirs. A failed run leaves the kept costs alone.
     try:
-        shards.write_report(merged, kept)
+        shards.keep_costs(merged, kept, selection)
     except OSError as error:
         problem = f"the measured costs could not be kept in {paths.display_path(kept)}: {error}"
         console.print(f"WARNING: {problem}")
@@ -3121,10 +3158,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--parallel", type=int, metavar="N",
                         help="unit suite: list the run's test cases once, then run them in contiguous shards of about "
                              f"{shards.SHARD_SECONDS:.0f} s of measured work each (at least N, one Tests process "
-                             "each), "
-                             "N at a time, dearest first, sized from the costs the last full, passing sharded run of "
-                             f"the report kept in <git common dir>/{shards.COSTS_DIRECTORY_NAME}/<report stem>.xml "
-                             f"({shards.SHARD_CASES} cases a shard without them); each shard's timeout follows its "
+                             "each), N at a time, dearest first, sized from the per-case costs that passing "
+                             f"sharded runs of the report kept in <git common dir>/{shards.COSTS_DIRECTORY_NAME}/"
+                             f"<report stem>.xml ({shards.SHARD_CASES} cases a shard without them); each shard's "
+                             "timeout follows its "
                              f"expected time (x {shards.SHARD_TIMEOUT_FACTOR:g}, at least "
                              f"{shards.SHARD_MINIMUM_TIMEOUT_SECONDS:.0f} s) within --timeout, which bounds the "
                              "listing and the shards together; the shards' reports merge into the run's, and a failure "
