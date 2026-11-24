@@ -629,7 +629,7 @@ The shared integration files (`premake5.lua`, `Dependencies.lua`, `ModuleRules.j
 | `Asset/IrradianceVolumeData.{h,cpp}`, `EditorCore/Lighting/LightingBake.{h,cpp}`, `EditorCore/Automation/LightingMethods.{h,cpp}`, `Scene/ProbeValidation.{h,cpp}` | M45 alone | — |
 | `Asset/MeshData.{h,cpp}`, `Asset/MaterialData.{h,cpp}`, `AssetPipeline/Importers/GltfImporter.{h,cpp}`, `Tests/Data/Generate/MakeGltfFixtures.py`, `Tests/Data/Formats/Material/`, the premake and build files | M46 alone | — |
 | `Tests/Data/Scenes/AllComponents.scene` | M47 alone | — |
-| `ScriptBindingFuzzTests.cpp`, `ScriptProxyTests.cpp` | append | M47's water calls (`:297`), then M48's `MoveFree` (`:91`, `ScriptProxyTests.cpp:323`). |
+| `ScriptBindingFuzzTests.cpp`, `ScriptProxyTests.cpp` | append | M47's water calls (`:297`), then M48's `MoveFree` (`:91`, `ScriptProxyTests.cpp:323`). Amended 2026-11-24 (M44's W44.3 review): `ScriptProxyTests.cpp`'s pending-entity read list takes each milestone's new reads, appended in train order: M44's 12 vehicle reads, M46's `Wind:Sample`, M47's four `Water` methods. |
 | `RenderPassDeclarationTests.cpp`, `SceneRendererTests.cpp` | append | M45's counts, then M47's: 48 rows and 91 pipelines on the merged tree. |
 | `Tests/Source/Engine/Graphics/ShadersTests.cpp` | append | M43, then M45, then M46, then M47. |
 | `Scripts/Perf.py`, `Scripts/Lib/perf.py`, `Tests/Automation/test_perf.py` | append | M43, then M45, then M46, then M47. |
