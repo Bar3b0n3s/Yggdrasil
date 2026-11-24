@@ -229,6 +229,10 @@ Numbering: M48's record is this ADR, 0066, phase 8's last. The next record takes
 5. **A free move on the ground is `Move`, with stick-to-floor off only in the air** (ADR 0060 decision 4's wording; the research's design).
 6. **The swim's acceptance uses a computed swell, not M47's water.** Same-phase milestones share nothing but the ledger (Roadmap rule 3; ADR 0028 decision 17). This departs from the research's "needs S01 in the tree".
 7. **`physics.bodyInfo` reports `lastMove`** (the research's observability), since a free move in the air is otherwise invisible to an agent.
+8. **A light body's walkable face is walked onto from a light ground** (the lead, on W48.2's investigation, answer 2: "A + B"). While the character's ground of the last update is a Dynamic body lighter than it, another light body's contact whose normal is walkable (within `MaxSlopeAngle`) is not M34's wall to its slide: `OnContactSolve` keeps Jolt's answer, so the character walks onto it as onto any ground, and the next update stands on it and is supported by it (decision 3).
+   - **Why.** W48.2's base run found that the stall comes first, at each joint where a light deck climbs: the next plank's upward face is M34's wall until the character's ground switches to it, and the sink then builds under the stopped character. Decision 3's support alone (A) meets the Acceptance on the brief's bridge, but leaves stalls of up to 20 updates at climbing joints (crossings of 196 to 224 ticks, where a clean walk takes about 187), a visible hitch the game would report again. A with this rule (B) crosses in 187 to 193 ticks with no stall.
+   - **Narrow.** Only walkable contact normals, and only while the character stands on a light body. A light body is still never a stair, so steps are unaffected, and M34's wall stays everywhere else: a character on static or heavy ground still meets it at a light body's walkable face ("a character does not walk up a light Dynamic ramp, and walks up a heavy one" runs unchanged).
+   - **The alternative measured:** A alone (above). The bridge case's tick bound (200 a crossing) is the one A fails.
 
 ### 5. Approvals
 
@@ -368,7 +372,7 @@ W48.1 makes decision 3's S17 part exact. Its checkpoint fixes the frozen header'
 - **The header** (`Physics/CharacterController.h`, a reviewed change to M11's frozen interface, ADR 0014 decision 8):
   - `enum class CharacterMoveMode : uint8_t { Walk, Free }`, before `CharacterControllerDescription`.
   - `void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity, CharacterMoveMode mode = CharacterMoveMode::Walk)`. Its comment states the free move.
-  - **Departure (an addition): `[[nodiscard]] CharacterMoveMode GetLastMove() const`**, after `GetSqueeze`. It returns `Free` for a free move in the air and `Walk` otherwise, `Walk` before the first update; a teleport keeps it.
+  - **Departure (an addition): `[[nodiscard]] CharacterMoveMode GetLastMove() const`**, after `GetSqueeze`, accepted by the lead's W48.1 review. It returns `Free` for a free move (a `Free` update while the character was not grounded as the update began) and `Walk` otherwise, `Walk` before the first update; a teleport keeps it.
     - Why: decision 3 derives `PhysicsCharacterState::LastMove` "like `IsSqueezed`". Whether an update was in the air is decided inside `Update` (Jolt's `OnGround` while not leaving faster than `LeavingGroundSpeed`). The session reads the answer from the controller, as it reads the squeeze, rather than repeat that test from outside.
   - The file comment gains a "Free moves" paragraph, and its frozen list gains M48's sentence.
 - **The update** (`CharacterController.cpp`, `Update`):
@@ -379,13 +383,13 @@ W48.1 makes decision 3's S17 part exact. Its checkpoint fixes the frozen header'
   - The `.cpp` file comment gains the "Free moves" paragraph.
 - **The session:**
   - `PhysicsSystem::MoveCharacter(UUID, const glm::vec3&, CharacterMoveMode mode = CharacterMoveMode::Walk)` checks both modes alike. An error changes nothing, so the last valid call of the tick stays.
-  - `PhysicsCharacterEntry::DesiredMode` (Walk) is set with `DesiredVelocity`, and PreStep's item 5 passes it to `Update` and resets it to Walk with the velocity.
+  - `PhysicsCharacterEntry::DesiredMode` (Walk) is set with `DesiredVelocity`, and PreStep's item 5 passes it to `Update` and resets it to Walk with the velocity. **Changed by the W48.1 review's fixes** (below): the pending move waits in `PendingMoves`, apart from the entry.
   - `PhysicsCharacterState::LastMove` is `GetLastMove()`, derived and not hashed.
   - `PhysicsSystem.h` includes `CharacterController.h` for the enum. Its item 5, `MoveCharacter` and frozen paragraph say what M48 adds.
 - **Scripts:**
   - `CharacterController:MoveFree(velocity: vector) -> ()` is registered after `Move`, so the proxy has 8 methods. It is mutating, in every run mode and at run time, with decision 3's description.
   - One template, `Utils::CharacterMove<CharacterMoveMode>`, serves `Move` and `MoveFree`. Both share `BoundedVector(MaxCharacterSpeed)` and the session's check.
-  - `GetVelocity`'s description is decision 3's.
+  - `GetVelocity`'s description is decision 3's, **corrected by the W48.1 review's fixes** (below).
   - Like every member, it is a visual-scripting node, `Call.CharacterController.MoveFree`: a statement, as `Move` is.
 - **Automation:** `physics.bodyInfo`'s result gains `lastMove`, a string after `squeezedBy` and before `tick`: "Walk" or "Free" for a character, empty for other bodies. M44's `centerOfMass` and M47's `buoyancy` go before it at the landing. It is still 126 methods and 86 tools.
 - **Tests:**
@@ -394,7 +398,7 @@ W48.1 makes decision 3's S17 part exact. Its checkpoint fixes the frozen header'
     - "a free move while grounded is a Move": two identical worlds, a walker and a free mover, compared bit for bit for every update of a walk up a 0.2 m step and a jump.
     - "a free move in the air is not stuck to the floor". A character in the air leans on a 60-degree slope; that steep contact supports it (`OnSteepGround`) without its being grounded, with the floor 0.2 m below its feet. It then moves off level. A free move keeps its height to 1e-5, while a walk in the same place is stuck to the floor at once (the case's control).
     - "a character free-moved toward a moving target height follows it within 1 mm": 600 ticks of a sine swell while swimming 20 m.
-    - "a climber free-moved along a wall rises along it and steps off at the top onto the floor": a 6 m wall at 2 m/s, pressed into it (0.68 m from the face below its top), then a forward `Move` onto the platform.
+    - "a climber free-moved along a wall rises along it and steps off at the top onto the floor": a 6 m wall at 2 m/s, pressed into it (its axis starting at x 0.68, 2 cm off the face at x 1, and kept 0.30 to 0.35 m from the face below 5.5 m), then a forward `Move` onto the platform.
     - "a Move in the air after a free move continues from its velocity plus gravity".
   - `PhysicsSystemCharactersTests.cpp`: "a free move faster than MaxCharacterSpeed is refused" (refusals keep the earlier free move) and "the last Move or MoveFree of a tick decides the next update" (both orders, then a tick with no call).
   - `Scripting/Bindings/PhysicsTests.cpp`: "PhysicsBindings: CharacterController:MoveFree reaches the next update as a free move and refuses what Move refuses". `MoveFree` also joins the coverage script, the malformed list and the read-only list.
@@ -411,10 +415,83 @@ W48.1 makes decision 3's S17 part exact. Its checkpoint fixes the frozen header'
   - `Lint.py`, `Format.py --check` and `GenerateDocs.py --config Debug --check`: passed.
   - No GPU run: nothing W48.1 adds renders.
 
+### The W48.1 review's fixes
+
+The lead's review of `c34f99d5` (`bin/Reviews/P8/M48-W1-review.md`: 0 blocker, 0 major, 2 minor, 4 nit) accepted both departures (`GetLastMove`, `lastMove` as a string) and gate 2's red until W48.3. Every finding is fixed, with W48.2's checkpoint:
+1. **The refusal path's mode** (minor). "a free move faster than MaxCharacterSpeed is refused" now also makes two refused Walk calls after its valid free move, and gains the mirror: a valid Walk, two refused free moves, then a tick that walks at the valid velocity. With the session's write moved above its checks, the case fails (a refused NaN reaches the update's assert).
+2. **A rebuild in the same tick no longer drops the move** (minor; the lead preferred a fix to a recorded limit). The pending move now waits in `PhysicsSystem::State::PendingMoves` (`std::map<UUID, PhysicsCharacterMove>`, `PhysicsCharacterMove {glm::vec3 Velocity; CharacterMoveMode Mode}`), declared beside `Characters`, instead of in `PhysicsCharacterEntry`, whose `DesiredVelocity` and `DesiredMode` are gone. `MoveCharacter` writes it after its checks; PreStep's item 5 consumes each updated character's entry, and drops at its end the moves of characters that no longer exist (one skipped there waits, as it waited in its entry). So a field write that creates the character again in items 1-2 (any `CharacterController` field but `GravityFactor` and `InheritGroundVelocity`) keeps the tick's `Move` or `MoveFree`. `Rebuild` and `CreateCharacter`, M44's regions, are untouched; the one new line in `PhysicsSystemState.h` outside `PhysicsCharacterEntry` is `PendingMoves`, in the characters section, which no other milestone edits.
+   - **Test:** "PhysicsSystem: a Move or MoveFree survives a field write that creates the character again in the same tick" (a character at 20 m, a `Height` write and `MoveFree (0, 2, 0)` in one tick: `LastMove` Free and `Velocity` (0, 2, 0); the same with `Move (1, 0, 0)`: `Velocity.x` 1; and the capsule 1.2 m tall). It failed before the fix: Walk with (0, -0.49, 0), and `Velocity.x` 0.
+   - **Committed replays:** none can change. `Move` behaves differently only in a tick that also writes a rebuilding `CharacterController` field; the one committed replay with a character, `Surfaces.replay`, never writes one (`SurfaceWalker.luau` only moves), and `Api/CharacterController.test.luau`, the one script that writes those fields, never moves in the same tick.
+3. **The air test, named** (nit). `lastMove`'s description, `GetLastMove`'s and `PhysicsCharacterState::LastMove`'s comments and `MoveFree`'s description say what decides a free move: not grounded as the update began (on walkable ground and not leaving it faster than 0.1 m/s), so `lastMove` can read "Free" beside `grounded` true in the update that lands. W48.3's §9.6 and `characters-and-input.md` text name the test, the 0.1 m/s and the gap with `IsGrounded()`.
+4. **`GetVelocity`** (nit): "The velocity the last update asked for (its step velocity), not the distance it covered; off the ground, without its part into a steep face the character touches, which the update drops." This corrects decision 3's text: off the ground, Jolt's `CancelVelocityTowardsSteepSlopes` drops that part.
+5. **The frozen paragraph** (nit) of `CharacterController.h` cites "ADR 0066 decisions 3 and 4 and its W48.1 record".
+6. **The climber's distance** (nit), in the Tests bullet above.
+
+## The W48.2 record
+
+### The investigation, on the base
+
+The four-crossing case was written first and run alone on the base: `f244e1e7` with only the test added, Debug, Jolt's 4 worker threads. Every update's character contacts were logged by a temporary trace, removed before any fix. The base trace and the analysis script are kept in `bin/Reviews/P8/scratch/M48-builder/` (`inv-L09-600.txt`, `analyze.py`).
+
+- **The shape needed a dimension the brief does not give.** The brief names thirteen 25 kg hinged planks and a 70 kg character, not the planks' length. Decision 3's case as first written, with 0.6 m planks (a 7.8 m span), passes on the base: four crossings, at most 2.6 cm of sink, no stall. A sweep of lengths and sags reproduced S19.
+  - **0.9 m planks** (an 11.6 m span with a 1.05 m sag), which the case keeps (the lead's answer 1), fail on the base:
+    - crossings 1 and 2 arrive, slowly: 228 and 260 ticks, where a clean walk of the same distance takes about 187;
+    - crossing 3 stalls at x 10.64, 1.1 m short of the far rim at 11.70, for the rest of its 600-tick budget, and the sink grows to 0.219 m, inside the brief's 0.17 to 0.24 m.
+  - Other shapes stall too: 1.15 m planks with 1.5-degree steps stall on the first crossing; 1.15 m planks with 4.5-degree steps on the fourth; 0.6 m planks at 6 m/s on the third.
+  - **The game's workaround:** the same 0.9 m bridge with 90 kg planks crosses four times with less than 1 cm of sink, as Skerries' 90 kg planks do today.
+- **What the trace shows**, against decision 3's three points (11 stalls over the four crossings):
+  - **The plank's upward velocity under the character:** at most 0.45, 0.18, 0.97 and 0.71 m/s on crossings 1 to 4.
+  - **The ground contact's depth grows tick by tick with `mCanPushCharacter` off:** -0.0018 to -0.2223 m over 395 updates in crossing 3's stall on plank 11; -0.0046 to -0.0168 m over 21 updates in a stall on plank 5 on crossing 2. This confirms Context point 1: a light ground never lifts the character, so a deck rising under it passes into the capsule.
+  - **Which contact stops the character:** in every stall, the next plank's top at a joint where the deck climbs, with contact normals from (±0.13, 0.99) to (-0.59, 0.81). It is light, faces upwards and is not the last update's ground, so `OnContactSolve` meets it as M34's wall. It is never the rim, and never a step up from sunk feet.
+- **The cause, corrected.** Context point 3's order is reversed: the stall comes first, and the sink then grows under the stopped character.
+  - Each stall begins with almost no sink: on crossing 1 at x 7.095 the sink is 0.9 mm, and the next plank's contact is 0.8 mm away, not yet penetrating.
+  - While the character is held at the joint, the swinging planks rise under it with no push, so the sink builds, up to 0.22 m in the stall that never ends.
+  - The stall is the Risks' "second stall mechanism": the next plank's upward face is a wall until the character's ground switches to it. The sink is Context point 1's, confirmed.
+- **What the fix had to do**, measured before the lead decided (experiments, reverted):
+  - **A**, decision 3's support alone: all four crossings arrive in every shape (0.6, 0.9, 1.15 and 1.4 m), with at most 1.4 cm of sink, and the deck still gives (the plank underfoot 6 to 11 cm below unloaded). Short stalls at climbing joints remain: 4, 20 and 6 updates on the 0.9 m bridge, each stopped by the next plank's wall; the crossings take 196 to 224 ticks.
+  - **B**, A plus walkable faces of other light bodies passable while the character stands on a light body: no stall at all, the crossings 187 to 193 ticks, at most 1.1 cm of sink.
+  - The lead decided A and B (decision 4, question 8).
+
+### The fix
+
+- **The support** (decision 3; `Physics/Private/CharacterContactRecorder.cpp`, `ApplyLightBodyRule`): for a contact of a Dynamic body lighter than the character, `mCanPushCharacter` is on exactly when the body is the character's walkable ground of the last update (`Utils::StandsOn`: Jolt's `OnGround` and ground body, the helper both rules share) and the contact's normal is walkable (`!IsSlopeTooSteep(mContactNormal)`), and off otherwise. Jolt's contact plane and penetration recovery then hold the character on the surface: a plank rising under it lifts it at the plank's velocity along the contact's normal, and an overlap is pushed out within the update.
+  - **Departure in form (the lead's answer 3):** decision 3 had `OnContactSolve` answer a steep face of the light ground "as if the body stood still". It cannot: with the push on, the contact's constraint keeps the body's velocity and the penetration recovery, which `OnContactSolve` cannot change, so Jolt meets the same contact again at once in every iteration of its solver until `mMaxConstraintIterations`, and the update stops short, a stall. The rule is decided where the push is: in `ApplyLightBodyRule`, at the update's first callback for that body and sub-shape (Jolt reuses the settings for the rest of the update, `CharacterVirtual.cpp:495-527`). A steep face of the ground gets the push off, which is Jolt's own answer with a zero constraint velocity: no push and no recovery. A box or a convex hull gives one contact a pass, so the rule holds per face for boxes and hulls and per triangle for a mesh (each triangle its own sub-shape).
+- **Walking from light body to light body** (decision 4, question 8; `OnContactSolve`): while the character's ground is a light body, another light body's contact whose normal is walkable is not M34's wall: Jolt's answer is kept, so the character walks onto it as onto any ground, and the next update stands on it. M34's wall stays for every other case: a character on static or heavy ground still meets it at a light body's walkable face, and a light body is still never a stair.
+- **What stays M34's** (unchanged code): the light ground's velocity is never the character's (`Update`'s ground velocity, the stairs, `PushGround`'s cap, `FindSqueeze`); the walk's push with at most `Mass` × 9.81 N; every other light body's contacts with the push off.
+- **Descriptions and documents:** `CharacterController.Mass` reads "a Dynamic body lighter than it supports the character where it stands on it, and never pushes, launches or carries it". The comments of `CharacterController.h` (the light-body paragraph, the frozen list, `Mass`, `Update`), `CharacterController.cpp` and `CharacterContactRecorder.h` state the rule; Architecture §9.6's "Characters and Dynamic bodies" and "Pushes and the squeeze" too. The Backlog's M34 rows and the skills follow in W48.3, as decision 2 orders them.
+
+### Tests
+
+All in `CharacterControllerTests.cpp`, beside M34's and M36's cases, which run unchanged but the rising platform:
+- `RopeBridge` builds the investigation's bridge (0.9 m planks, `PhysicsWorld::CreateJoint` hinges along the top edges, the end planks to the world), and `CrossBridge` walks one crossing at 4.2 m/s, measuring the deepest sink under the plank stood on (`GroundBody`'s top plane at the character) and the lowest the plank underfoot sat below its unloaded height.
+- "a character crosses a bridge of thirteen hinged 25 kg planks four times, each onto the far rim, and never sinks into a plank": each crossing within 200 ticks (a clean walk takes about 187), a sink under 3 cm, and the plank underfoot at least 3 cm below unloaded (the deck gives).
+- "a character on a light Dynamic plank that swings up under it rides its surface and keeps none of its velocity": a 25 kg plank 4 m long hinged to the world at one end, its motor lifting the free end at about 1.5 m/s under the character for half a second, then holding: the character rides more than 0.5 m up within 3 cm of the surface, its `GetVelocity().y` stays under 0.1 m/s, and it stands where it was lifted to once the plank holds.
+- "a light Dynamic platform rising under a character lifts it on its surface and gives it none of its velocity": M34's case in its place, its scenario kept (a 5 kg plate driven up at 1.5 m/s under a standing character), its checks decision 3's: within 3 cm of the plate's top, `GetVelocity().y` under 0.1 m/s, and stopping with the plate.
+- "only the walkable surface of the light body a character stands on supports it, and no light body pushes it sideways": a 30 kg trough (a floor and a wall at one end, two sub-shapes) driven along X under a character standing on its floor, whose wall comes more than 0.1 m into the capsule without moving it (and the floor slides away under it without carrying it); then a light crate thrown at a character standing on the trough, which never moves it.
+- "four bridge crossings end at one pose at Jolt thread counts 0, 1 and 8": the character's and every plank's pose, bit for bit.
+- **The proofs.** Each case ran against two mutations of the recorder and against the base, then on the restored code (51 of 51 `CharacterController:*` cases):
+  - **On the base** (the recorder as W48.1 left it), three cases fail and the other 48 pass:
+    - the bridge: crossings 1 and 3 do not arrive within 200 ticks (x 10.52 and 11.49 of 12.20), and the sinks reach 5.8, 5.2 and 3.7 cm;
+    - the swinging plank: the character sinks 0.76 m into it;
+    - the platform: it rises through the character, its top ending 3 m above the character's base.
+  - **A alone** (B disabled): the bridge case fails its bound (crossing 1 at x 11.81 after 200 ticks); the other 50 pass.
+  - **The support per body rather than per face** (`mCanPushCharacter` on for every contact of the light ground): the trough's wall shoves the character 0.17 m, failing the per-face case; the other 50 pass.
+
+### Runs
+
+On the wave's final code (2026-11-24, the checkpoint on `milestone/m48`, with the W48.1 review's fixes):
+- **Builds:** Debug, 27 projects, 0 warnings; the Release editor, 0 warnings.
+- **Unit, Debug, targeted:** `CharacterController:*`, `PhysicsSystem:*` and "Physics: trigger detects a character through its inner body", 144 passed; the review fixes' cases alone before the fixes (failing as recorded above), then passing.
+- **Unit, Debug, unfiltered** (`--parallel 4`): 5,393 of 5,395 passed in 38 of 40 shards. The other two shards each held one long case that passed its time limit on the loaded machine ("Validation: each fixture reports exactly its expected codes", 604 s against 248 expected; "Physics: contact event order identical across runs", 454 s against 176), with no failed check; both then passed run alone.
+- **Automation, Debug,** `test_physics`: 15 passed.
+- **FeatureTest in the Debug editor** (`--run-tests --renderer none`): `Physics.Surfaces` with `Surfaces.replay` at its committed hash, `Physics.CharacterDebris` and `Api.CharacterController` passed, and FeatureTest is unchanged.
+- **`Lint.py`, `Format.py --check` and `GenerateDocs.py --config Debug --check`:** passed on the final code. `Components.md`, the scene and prefab schemas, `Methods.json`, `Automation.md`, `ScriptAPI.md` and `Engine.d.luau` regenerated for `Mass`'s, `lastMove`'s, `MoveFree`'s and `GetVelocity`'s descriptions.
+- **No GPU run:** nothing W48.2 changes renders.
+
 ## Before milestone completion
 
-- [x] W48.1 committed; [ ] the lead's review pass taken and every finding fixed.
-- [ ] W48.2 committed, its record holding the base run (the bridge case failing, its sink and stall, the cause); [ ] the lead's review pass taken and every finding fixed.
+- [x] W48.1 committed; [x] the lead's review pass taken and every finding fixed.
+- [x] W48.2 committed, its record holding the base run (the bridge case failing, its sink and stall, the cause); [ ] the lead's review pass taken and every finding fixed.
 - [ ] W48.3 committed; [ ] the lead's review pass taken and every finding fixed.
 - [ ] The landing: phase 8's batch, M48 last, appending after M43 to M47 in every shared file; FeatureTest regenerated and `EngineVersionString` 0.9.0; `CI.py --require-clang-cl` green; main fast-forwarded and pushed.
 - [ ] S17's and S19's "How the game will check it" met as the Acceptance maps them, and reported to the Skerries session through the product owner with the corrections above. The light-body rule's change is reported to the World Tree session too.

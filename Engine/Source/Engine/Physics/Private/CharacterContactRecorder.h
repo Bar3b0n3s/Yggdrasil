@@ -25,14 +25,22 @@
 // its inner body and the world's ContactListener instead (§9.2, §9.6), and a trigger pair is never reported twice. Contacts
 // with other characters do not arise (no CharacterVsCharacterCollision is installed).
 //
-// Light bodies (M34, Docs/Decisions/0049-m34-characters-input.md decision 2): a Dynamic body lighter than the character
-// (IsLighterThanCharacter) never pushes it, so the recorder turns CharacterContactSettings::mCanPushCharacter off for one
-// in OnContactAdded and OnContactPersisted; the character still pushes it (mCanReceiveImpulses stays on). Nor does the
-// character climb one by sliding up a surface of it that faces upwards: OnContactSolve meets such a contact as a vertical
-// wall, so the character's motion into the body stops and its vertical motion stays as it was, except on the body the
-// character stands on (its walkable ground of the last update), which it moves across as Jolt slides it; and whatever the
-// wall leaves moving into the contact's plane (a fall onto a steep face) slides along the plane, never lifting the
-// character, so the solver never leaves it hanging on the face.
+// Light bodies (M34, Docs/Decisions/0049-m34-characters-input.md decision 2; M48,
+// Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decisions 3 and 4): a Dynamic body lighter
+// than the character (IsLighterThanCharacter) never pushes it, so the recorder turns
+// CharacterContactSettings::mCanPushCharacter off for one in OnContactAdded and OnContactPersisted, but for a contact
+// of the body the character stands on (its walkable ground of the last update) whose normal is walkable: that body
+// supports the character, Jolt's contact plane and penetration recovery holding it on the surface, so a deck rising
+// under it lifts it and an overlap is pushed out within the update. Jolt keeps the settings of a body and sub-shape for
+// the whole update, decided at their first callback, so the support holds per face for a box or a convex hull (one
+// contact a pass) and per triangle for a mesh, and a steep face of the ground is met with no push and no recovery, as
+// if the body stood still. The character still pushes every light body (mCanReceiveImpulses stays on). Nor does the
+// character climb one by sliding up a surface of it that faces upwards: OnContactSolve meets such a contact as a
+// vertical wall, so the character's motion into the body stops and its vertical motion stays as it was, except on the
+// body the character stands on, which it moves across as Jolt slides it, and, while the character stands on a light
+// body, on another light body's walkable face, which it walks onto as onto any ground (the next plank of a bridge); and
+// whatever the wall leaves moving into the contact's plane (a fall onto a steep face) slides along the plane, never
+// lifting the character, so the solver never leaves it hanging on the face.
 //
 // Private to the Physics module. Main thread only: CharacterVirtual calls it synchronously from ExtendedUpdate, in an order
 // that depends only on the world's state, so the records are deterministic.
@@ -73,9 +81,9 @@ namespace Engine {
 
 		// Refuses sensors (see the file comment).
 		bool OnContactValidate(const JPH::CharacterVirtual* character, const JPH::CharacterContact& contact) override;
-		// Records the contact; a light body cannot push the character (see the file comment).
+		// Records the contact; a light body cannot push the character but where it supports it (see the file comment).
 		void OnContactAdded(const JPH::CharacterVirtual* character, const JPH::CharacterContact& contact, JPH::CharacterContactSettings& settings) override;
-		// A light body cannot push the character (see the file comment); nothing is recorded.
+		// A light body cannot push the character but where it supports it (see the file comment); nothing is recorded.
 		void OnContactPersisted(const JPH::CharacterVirtual* character, const JPH::CharacterContact& contact,
 			JPH::CharacterContactSettings& settings) override;
 		// A light body's upward-facing surface is a vertical wall to the character (see the file comment).
@@ -87,7 +95,7 @@ namespace Engine {
 		// The records since the last Drain, in callback order, and empties the list.
 		[[nodiscard]] std::vector<CharacterContactRecord> Drain();
 	private:
-		// Turns mCanPushCharacter off for a light body.
+		// Turns mCanPushCharacter off for a light body, but for the walkable surface of the one the character stands on.
 		void ApplyLightBodyRule(const JPH::CharacterVirtual& character, const JPH::CharacterContact& contact, JPH::CharacterContactSettings& settings) const;
 	private:
 		const JPH::BodyLockInterface* m_Locks = nullptr;

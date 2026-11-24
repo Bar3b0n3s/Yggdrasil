@@ -50,6 +50,10 @@
 // (IsLighterThanCharacter) never moves it: it cannot push it or carry it up a surface of its own (the recorder), it gives
 // it none of its velocity as its ground (Update), it is never a stair (WalkStairs, Jolt's step without light bodies) and
 // it carries at most its own weight from the character (PushGround, which replaces CharacterVirtual's weight impulse).
+// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decisions 3 and 4): the recorder lets
+// the walkable surface of the light body the character stands on push it, so Jolt's contact plane and penetration
+// recovery hold the character on top within ExtendedUpdate; the lift moves the character and never becomes its
+// velocity, which Update sets before the move as for any ground.
 //
 // Contacts. A CharacterContactRecorder records the character's contacts during ExtendedUpdate; Update then appends each as
 // a ContactEvent with FromCharacter, BodyA the inner body, ColliderA 0 (the capsule is the character's only collider) and

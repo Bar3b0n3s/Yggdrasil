@@ -1579,7 +1579,8 @@ namespace Engine {
 		state.WakeOwners(woken);
 
 		// 5. Characters: a Transform write teleports them, then each runs its update with the velocity and mode of its last
-		// MoveCharacter, which the update consumes (M48: Walk when the tick made no call).
+		// MoveCharacter, which the update consumes (M48: Walk when the tick made no call; kept in PendingMoves, so a rebuild of
+		// the character in items 1-2 keeps it).
 		const glm::vec3 gravity = state.World->GetGravity();
 		for (const UUID id : order)
 		{
@@ -1610,10 +1611,19 @@ namespace Engine {
 			glm::vec3 characterGravity = gravity * entry.GravityFactor;
 			if (!Utils::IsFinite(characterGravity))
 				characterGravity = glm::vec3(0.0f);
-			entry.Controller->Update(deltaTime, entry.DesiredVelocity, characterGravity, entry.DesiredMode);
-			entry.DesiredVelocity = glm::vec3(0.0f);
-			entry.DesiredMode = CharacterMoveMode::Walk;
+			PhysicsCharacterMove move{};
+			if (const auto pending = state.PendingMoves.find(id); pending != state.PendingMoves.end())
+			{
+				move = pending->second;
+				state.PendingMoves.erase(pending);
+			}
+			entry.Controller->Update(deltaTime, move.Velocity, characterGravity, move.Mode);
 		}
+		// The move of a character that no longer exists goes with it; one skipped above waits, as it waits in its entry.
+		std::erase_if(state.PendingMoves, [&state](const std::pair<const UUID, PhysicsCharacterMove>& pending)
+		{
+			return !state.Characters.contains(pending.first);
+		});
 
 		// Dormant contacts a body of which is awake now: the step will report them again if they still touch.
 		state.EligibleDormantContacts.clear();

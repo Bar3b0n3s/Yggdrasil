@@ -20,6 +20,13 @@ namespace Engine {
 		// The length below which a contact normal's horizontal part has no direction: the surface faces straight up or down.
 		constexpr float MinWallNormalLength = 1.0e-3f;
 
+		// Whether `character`'s last update stood on `body`: its walkable ground (Jolt's OnGround and ground body), which both
+		// light-body rules except.
+		[[nodiscard]] static bool StandsOn(const JPH::CharacterVirtual& character, const JPH::BodyID& body)
+		{
+			return character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround && character.GetGroundBodyID() == body;
+		}
+
 	}
 
 	bool IsLighterThanCharacter(const JPH::Body& body, float characterMass)
@@ -49,8 +56,11 @@ namespace Engine {
 	void CharacterContactRecorder::ApplyLightBodyRule(const JPH::CharacterVirtual& character, const JPH::CharacterContact& contact,
 		JPH::CharacterContactSettings& settings) const
 	{
-		if (contact.mMotionTypeB == JPH::EMotionType::Dynamic && IsLighterThanCharacter(*m_Locks, contact.mBodyB, character.GetMass()))
-			settings.mCanPushCharacter = false;
+		if (contact.mMotionTypeB != JPH::EMotionType::Dynamic || !IsLighterThanCharacter(*m_Locks, contact.mBodyB, character.GetMass()))
+			return;
+		// M48: the walkable surface of the light body the character stands on supports it; its steep faces, and every other
+		// light body, never push it (see the file comment).
+		settings.mCanPushCharacter = Utils::StandsOn(character, contact.mBodyB) && !character.IsSlopeTooSteep(contact.mContactNormal);
 	}
 
 	void CharacterContactRecorder::OnContactPersisted(const JPH::CharacterVirtual* character, const JPH::CharacterContact& contact,
@@ -67,13 +77,20 @@ namespace Engine {
 		// box's edge below the capsule's middle) carries it up onto the body. A surface facing downwards or straight up keeps
 		// Jolt's answer, which never lifts the character, and so does the body the character stands on (its ground of the
 		// last update, walkable): the rule stops a character getting onto a light body, never moving across the one it is on,
-		// such as up a tilted plank.
+		// such as up a tilted plank. M48 (decision 4): nor does it stop a character standing on a light body walking onto
+		// another light body's walkable face, as onto any ground (the next plank of a bridge, where the deck climbs).
 		const JPH::Vec3 up = character->GetUp();
 		const float upwards = contactNormal.Dot(up);
 		JPH::Vec3 across = contactNormal - upwards * up;
 		const float length = across.Length();
-		const bool standsOn = character->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround && character->GetGroundBodyID() == body;
-		if (!(upwards > 0.0f) || !(length > Utils::MinWallNormalLength) || standsOn || !IsLighterThanCharacter(*m_Locks, body, character->GetMass()))
+		if (!(upwards > 0.0f) || !(length > Utils::MinWallNormalLength) || Utils::StandsOn(*character, body)
+			|| !IsLighterThanCharacter(*m_Locks, body, character->GetMass()))
+		{
+			return;
+		}
+		const bool onLightGround = character->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround
+			&& IsLighterThanCharacter(*m_Locks, character->GetGroundBodyID(), character->GetMass());
+		if (onLightGround && !character->IsSlopeTooSteep(contactNormal))
 			return;
 		across /= length;
 		const float into = characterVelocity.Dot(across);

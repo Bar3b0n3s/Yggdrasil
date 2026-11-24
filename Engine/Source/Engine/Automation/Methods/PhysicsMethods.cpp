@@ -233,8 +233,9 @@ namespace Engine {
 				"The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty "
 				"when it is not squeezed, for other bodies, and when that entity is disabled or destroyed.")
 			.Field("lastMove", &PhysicsBodyInfoResult::LastMove,
-				"How a character's last update moved it: \"Free\" for a free move in the air (CharacterController:MoveFree, which on the "
-				"ground is a Move), \"Walk\" otherwise; empty for other bodies.")
+				"\"Free\" when a character's last update was a free move (CharacterController:MoveFree while the character was not grounded "
+				"as the update began: on walkable ground and not leaving it faster than 0.1 m/s), so it can read \"Free\" beside grounded true "
+				"in the update that lands; \"Walk\" otherwise; empty for other bodies.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).

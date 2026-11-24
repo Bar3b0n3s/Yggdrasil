@@ -536,13 +536,16 @@ namespace Engine {
 				.Method("Move", Utils::CharacterMove<CharacterMoveMode::Walk>, "(self: CharacterController, velocity: vector) -> ()", "Supply desired velocity for the next fixed character update.", write)
 				.Method("MoveFree", Utils::CharacterMove<CharacterMoveMode::Free>, "(self: CharacterController, velocity: vector) -> ()",
 					"Supply the velocity of the next fixed character update as a free move: in the air the character takes it whole, its vertical "
-					"part included, with no gravity and no floor sticking (swimming, climbing, gliding); on the ground it is Move. Call it every "
-					"OnFixedUpdate; the last Move or MoveFree of a tick wins.",
+					"part included, with no gravity and no floor sticking (swimming, climbing, gliding); grounded as the update begins (on walkable "
+					"ground and not leaving it faster than 0.1 m/s) it is Move. Call it every OnFixedUpdate; the last Move or MoveFree of a tick "
+					"wins.",
 					write)
 				.Method("IsGrounded", Utils::CharacterRead<0>, "(self: CharacterController) -> boolean", "Whether the last character update found supporting ground.", read)
 				.Method("GetGroundNormal", Utils::CharacterRead<1>, "(self: CharacterController) -> vector", "Ground normal from the last update.", read)
 				.Method("GetVelocity", Utils::CharacterRead<2>, "(self: CharacterController) -> vector",
-					"The velocity the last update asked for (its step velocity), not the distance it covered: a blocked character still reports it.", read)
+					"The velocity the last update asked for (its step velocity), not the distance it covered; off the ground, without its part "
+					"into a steep face the character touches, which the update drops.",
+					read)
 				.Method("GetGroundCollider", Utils::CharacterEntityRead<0>, "(self: CharacterController) -> Entity?",
 					"The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when "
 					"that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity.",

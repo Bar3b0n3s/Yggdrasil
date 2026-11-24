@@ -32,8 +32,7 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "the velocity ({}, {}, {}) is out of range: each component must be at most {} m/s", velocity.x,
 				velocity.y, velocity.z, MaxCharacterSpeed);
 		}
-		found->second.DesiredVelocity = velocity;
-		found->second.DesiredMode = mode;
+		m_State->PendingMoves[entity] = PhysicsCharacterMove{ .Velocity = velocity, .Mode = mode };
 		return {};
 	}
 

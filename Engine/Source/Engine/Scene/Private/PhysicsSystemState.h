@@ -95,15 +95,18 @@ namespace Engine {
 		bool HasSurfaces = false;
 	};
 
+	// The velocity and the mode (M48) of a character's last MoveCharacter, which the next PreStep's item 5 consumes.
+	struct PhysicsCharacterMove
+	{
+		glm::vec3 Velocity = glm::vec3(0.0f);
+		CharacterMoveMode Mode = CharacterMoveMode::Walk;
+	};
+
 	// One created character (§9.6).
 	struct PhysicsCharacterEntry
 	{
 		UUID Owner{};
 		Scope<CharacterController> Controller{};
-		// The velocity of the last MoveCharacter, consumed by the next PreStep.
-		glm::vec3 DesiredVelocity = glm::vec3(0.0f);
-		// M48: the mode of the last MoveCharacter, consumed with DesiredVelocity.
-		CharacterMoveMode DesiredMode = CharacterMoveMode::Walk;
 		// The owner's local Translation and Rotation that PostStep last wrote (as for Dynamic bodies).
 		glm::vec3 WrittenTranslation = glm::vec3(0.0f);
 		glm::quat WrittenRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
@@ -372,6 +375,10 @@ namespace Engine {
 		// of PreStep step 5 and the write-back of PostStep) is in PhysicsSystem.cpp, because the step phases and the rebuilds
 		// own it; InnerBodies maps each character's inner body to its owner.
 		std::map<UUID, PhysicsCharacterEntry> Characters;
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md, the W48.2 record): each character's
+		// pending move by owner (MoveCharacter), until PreStep's item 5 consumes it. Kept apart from the character's entry,
+		// so a field write that creates the character again in the same PreStep's items 1-2 keeps the tick's move.
+		std::map<UUID, PhysicsCharacterMove> PendingMoves;
 
 		// The owner of the character whose inner body is `body` (InnerBodies); the invalid UUID when `body` is no character's.
 		[[nodiscard]] UUID FindCharacterOwner(BodyHandle body) const;
