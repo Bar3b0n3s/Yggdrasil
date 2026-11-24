@@ -44,7 +44,7 @@
   - **The replays.** All 26 replays record 0.8.0, and every other field, hash included, is main's (M41's tip's for `BoneAttachments.replay`). No demo changed.
   - **The goldens, against main.** Every golden was rendered on this machine with main `bb8d6042`'s Release build and with `d7db913e`'s. The 55 existing images are byte-identical, and two renders of main are byte-identical to each other. So neither milestone changed an existing image, as decision 3's rendering rule and ADR 0059's clip promised. The one new image is M42's `PlanarReflections`.
   - **The merge review** (the lead's independent pass) found one nit, the count comment in `BuiltinComponentsTests.cpp`, and two documents the milestones missed: Architecture §15.4's golden list and the luau-gameplay `game-services` page's readout members. All three are fixed on the landing branch.
-  - **The gate.** `CI.py --milestone` (decision 7) remains, with the World Tree and Skerries sessions' rendering editors closed.
+  - **The gate.** `CI.py --milestone` (decision 7) passed every stage on `e7fb5356`, its hardening included. Main fast-forwarded to the landing and was pushed ("The phase 7 gate").
 
 ## Context
 
@@ -525,12 +525,41 @@ The lead's independent review of W41.2 (`f8739224`; `bin/Reviews/P7/M41-W2-revie
 - **7 (nit).** The detaching case names its expected `ANIMATION_ATTACHMENT_INVALID` warning (now the Rider's), and so does the record.
 - **Runs** (2026-11-19): the scaffolds first on a scratch copy (the suite's eight cases and the replay's expectations passed; with the phase moved after the physics step, the trigger case failed); `Scaffold.py` (Release) regenerated only the probe, the suite, the replay and the provenance, and `Scaffold.py --check` passed; the feature suite, Debug: 460 cases, the six editor-mode gates green, `Projects/FeatureTest` unchanged; automation, `test_animation`: 4 passed; unit, Debug, `DocExamples`: 7 passed; `Lint.py --steps python,json` passed.
 
+## The phase 7 gate
+
+`CI.py --milestone` (decision 7) ran on `e7fb5356` on 2026-11-23, with the World Tree and Skerries sessions' rendering editors closed. It took about 8.5 h on a quiet machine, from 12:20 to 20:48. **Every stage passed**, including the first full hardening since M27's gate.
+
+1. **The stages before the hardening:**
+   - generate and the static checks;
+   - the Debug, Release and Dist builds, with the Dist map check and the references check;
+   - the bake;
+   - unit, in Debug and Release;
+   - gpu, in Debug and Release, under both API caps;
+   - golden: 56 images on `nvidia-62x`;
+   - feature, in Debug and Release;
+   - automation;
+   - export, in Release and Dist (116 suites, 26 replays), with the coverage merge;
+   - determinism: all 26 replays matched their committed hashes in the Debug and Release editors and the exported Release and Dist runs;
+   - games: RollingBall, Tetris, Breakout and NativeTest, each with its audit and its Debug, Release and Dist halves;
+   - portability, with the clang-cl Release and Dist builds.
+2. **The hardening stage:**
+   - **Perf:** 217 metrics of 104 scenes, every one within its budget (505 s).
+   - **The soak:** 109 subjects over 10,000 frames. The largest memory growth was 0.164 % of the private bytes, the heap of `GoldenRendererII/GtaoOff.scene` (6,713 s).
+   - **The ASan unit run, Release:** 5,498 cases passed. The 48 it skipped are all child-process targets (3,245 s).
+   - **The ASan feature run, Release:** the six editor-mode gates were green and FeatureTest was left unchanged (150 s).
+   - **The debug heap:** one run of the Debug gpu suite, 631 cases under each API cap (3,925 s).
+   - **The fuzz:** 53 targets x 1,000,000 iterations in 19 processes, clean. The peak private memory of one process was 3,240 MB (5,155 s).
+3. **No finding,** so nothing needed fixing. Main fast-forwarded to `landing/phase7` and was pushed to `origin`.
+4. **Two steps ran close to their bounds,** though neither failed:
+   - **The ASan unit run** took 3,245 s of its 3,600 s. That is 0.59 s a case on a quiet machine, not the 0.5 s that `Docs/Backlog.md` §3's row assumed, so about 6,100 cases fit (the row now says so).
+   - **The fuzz** took 5,155 s of its 5,276 s timeout. Its sizing, from the costs measured on 2026-11-15, expected about 70 min (4,200 s), so the targets ran about 23 % slower than those costs. This run's cause was not measured. As a full, passing run, the step kept its costs in `<git common dir>/fuzz-costs/Fuzz-Release-Asan.xml` (ADR 0028 decision 16), so the next fuzz step is sized and bounded from them.
+
 ## Before milestone completion
 
 - [x] Brief 21's three items landed on main, each reviewed and its outcome recorded in decision 8.
 - [x] W41.1 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] W41.2 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] The milestone end: `milestone/m41` merged current main, the milestone review's findings fixed, `EngineVersionString` 0.8.0, FeatureTest regenerated and the editor-UI goldens checked on the final tree.
-- [ ] The gate green (decision 7), main fast-forwarded and pushed.
-- [ ] Brief 22's and brief 21's "How the game will check it" met, and reported to the World Tree session through the product owner with the corrections above.
+- [x] The gate green (decision 7), main fast-forwarded and pushed ("The phase 7 gate").
+- [x] Brief 22's and brief 21's "How the game will check it" met, and reported to the World Tree session through the product owner with the corrections above.
 - [x] Architecture, the Roadmap, the skills, the Backlog and the generated references describe what landed.
