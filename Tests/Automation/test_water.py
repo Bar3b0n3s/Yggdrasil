@@ -1,6 +1,7 @@
 """Water through automation (Docs/Decisions/0065-m47-water.md decision 3; Docs/Architecture.md §9.12, §13.5
 "water.sample"): water.sample reads the surface of the water that holds each point, or a named water's own surface, in
-the edit scene at time 0 or a given time and in the play scene at the world's time, and refuses bad points and entities.
+the edit scene at time 0 or a given time and in the play scene at the world's time, and refuses bad points (none, or
+beyond the world) and entities.
 """
 
 from __future__ import annotations
@@ -49,6 +50,12 @@ class WaterTests(AutomationTestCase):
         with self.assertRaises(engine_client.EngineError) as no_points:
             client.call("water.sample", {"points": []})
         self.assert_engine_error(no_points.exception, engine_client.INVALID_PARAMS)
+        # A point beyond the physics' world (a coordinate past 1e9 m) is refused where it is, as the physics queries
+        # refuse it.
+        with self.assertRaises(engine_client.EngineError) as far:
+            client.call("water.sample", {"points": [[0, 0, 0], [0, 0, 2e9]]})
+        self.assert_engine_error(far.exception, engine_client.INVALID_PARAMS)
+        self.assertEqual(far.exception.issues[0]["pointer"], "/points/1")
 
     def test_sample_takes_the_world_time_in_play(self) -> None:
         client, _ = self.open_editor_with_scene()

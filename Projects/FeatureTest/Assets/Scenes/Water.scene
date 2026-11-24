@@ -1,0 +1,701 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Water",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 2,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"Script": 2,
+		"Water": 1,
+		"Buoyancy": 1
+	},
+	"Entities": [
+		{
+			"ID": "fcb8833ccc538b0a",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000202",
+					"Intensity": 0.8,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Fxaa"
+				}
+			}
+		},
+		{
+			"ID": "b4a9bcfe510645ce",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 4, 14],
+					"Rotation": [-0.104528464, 0, 0, 0.9945219],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "146496e79a301f61",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.28257102, 0.3261904, 0.10284744, 0.8962008],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "7c19d795eb8cc89c",
+			"Name": "Sea",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Water": {
+					"Shape": "Ocean",
+					"Size": [20, 20],
+					"Depth": 5,
+					"Headroom": 10,
+					"Waves": [
+						{
+							"Direction": 0,
+							"Wavelength": 9,
+							"Amplitude": 0.3,
+							"Steepness": 0.6,
+							"Speed": 0,
+							"Phase": 0
+						},
+						{
+							"Direction": 70,
+							"Wavelength": 5,
+							"Amplitude": 0.15,
+							"Steepness": 0.8,
+							"Speed": 2.5,
+							"Phase": 45
+						},
+						{
+							"Direction": -35,
+							"Wavelength": 14,
+							"Amplitude": 0.25,
+							"Steepness": 0.3,
+							"Speed": 0,
+							"Phase": 120
+						}
+					],
+					"WaveScale": 0.8,
+					"Current": [0, 0],
+					"Density": 1000,
+					"ShallowColor": [0.08, 0.5, 0.45],
+					"DeepColor": [0.02, 0.08, 0.15],
+					"Clarity": 6,
+					"Roughness": 0.08,
+					"RefractionStrength": 0.4,
+					"FoamAmount": 0.6,
+					"ShoreFoamDepth": 0.8,
+					"DetailNormalStrength": 0.6,
+					"DetailScale": 5,
+					"DetailDrift": [1.5, -0.5],
+					"UnderwaterColor": [0.03, 0.12, 0.14],
+					"UnderwaterVisibility": 20,
+					"NormalMap": null,
+					"FoamTexture": null
+				}
+			}
+		},
+		{
+			"ID": "c3e52180ddfeb9ee",
+			"Name": "Pool",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [16, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Water": {
+					"Shape": "Rectangle",
+					"Size": [6, 6],
+					"Depth": 2.5,
+					"Headroom": 3,
+					"Waves": [
+						{
+							"Direction": 30,
+							"Wavelength": 2,
+							"Amplitude": 0.005,
+							"Steepness": 0.2,
+							"Speed": 0,
+							"Phase": 0
+						}
+					],
+					"WaveScale": 1,
+					"Current": [0.8, 0],
+					"Density": 1025,
+					"ShallowColor": [0.2, 0.6, 0.55],
+					"DeepColor": [0.02, 0.1, 0.12],
+					"Clarity": 2,
+					"Roughness": 0.1,
+					"RefractionStrength": 0.2,
+					"FoamAmount": 0.3,
+					"ShoreFoamDepth": 0.25,
+					"DetailNormalStrength": 0.8,
+					"DetailScale": 2,
+					"DetailDrift": [-1, 0.5],
+					"UnderwaterColor": [0.05, 0.15, 0.1],
+					"UnderwaterVisibility": 8,
+					"NormalMap": "b518e426191e70b0",
+					"FoamTexture": "98ff47d5d6208ff8"
+				}
+			}
+		},
+		{
+			"ID": "1fadfd8aed238382",
+			"Name": "Grotto",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-16, -6, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Water": {
+					"Shape": "Rectangle",
+					"Size": [8, 8],
+					"Depth": 3,
+					"Headroom": 4,
+					"Waves": [],
+					"WaveScale": 1,
+					"Current": [0, 0],
+					"Density": 1000,
+					"ShallowColor": [0.1, 0.55, 0.5],
+					"DeepColor": [0.01, 0.07, 0.12],
+					"Clarity": 12,
+					"Roughness": 0.05,
+					"RefractionStrength": 0.3,
+					"FoamAmount": 0.5,
+					"ShoreFoamDepth": 0.5,
+					"DetailNormalStrength": 0.5,
+					"DetailScale": 4,
+					"DetailDrift": [2, 1],
+					"UnderwaterColor": [0.02, 0.1, 0.12],
+					"UnderwaterVisibility": 6,
+					"NormalMap": null,
+					"FoamTexture": null
+				}
+			}
+		},
+		{
+			"ID": "ad9a9f2c10fd3ee3",
+			"Name": "Cave",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-16, -6, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "18f456031fa98e34",
+			"Name": "Floor",
+			"Parent": "ad9a9f2c10fd3ee3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -3.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [9, 0.5, 9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["2dbf092f33eb546f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "437ae4bca2558855",
+			"Name": "Ceiling",
+			"Parent": "ad9a9f2c10fd3ee3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 4.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [9, 0.5, 9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["2dbf092f33eb546f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "171d829e6d6bdb59",
+			"Name": "WallEast",
+			"Parent": "ad9a9f2c10fd3ee3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4.25, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 7, 9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["2dbf092f33eb546f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "4577d93c5ca3fb85",
+			"Name": "WallWest",
+			"Parent": "ad9a9f2c10fd3ee3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4.25, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 7, 9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["2dbf092f33eb546f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "a8b44e549f7b762d",
+			"Name": "WallNorth",
+			"Parent": "ad9a9f2c10fd3ee3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, -4.25],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [8, 7, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["2dbf092f33eb546f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "f64009ddb2306b2a",
+			"Name": "WallSouth",
+			"Parent": "ad9a9f2c10fd3ee3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, 4.25],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [8, 7, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["2dbf092f33eb546f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "db2944b9eb2f20b6",
+			"Name": "Boat",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.6, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 400,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"Buoyancy": {
+					"Water": null,
+					"BuoyancyScale": 1,
+					"LinearDrag": 2,
+					"AngularDrag": 0.05
+				}
+			}
+		},
+		{
+			"ID": "07427c60d36ce5eb",
+			"Name": "PontoonFrontLeft",
+			"Parent": "db2944b9eb2f20b6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0, -0.75],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.2, 0.5, 0.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["5f7ac2a669149a31"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "769e3e7fc21136a3",
+			"Name": "PontoonFrontRight",
+			"Parent": "db2944b9eb2f20b6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0, -0.75],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.2, 0.5, 0.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["5f7ac2a669149a31"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "2e868334c9bef3d6",
+			"Name": "PontoonBackLeft",
+			"Parent": "db2944b9eb2f20b6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0, 0.75],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.2, 0.5, 0.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["5f7ac2a669149a31"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "0ecbfc0f669f75fe",
+			"Name": "PontoonBackRight",
+			"Parent": "db2944b9eb2f20b6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0, 0.75],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.2, 0.5, 0.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["5f7ac2a669149a31"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "7782d0c200e352d2",
+			"Name": "Deck",
+			"Parent": "db2944b9eb2f20b6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2.6, 0.1, 2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["cab643436ba4d146"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "64c433ee6456a003",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [16, 3.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["cab643436ba4d146"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 250,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Buoyancy": {
+					"Water": "c3e52180ddfeb9ee",
+					"BuoyancyScale": 1.2,
+					"LinearDrag": 3,
+					"AngularDrag": 0.25
+				}
+			}
+		},
+		{
+			"ID": "fca69a62f4eab332",
+			"Name": "Director",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "5b6b24e0d738d794",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}
