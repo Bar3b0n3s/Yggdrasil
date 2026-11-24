@@ -9,10 +9,12 @@
 #include "Engine/Physics/PhysicsQueries.h"
 #include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Physics/PhysicsTypes.h"
+#include "Engine/Physics/PhysicsVehicle.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -364,6 +366,63 @@ namespace Engine {
 		// plus BodyDescription::MassOverride's offset for a Dynamic body), for physics.bodyInfo. `body` live (asserted; the
 		// origin otherwise).
 		[[nodiscard]] glm::vec3 GetCenterOfMassPosition(BodyHandle body) const;
+
+		// --- Vehicles (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; Physics/PhysicsVehicle.h;
+		// Physics/PhysicsWorldVehicles.cpp) ---------------------------------------------------------------------------------
+		// Jolt's wheeled vehicles: each a VehicleConstraint with a WheeledVehicleController on one Dynamic body, added to the
+		// system as a constraint and a step listener, whose wheels cast for the ground with the body's object layer (so they
+		// meet what the body meets; sensors and the body itself never) at every collision step. Jolt holds a raw pointer to
+		// the body in a vehicle, so the world never leaves one behind its body: DestroyBody destroys the body's vehicle before
+		// its joints and the body (its handle goes invalid), SetShape keeps it (its wheels are attached relative to the body's
+		// origin), and destroying the world destroys every vehicle before every joint and body. A wheel's grip combines each
+		// tyre curve's value with the ground's friction by the geometric mean: the friction of the ground collider's surface
+		// (SetColliderSurfaces), else of its body (Detail::ResolveGroundFriction, the one place a terrain layer's surface will
+		// join). Nothing Jolt would assert on reaches it: every description and setting is checked first. A vehicle runs in
+		// Jolt's step-listener jobs, which write only its own state and body, so its state is the same for every worker thread
+		// count. Main thread, between steps.
+		//
+		// Creates a vehicle on `description.Body` and wakes it. Errors, with nothing created: InvalidArgument for a Body that
+		// names no live Dynamic body or one that holds a vehicle, no wheel or more than MaxPhysicsVehicleWheels, an unknown
+		// cast or transmission mode, a value that is not finite or outside PhysicsVehicle.h's range (a wheel's Up or Forward
+		// not unit, or the two parallel; SuspensionMinLength above SuspensionMaxLength; MinRpm above MaxRpm; a gear ratio of
+		// the wrong sign; ShiftUpRpm not above ShiftDownRpm, or in Auto not below MaxRpm; a limited-slip ratio in (0, 1]), a
+		// curve whose X does not increase strictly or that has more than MaxPhysicsVehicleCurveKeys keys, a differential or bar
+		// naming a wheel the vehicle lacks or one wheel twice, more differentials, bars or gears than their caps, or
+		// differentials whose EngineTorqueRatio do not sum to 1 within 1e-3.
+		[[nodiscard]] Result<VehicleHandle> CreateVehicle(const PhysicsVehicleDescription& description);
+		// Destroys a vehicle (its constraint and step listener removed) and wakes its body. A handle that names no live
+		// vehicle of this world (one destroyed with its body included) is ignored.
+		void DestroyVehicle(VehicleHandle vehicle);
+		// Whether `vehicle` names a live vehicle of this world.
+		[[nodiscard]] bool IsVehicleValid(VehicleHandle vehicle) const;
+		// The live vehicle on `body`, or the invalid handle.
+		[[nodiscard]] VehicleHandle FindVehicle(BodyHandle body) const;
+		// Sets a live vehicle's driver input (PhysicsVehicleInput, each value clamped to its range; Manual's gear and clutch
+		// through Jolt's VehicleTransmission::Set, the gear clamped to the gear counts). It does not wake the body (the caller
+		// decides; Jolt only keeps a vehicle awake while its wheels spin). A dead handle or a value that is not finite is a
+		// programmer error (asserted) and ignored.
+		void SetVehicleInput(VehicleHandle vehicle, const PhysicsVehicleInput& input);
+		// Applies `settings` to a live vehicle in place (Jolt's writable engine, transmission, differentials and anti-roll
+		// bars, and SetMaxPitchRollAngle; its RPM is clamped to the new range and its gear to the new counts) and wakes its
+		// body. Errors: InvalidArgument for a dead handle or invalid settings (as CreateVehicle, against the vehicle's wheel
+		// count), with nothing changed.
+		[[nodiscard]] Status SetVehicleSettings(VehicleHandle vehicle, const PhysicsVehicleSettings& settings);
+		// Sets a live vehicle's solver priority (PhysicsVehicleDescription::Priority); a dead handle is ignored.
+		void SetVehiclePriority(VehicleHandle vehicle, uint32_t priority);
+		// The vehicle's reading after the last step (PhysicsVehicleState); empty for a dead handle. A wheel's ground is read
+		// by its body ID, never through Jolt's per-step pointer, so a ground destroyed since reads as no body and collider.
+		[[nodiscard]] PhysicsVehicleState GetVehicleState(VehicleHandle vehicle) const;
+		// The engine RPM, transmission state (gear, clutch friction, the three timers) and wheels (angular velocity, angle,
+		// steer angle, suspension length) of a live vehicle, Jolt's VehicleEngine::SaveState and VehicleTransmission::SaveState
+		// bytes then each wheel's four floats' bits, appended to `bytes` for a state hash; nothing for a dead handle. Never
+		// Jolt's VehicleConstraint::SaveState, whose body IDs and step counter depend on the world's history.
+		void AppendVehicleState(VehicleHandle vehicle, std::vector<std::byte>& bytes) const;
+		// Restores a live vehicle's engine RPM, gear, clutch and each wheel's angular velocity and angle (wheels past the
+		// vehicle's count are ignored): what a vehicle made again on the same body carries over (Scene/PhysicsSystem). A dead
+		// handle or a value that is not finite is ignored after an assert.
+		void RestoreVehicleMotion(VehicleHandle vehicle, const PhysicsVehicleState& state);
+		// The number of live vehicles.
+		[[nodiscard]] uint32_t GetVehicleCount() const;
 	private:
 		// The Jolt objects (Physics/Private/PhysicsWorldState.h, shared by the world's .cpp files and CharacterController).
 		struct State;

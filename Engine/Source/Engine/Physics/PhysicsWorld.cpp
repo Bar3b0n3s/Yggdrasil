@@ -318,7 +318,9 @@ namespace Engine {
 		if (m_State->System == nullptr)
 			return;
 
-		// Every joint first (M37: a constraint holds raw pointers to its bodies), then every body still in the world.
+		// Every vehicle and joint first (M44, M37: each constraint holds raw pointers to its bodies), then every body still in
+		// the world.
+		m_State->DestroyAllVehicles();
 		m_State->DestroyAllJoints();
 		JPH::BodyIDVector bodies;
 		m_State->System->GetBodies(bodies);
@@ -537,7 +539,8 @@ namespace Engine {
 		if (!live.has_value())
 			return;
 
-		// M37: its joints first, so no constraint is left with a pointer to the destroyed body.
+		// M44 and M37: its vehicle and its joints first, so no constraint is left with a pointer to the destroyed body.
+		state.DestroyVehiclesOf(live->ID);
 		state.DestroyJointsOf(live->ID);
 		JPH::BodyInterface& bodyInterface = state.System->GetBodyInterface();
 		const JPH::AABox bounds = bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds();

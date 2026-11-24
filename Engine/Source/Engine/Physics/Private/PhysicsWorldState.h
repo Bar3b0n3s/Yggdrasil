@@ -16,13 +16,17 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Constraints/TwoBodyConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
+#include <Jolt/Physics/Vehicle/VehicleConstraint.h>
+#include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
 
 #include <cstdint>
 #include <map>
 #include <vector>
 
 // The Jolt side of PhysicsWorld and PhysicsShape (Architecture §9.1), shared by the Physics module's .cpp files: the world
-// (PhysicsWorld.cpp), its queries (PhysicsWorldQueries.cpp) and CharacterController, which needs the world's
+// (PhysicsWorld.cpp), its queries (PhysicsWorldQueries.cpp), joints (PhysicsWorldJoints.cpp), vehicles
+// (PhysicsWorldVehicles.cpp) and CharacterController, which needs the world's
 // JPH::PhysicsSystem and temporary allocator. Private to the Physics module (§3 rule 3: Jolt types never reach a public
 // header), so it changes without the contract owner's review (Docs/Decisions/0014-m11-decisions.md decision 17).
 
@@ -53,6 +57,18 @@ namespace Engine {
 			// Invalid for the world.
 			JPH::BodyID ConnectedBody{};
 			PhysicsJointSettings Settings{};
+		};
+
+		// One live vehicle of a PhysicsWorld (M44, PhysicsWorldVehicles.cpp). The world owns Jolt's reference-counted objects,
+		// each embedded so the system's references never delete it. Members are destroyed in reverse order: the constraint
+		// first (the world removed it from the system and its step listeners), then the tester it referenced, then the wheel
+		// settings its wheels referenced.
+		struct PhysicsVehicleRecord
+		{
+			std::vector<Scope<JPH::WheelSettingsWV>> Wheels{};
+			Scope<JPH::VehicleCollisionTester> Tester{};
+			Scope<JPH::VehicleConstraint> Constraint{};
+			JPH::BodyID Body{};
 		};
 
 	}
@@ -90,6 +106,11 @@ namespace Engine {
 		Detail::PhysicsJointedPairs JointedPairs{};
 		Detail::PhysicsJointedPairFilter JointedPairFilter{ JointedPairs };
 		float CollisionStepDelta = 0.0f;
+		// --- Vehicles (M44, PhysicsWorldVehicles.cpp) ------------------------------------------------------------------
+		// The live vehicles by VehicleHandle value (ordered, so every walk over them is in creation order) and the next handle
+		// value. Destroyed with the state, after the world's destructor removed them from the system.
+		std::map<uint32_t, Detail::PhysicsVehicleRecord> Vehicles{};
+		uint32_t NextVehicle = 1;
 		// A TempAllocatorImpl of Specification.Limits.TempAllocatorBytes (§9.1, 16 MB by default) that falls back to the heap
 		// when a step needs more, so no content can exhaust it (JPH::TempAllocatorImpl aborts the process when it is full).
 		Scope<JPH::TempAllocator> TempAllocator;
@@ -110,6 +131,14 @@ namespace Engine {
 		void NotifyJointsShapeChanged(const JPH::BodyID& body, JPH::Vec3Arg deltaCenterOfMass);
 		// Removes every joint from the system without waking anything (the world's destructor, before its bodies).
 		void DestroyAllJoints();
+
+		// --- Vehicles (M44; defined in PhysicsWorldVehicles.cpp) ---------------------------------------------------------
+		// Removes a vehicle's step listener and constraint from the system (its record is erased by the caller).
+		void RemoveVehicle(Detail::PhysicsVehicleRecord& record);
+		// Destroys the vehicle of `body` (DestroyBody calls it before the body's joints and the body), waking nothing.
+		void DestroyVehiclesOf(const JPH::BodyID& body);
+		// Removes every vehicle from the system without waking anything (the world's destructor, before its joints).
+		void DestroyAllVehicles();
 	};
 
 }

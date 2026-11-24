@@ -89,6 +89,13 @@ namespace Engine {
 		// body without a record). Callable while Jolt holds the body locked (it only reads the body's shape and the records).
 		[[nodiscard]] uint32_t ResolvePhysicsCollider(const std::vector<PhysicsBodyRecord>& bodies, const JPH::Body& body, const JPH::SubShapeID& subShape);
 
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the friction of the ground a vehicle's wheel stands on, its
+		// body `body` and sub-shape `subShape`: the surface friction of the collider there (ResolvePhysicsCollider, then
+		// FindColliderSurface), else the body's own friction (a terrain's implicit static body has its TerrainCollider's). The one
+		// resolver of a wheel's ground, which a terrain layer's surface joins with M54. Callable from a vehicle's step listener
+		// while Jolt holds the body locked (it only reads the body, its shape and the records, written only between steps).
+		[[nodiscard]] float ResolveGroundFriction(const std::vector<PhysicsBodyRecord>& bodies, const JPH::Body& body, const JPH::SubShapeID& subShape);
+
 		// The key of a sub-shape contact: (body pair, sub-shape pair), each packed with the lower body ID's half first, so a
 		// contact has one key whichever order Jolt reports its bodies in. Pure; any thread.
 		[[nodiscard]] std::pair<uint64_t, uint64_t> MakePhysicsContactKey(const JPH::BodyID& body1, const JPH::SubShapeID& subShape1,

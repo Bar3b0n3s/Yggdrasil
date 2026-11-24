@@ -38,6 +38,17 @@ namespace Engine {
 			return ResolveColliderIndex(*body.GetShape(), subShape, record != nullptr ? record->Collider : 0);
 		}
 
+		float ResolveGroundFriction(const std::vector<PhysicsBodyRecord>& bodies, const JPH::Body& body, const JPH::SubShapeID& subShape)
+		{
+			const PhysicsBodyRecord* record = FindPhysicsBodyRecord(bodies, body.GetID());
+			if (record != nullptr && !record->Surfaces.empty())
+			{
+				if (const PhysicsColliderSurface* surface = FindColliderSurface(*record, ResolvePhysicsCollider(bodies, body, subShape)))
+					return surface->Friction;
+			}
+			return body.GetFriction();
+		}
+
 		const PhysicsBodyRecord* FindPhysicsBodyRecord(const std::vector<PhysicsBodyRecord>& bodies, const JPH::BodyID& body)
 		{
 			const uint32_t slot = body.GetIndex();
