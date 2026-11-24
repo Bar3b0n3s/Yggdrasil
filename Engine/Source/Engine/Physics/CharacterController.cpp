@@ -71,13 +71,15 @@
 // decision on the W36.2 review, ADR 0053), so a belt whose velocity leaves its surface neither lifts a character nor
 // presses it in. Without a surface the update computes exactly what it did before M36.
 //
-// The squeeze (M36 W36.2, ADR 0053 decision 12). After the update, the contacts of its last pass (GetActiveContacts) name the
-// bodies that push the character: not sensors or discarded, able to push it (CharacterContactSettings::mCanPushCharacter,
-// which the recorder turns off for a light Dynamic body), not Static, and moving towards it (the contact point's velocity
-// along the contact's normal, which points at the character) faster than MinPushSpeed. Their contacts' distances are those
-// of the pass's start, so the controller measures them again where the update left the character: one CheckCollision of the
-// character's capsule against those bodies alone. A body whose push over the step (its speed times the step) would end more
-// than CharacterSqueezeTolerance inside the padded capsule squeezes it; the update could not keep the character ahead of it.
+// The squeeze (M36 W36.2, ADR 0053 decision 12). After the update, the contacts of its last pass (GetActiveContacts)
+// name the bodies that push the character: not sensors or discarded, able to push it
+// (CharacterContactSettings::mCanPushCharacter), not a Dynamic body lighter than the character (whose walkable surface
+// under the character keeps mCanPushCharacter on since M48: a support, not a push, which FindSqueeze leaves out
+// itself), not Static, and moving towards it (the contact point's velocity along the contact's normal, which points at
+// the character) faster than MinPushSpeed. Their contacts' distances are those of the pass's start, so the controller
+// measures them again where the update left the character: one CheckCollision of the character's capsule against those
+// bodies alone. A body whose push over the step (its speed times the step) would end more than
+// CharacterSqueezeTolerance inside the padded capsule squeezes it; the update could not keep the character ahead of it.
 //
 // Free moves (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3). An update in
 // CharacterMoveMode::Free that is not grounded sets the step's velocity to the desired one whole, with no gravity, and
