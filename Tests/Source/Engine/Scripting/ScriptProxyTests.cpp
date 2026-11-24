@@ -256,6 +256,11 @@ return true
 				{ "Terrain.SampleNormal", "assert(holders.Terrain.Terrain:SampleNormal(vector.zero) == nil)" },
 				// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): the fixture has no game UI, so no presentation text.
 				{ "UiText.GetPresentationText", "assert(holders.UiText.UiText:GetPresentationText() == nil)" },
+				// M47 (Docs/Decisions/0065-m47-water.md decision 3): the calm default Ocean's own surface at time 0.
+				{ "Water.SampleHeight", "assert(holders.Water.Water:SampleHeight(vector.zero) ~= nil)" },
+				{ "Water.SampleNormal", "assert(holders.Water.Water:SampleNormal(vector.zero) == vector.create(0, 1, 0))" },
+				{ "Water.SampleVelocity", "assert(holders.Water.Water:SampleVelocity(vector.zero) == vector.zero)" },
+				{ "Water.IsUnderwater", "assert(holders.Water.Water:IsUnderwater(vector.create(0, -1000000, 0)))" },
 			};
 			const std::set<std::string_view> identityReads = { "Entity.ID", "Entity.IsValid", "Entity.__eq" };
 			// Reads of a system's state of the entity, which is leaving with it (decision 4, "Unchanged").

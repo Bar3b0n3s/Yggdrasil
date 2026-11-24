@@ -382,6 +382,17 @@ namespace Engine {
 		UUID SqueezedBy{};
 	};
 
+	// M47 (Docs/Decisions/0065-m47-water.md decision 3; physics.bodyInfo's buoyancy): what the last PreStep's buoyancy item
+	// (4c) found for a body whose owner holds a Buoyancy: the water its planes came from (the Buoyancy's Water when set, else
+	// the water that held the most of the body's submerged volume; the null UUID when nothing was submerged) and the body's
+	// submerged and total volumes (m^3; 0 before the first tick it was applied, and while it is skipped).
+	struct PhysicsBuoyancyReport
+	{
+		UUID Water{};
+		float SubmergedVolume = 0.0f;
+		float TotalVolume = 0.0f;
+	};
+
 	// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5; §11.5 Physics.GetSurface's SurfaceInfo): what contacts
 	// with a collider use.
 	struct PhysicsSurfaceInfo
@@ -423,6 +434,8 @@ namespace Engine {
 		std::vector<PhysicsContactInfo> Contacts{};
 		// Characters only.
 		std::optional<PhysicsCharacterState> Character{};
+		// M47 (decision 3): bodies whose owner holds a Buoyancy only (empty otherwise); filled by W47.2's physics stream.
+		std::optional<PhysicsBuoyancyReport> Buoyancy{};
 	};
 
 	struct PhysicsSystemStats

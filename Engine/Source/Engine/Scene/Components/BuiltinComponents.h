@@ -8,6 +8,7 @@
 #include "Engine/Scene/Components/BoneAttachmentComponent.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/BuoyancyComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
@@ -66,6 +67,7 @@
 #include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 
 namespace Engine {
 
@@ -126,7 +128,11 @@ namespace Engine {
 		NavigationComponent, NavModifierComponent,
 		// Joints (Registration/JointsRegistration.cpp; M37, Docs/Decisions/0054-m37-joints.md decision 1). ADR 0052's phase-6
 		// ledger: a sixteenth category after Navigation, in landing order.
-		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent>;
+		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent,
+		// Water (Registration/WaterRegistration.cpp; M47, Docs/Decisions/0065-m47-water.md decision 3). Phase 8's ledger
+		// (Docs/Decisions/0060-skerries-engine-program.md): the twentieth category, after M44's Vehicles and M46's
+		// RenderDistance and Wind, in the train order.
+		WaterComponent, BuoyancyComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -156,8 +162,10 @@ namespace Engine {
 	void RegisterNavigationComponents(TypeRegistry& registry);
 	// M37 (Docs/Decisions/0054-m37-joints.md decision 1), after Navigation, in ADR 0052's phase-6 ledger's landing order.
 	void RegisterJointsComponents(TypeRegistry& registry);
+	// M47 (Docs/Decisions/0065-m47-water.md decision 3), last, in phase 8's ledger's train order.
+	void RegisterWaterComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the sixteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

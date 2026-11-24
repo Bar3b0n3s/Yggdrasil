@@ -51,6 +51,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scene/TerrainValidation.h"
+#include "Engine/Scene/WaterValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/AutomationTestClient.h"
@@ -1382,10 +1383,10 @@ end
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
 			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
-			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes).
+			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes), and phase 8's (M47's WaterDiagnosticCodes).
 			CHECK(codes.size()
 				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
-					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size());
+					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size() + WaterDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1446,12 +1447,16 @@ end
 			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36. Phase 7's follow (ADR 0058's
 			// ledger): M41's ANIMATION_ATTACHMENT_INVALID (Docs/Decisions/0058-m41-bone-attachments.md decision 3), then M42's
 			// RENDER_REFLECTION_INVALID (Docs/Decisions/0059-m42-planar-reflections.md, its ledger's validation row), which lands after
-			// M41 and ends the list.
+			// M41. Phase 8's follow (its ledger, in train order): M47's WATER_INVALID, WATER_WAVES_TOO_STEEP and
+			// PHYSICS_BUOYANCY_INVALID (Docs/Decisions/0065-m47-water.md decision 3), which end the list.
 			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
 			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
 			CHECK(position(AnimationAttachmentInvalidCode) + 1 == position(RenderReflectionInvalidCode));
-			CHECK(codes.back() == RenderReflectionInvalidCode);
+			CHECK(position(RenderReflectionInvalidCode) + 1 == position(WaterInvalidCode));
+			CHECK(position(WaterInvalidCode) + 1 == position(WaterWavesTooSteepCode));
+			CHECK(position(WaterWavesTooSteepCode) + 1 == position(PhysicsBuoyancyInvalidCode));
+			CHECK(codes.back() == PhysicsBuoyancyInvalidCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

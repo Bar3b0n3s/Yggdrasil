@@ -854,6 +854,14 @@ All hits sorted by distance then collider UUID.
 
 All modes; Runtime|Test; pure/read.
 
+### Physics.SampleWater
+
+`(position: vector, time: number?) -> WaterSample?`
+
+The surface of the water that holds the world point position at time seconds of world time (default Time.GetTime()): the Rectangle whose volume holds it with the highest surface there, else the scene's Ocean; nil where no water does. Inside a Rectangle's volume the Ocean is masked, so a cave above its lake is dry.
+
+All modes; Runtime|Test; pure/read.
+
 ### Physics.SetGravity
 
 `(gravity: vector) -> ()`
@@ -2228,6 +2236,42 @@ The rectangle's centre relative to the entity, in its XY plane.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## Buoyancy
+
+Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag.
+
+### Buoyancy.AngularDrag
+
+`number`
+
+The water's drag on the body's turning (Jolt's angular drag coefficient).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Buoyancy.BuoyancyScale
+
+`number`
+
+Multiplies the buoyant force: 1 is physical, 0 none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Buoyancy.LinearDrag
+
+`number`
+
+The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Buoyancy.Water
+
+`Entity?`
+
+The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## Camera
 
 Renders the scene from the entity, looking down its local -Z axis.
@@ -2856,6 +2900,14 @@ The entity's BoxCollider2D component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.Buoyancy
+
+`Buoyancy?`
+
+The entity's Buoyancy component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.Camera
 
 `Camera?`
@@ -2962,7 +3014,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?) & ((self: Entity, name: "Water") -> Water?) & ((self: Entity, name: "Buoyancy") -> Buoyancy?)`
 
 Get a component proxy, or nil when absent.
 
@@ -3405,6 +3457,14 @@ All modes; Runtime|Test; pure/read.
 `UiToggle?`
 
 The entity's UiToggle component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.Water
+
+`Water?`
+
+The entity's Water component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -6960,6 +7020,218 @@ Whether the toggle is on.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## Water
+
+A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike.
+
+### Water.Clarity
+
+`number`
+
+The metres of water column over which the bottom fades toward DeepColor.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Current
+
+`vector`
+
+The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.DeepColor
+
+`Color`
+
+The linear colour deep water absorbs toward.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Density
+
+`number`
+
+The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Depth
+
+`number`
+
+How far a Rectangle's volume reaches below its base, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.DetailDrift
+
+`vector`
+
+How fast the detail normals drift along the water's local X and Z axes, in metres per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.DetailNormalStrength
+
+`number`
+
+How strongly the small-scale detail normals ripple the surface.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.DetailScale
+
+`number`
+
+The metres one repeat of the detail normal map covers.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.FoamAmount
+
+`number`
+
+How much foam the crests and the shallows show: 0 none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.FoamTexture
+
+`AssetRef?`
+
+The foam's texture; null takes the built-in WaterFoam.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Headroom
+
+`number`
+
+How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.IsUnderwater
+
+`(self: Water, position: vector, time: number?) -> boolean`
+
+Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside.
+
+All modes; Runtime|Test; pure/read.
+
+### Water.NormalMap
+
+`AssetRef?`
+
+The detail normal map; null takes the built-in WaterNormal.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.RefractionStrength
+
+`number`
+
+How far the waves bend the view of what lies under the surface.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Roughness
+
+`number`
+
+The surface's perceptual roughness: low is a sharp sun glint and clear reflections.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.SampleHeight
+
+`(self: Water, position: vector, time: number?) -> number?`
+
+Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint.
+
+All modes; Runtime|Test; pure/read.
+
+### Water.SampleNormal
+
+`(self: Water, position: vector, time: number?) -> vector?`
+
+Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Water.SampleVelocity
+
+`(self: Water, position: vector, time: number?) -> vector?`
+
+Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Water.ShallowColor
+
+`Color`
+
+The linear colour of shallow water, over the bottom it shows.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Shape
+
+`WaterShape`
+
+Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.ShoreFoamDepth
+
+`number`
+
+The water column, in metres, under which foam gathers where the surface meets the ground or an object.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Size
+
+`vector`
+
+A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.UnderwaterColor
+
+`Color`
+
+The linear colour of the fog a camera under the surface sees.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.UnderwaterVisibility
+
+`number`
+
+How far a camera under the surface sees, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.WaveScale
+
+`number`
+
+Multiplies every wave's amplitude: 0 is calm, above 1 a storm.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Water.Waves
+
+`{{Direction: number, Wavelength: number, Amplitude: number, Steepness: number, Speed: number, Phase: number}}`
+
+At most eight Gerstner waves summed over the base; empty is a calm surface.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## AlphaMode
 
 How a material's base colour alpha is used (the glTF 2.0 alpha modes).
@@ -8310,6 +8582,14 @@ Which view viewport.screenshot renders.
 
 - `Game`: The target scene through its primary camera: what the game shows.
 
+## WaterShape (enum)
+
+What a Water covers.
+
+- `Ocean`: An unbounded sea: all of X and Z and everything below its surface; one a scene.
+
+- `Rectangle`: A bounded water (a pool, a canal, a cave lake): Size along the entity's local X and Z centred on it, from Depth below its base to Headroom above it.
+
 ## WorldPauseSounds
 
 What a world pause does to the world's playing voices, those of every group but Music and Ui (today the Sfx group's); the Music and Ui groups' play on either way.
@@ -8443,3 +8723,9 @@ Default positive tick timeout for cases in a suite.
 `{Min: vector, Max: vector, Canvas: Entity}`
 
 A UI element's laid-out rectangle: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down, in scene pixels for an element of a Screen canvas and in its canvas's own pixels for one of a World canvas, and the canvas it belongs to (Canvas).
+
+## WaterSample
+
+`{Water: Entity, Height: number, Normal: vector, Velocity: vector, Depth: number}`
+
+The surface of the water that holds a point: the Water's entity, the surface's world height, unit normal and velocity (with the current) under the point, and Depth, the height minus the point's y: positive under water.

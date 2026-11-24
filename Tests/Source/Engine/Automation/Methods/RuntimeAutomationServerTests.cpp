@@ -629,7 +629,7 @@ namespace Engine {
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
 					 "play.setTimeScale", "play.setWorldPaused", "input.inject", "viewport.screenshot", "physics.bodyInfo", "physics.jointInfo", "audio.stats", "stats.get",
 					 "script.eval", "script.errors", "play.waitFor", "input.record", "input.replay", "physics2d.raycast", "physics2d.overlap", "physics2d.bodyInfo",
-					 "ui.tree" })
+					 "ui.tree", "water.sample" })
 			{
 				INFO(std::string(name));
 				const MethodDescriptor* method = methods.Find(name);

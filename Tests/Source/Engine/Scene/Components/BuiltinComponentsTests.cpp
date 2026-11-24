@@ -3,6 +3,7 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/DisabledTag.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
@@ -40,8 +41,9 @@ namespace Engine {
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
 			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, M37's four joints (Docs/Decisions/0054-m37-joints.md
 			// decision 1) 62, M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63, and M42's
-			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64.
-			static_assert(BuiltinComponents::Size == 64);
+			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64, and M47's Water and Buoyancy
+			// (Docs/Decisions/0065-m47-water.md decision 3) 66.
+			static_assert(BuiltinComponents::Size == 66);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -595,6 +597,73 @@ namespace Engine {
 			CHECK(parameters.Opacity == 1.0f);
 		}
 
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): an Ocean with a calm surface of the decision's look, and a physical
+		// Buoyancy that takes the water holding each collider.
+		TEST_CASE("BuiltinComponents: water defaults follow the component table")
+		{
+			const WaterComponent water;
+			CHECK(water.Shape == WaterShape::Ocean);
+			CHECK(water.Size == glm::vec2(20.0f));
+			CHECK(water.Depth == 5.0f);
+			CHECK(water.Headroom == 10.0f);
+			CHECK(water.Waves.empty());
+			CHECK(water.WaveScale == 1.0f);
+			CHECK(water.Current == glm::vec2(0.0f));
+			CHECK(water.Density == 1000.0f);
+			CHECK(water.ShallowColor == glm::vec3(0.10f, 0.55f, 0.50f));
+			CHECK(water.DeepColor == glm::vec3(0.01f, 0.07f, 0.12f));
+			CHECK(water.Clarity == 4.0f);
+			CHECK(water.Roughness == 0.05f);
+			CHECK(water.RefractionStrength == 0.3f);
+			CHECK(water.FoamAmount == 0.5f);
+			CHECK(water.ShoreFoamDepth == 0.5f);
+			CHECK(water.DetailNormalStrength == 0.5f);
+			CHECK(water.DetailScale == 4.0f);
+			CHECK(water.DetailDrift == glm::vec2(2.0f, 1.0f));
+			CHECK(water.UnderwaterColor == glm::vec3(0.02f, 0.10f, 0.12f));
+			CHECK(water.UnderwaterVisibility == 15.0f);
+			CHECK_FALSE(water.NormalMap.IsValid());
+			CHECK_FALSE(water.FoamTexture.IsValid());
+			const WaterWave wave;
+			CHECK(wave.Direction == 0.0f);
+			CHECK(wave.Wavelength == 20.0f);
+			CHECK(wave.Amplitude == 0.2f);
+			CHECK(wave.Steepness == 0.5f);
+			CHECK(wave.Speed == 0.0f);
+			CHECK(wave.Phase == 0.0f);
+			const BuoyancyComponent buoyancy;
+			CHECK_FALSE(buoyancy.Water.IsValid());
+			CHECK(buoyancy.BuoyancyScale == 1.0f);
+			CHECK(buoyancy.LinearDrag == 0.5f);
+			CHECK(buoyancy.AngularDrag == 0.05f);
+		}
+
+		// M47 (decision 3): Waves holds at most MaxWaterWaves waves, refused past it on every write path (the component's Validate
+		// rule) and cut to it when generated; Buoyancy requires a RigidBody.
+		TEST_CASE("BuiltinComponents: a Water holds at most eight waves and a Buoyancy requires a RigidBody")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo* water = registry->FindComponent<WaterComponent>();
+			REQUIRE(water != nullptr);
+			CHECK(water->GetCategory() == "Water");
+			WaterComponent component;
+			component.Waves.resize(MaxWaterWaves);
+			ResolveContext resolve;
+			resolve.Registry = registry.get();
+			ValidationContext full;
+			water->Validate(&component, resolve, full);
+			CHECK_FALSE(full.HasErrors());
+			component.Waves.resize(MaxWaterWaves + 1);
+			ValidationContext over;
+			water->Validate(&component, resolve, over);
+			CHECK(over.HasErrors());
+			const ComponentInfo* buoyancy = registry->FindComponent<BuoyancyComponent>();
+			REQUIRE(buoyancy != nullptr);
+			const std::span<const ComponentInfo* const> required = buoyancy->GetRequires();
+			REQUIRE(required.size() == 1);
+			CHECK(required[0]->GetName() == "RigidBody");
+		}
+
 		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 1): every default reproduces the look of an emitter without one.
 		TEST_CASE("BuiltinComponents: a ParticleLook's defaults follow the component table and change nothing")
 		{
@@ -736,6 +805,9 @@ namespace Engine {
 				"SliderJoint",
 				"DistanceJoint",
 				"FixedJoint",
+				// M47 (Docs/Decisions/0065-m47-water.md decision 3): phase 8's ledger's Water category, last.
+				"Water",
+				"Buoyancy",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -747,7 +819,7 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints", "Water" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,

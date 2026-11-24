@@ -150,6 +150,9 @@ namespace Engine {
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the HingeJoint, SliderJoint, DistanceJoint and FixedJoint proxies'
 		// methods.
 		[[nodiscard]] Status RegisterJoints(ScriptApiRegistry& api);
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water proxy's methods, Physics.SampleWater (reopening the Physics
+		// module) and the WaterSample alias.
+		[[nodiscard]] Status RegisterWater(ScriptApiRegistry& api);
 
 	}
 

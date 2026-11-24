@@ -315,6 +315,8 @@ namespace Engine {
 			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): one bounce, as the probes' term is off: a mirror bakes
 			// as the surface its material draws without the component.
 			snapshot.PlanarReflections.clear();
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): the sea is out of the bakes, as the fog is.
+			snapshot.Waters.clear();
 			return snapshot;
 		}
 

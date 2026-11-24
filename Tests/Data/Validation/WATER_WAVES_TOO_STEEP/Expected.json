@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["WATER_WAVES_TOO_STEEP"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

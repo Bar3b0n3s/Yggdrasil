@@ -269,6 +269,9 @@ export type ValidationScope = "Project" | "Scene"
 -- Which view viewport.screenshot renders.
 export type ViewportView = "Scene" | "Game"
 
+-- What a Water covers.
+export type WaterShape = "Ocean" | "Rectangle"
+
 -- What a world pause does to the world's playing voices, those of every group but Music and Ui (today the Sfx group's); the Music and Ui groups' play on either way.
 export type WorldPauseSounds = "Pause" | "Finish"
 
@@ -334,6 +337,9 @@ export type TestSuiteOptions = {CaseTimeoutTicks: number?}
 
 -- A UI element's laid-out rectangle: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down, in scene pixels for an element of a Screen canvas and in its canvas's own pixels for one of a World canvas, and the canvas it belongs to (Canvas).
 export type UiElementRect = {Min: vector, Max: vector, Canvas: Entity}
+
+-- The surface of the water that holds a point: the Water's entity, the surface's world height, unit normal and velocity (with the current) under the point, and Depth, the height minus the point's y: positive under water.
+export type WaterSample = {Water: Entity, Height: number, Normal: vector, Velocity: vector, Depth: number}
 
 -- Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
 declare extern type Animator with
@@ -497,6 +503,18 @@ declare extern type BoxCollider2D with
 	IsTrigger: boolean
 	-- The rectangle's centre relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
 	Offset: vector
+end
+
+-- Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag.
+declare extern type Buoyancy with
+	-- The water's drag on the body's turning (Jolt's angular drag coefficient). [All modes; Runtime|Test; pure/read; setter mutates]
+	AngularDrag: number
+	-- Multiplies the buoyant force: 1 is physical, 0 none. [All modes; Runtime|Test; pure/read; setter mutates]
+	BuoyancyScale: number
+	-- The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). [All modes; Runtime|Test; pure/read; setter mutates]
+	LinearDrag: number
+	-- The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre. [All modes; Runtime|Test; pure/read; setter mutates]
+	Water: Entity?
 end
 
 -- Renders the scene from the entity, looking down its local -Z axis.
@@ -684,6 +702,8 @@ declare extern type Entity with
 	BoxCollider: BoxCollider?
 	-- The entity's BoxCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	BoxCollider2D: BoxCollider2D?
+	-- The entity's Buoyancy component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Buoyancy: Buoyancy?
 	-- The entity's Camera component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Camera: Camera?
 	-- The entity's CapsuleCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -767,6 +787,8 @@ declare extern type Entity with
 	function GetComponent(self, name: "SliderJoint"): SliderJoint?
 	function GetComponent(self, name: "DistanceJoint"): DistanceJoint?
 	function GetComponent(self, name: "FixedJoint"): FixedJoint?
+	function GetComponent(self, name: "Water"): Water?
+	function GetComponent(self, name: "Buoyancy"): Buoyancy?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -877,6 +899,8 @@ declare extern type Entity with
 	UiTextInput: UiTextInput?
 	-- The entity's UiToggle component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiToggle: UiToggle?
+	-- The entity's Water component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Water: Water?
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
 	__eq: (self: Entity, other: Entity) -> boolean
 end
@@ -1913,6 +1937,62 @@ declare extern type UiToggle with
 	IsOn: boolean
 end
 
+-- A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike.
+declare extern type Water with
+	-- The metres of water column over which the bottom fades toward DeepColor. [All modes; Runtime|Test; pure/read; setter mutates]
+	Clarity: number
+	-- The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave. [All modes; Runtime|Test; pure/read; setter mutates]
+	Current: vector
+	-- The linear colour deep water absorbs toward. [All modes; Runtime|Test; pure/read; setter mutates]
+	DeepColor: Color
+	-- The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre. [All modes; Runtime|Test; pure/read; setter mutates]
+	Density: number
+	-- How far a Rectangle's volume reaches below its base, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	Depth: number
+	-- How fast the detail normals drift along the water's local X and Z axes, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	DetailDrift: vector
+	-- How strongly the small-scale detail normals ripple the surface. [All modes; Runtime|Test; pure/read; setter mutates]
+	DetailNormalStrength: number
+	-- The metres one repeat of the detail normal map covers. [All modes; Runtime|Test; pure/read; setter mutates]
+	DetailScale: number
+	-- How much foam the crests and the shallows show: 0 none. [All modes; Runtime|Test; pure/read; setter mutates]
+	FoamAmount: number
+	-- The foam's texture; null takes the built-in WaterFoam. [All modes; Runtime|Test; pure/read; setter mutates]
+	FoamTexture: AssetRef?
+	-- How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. [All modes; Runtime|Test; pure/read; setter mutates]
+	Headroom: number
+	-- Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. [All modes; Runtime|Test; pure/read]
+	IsUnderwater: (self: Water, position: vector, time: number?) -> boolean
+	-- The detail normal map; null takes the built-in WaterNormal. [All modes; Runtime|Test; pure/read; setter mutates]
+	NormalMap: AssetRef?
+	-- How far the waves bend the view of what lies under the surface. [All modes; Runtime|Test; pure/read; setter mutates]
+	RefractionStrength: number
+	-- The surface's perceptual roughness: low is a sharp sun glint and clear reflections. [All modes; Runtime|Test; pure/read; setter mutates]
+	Roughness: number
+	-- Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. [All modes; Runtime|Test; pure/read]
+	SampleHeight: (self: Water, position: vector, time: number?) -> number?
+	-- Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. [All modes; Runtime|Test; pure/read]
+	SampleNormal: (self: Water, position: vector, time: number?) -> vector?
+	-- Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. [All modes; Runtime|Test; pure/read]
+	SampleVelocity: (self: Water, position: vector, time: number?) -> vector?
+	-- The linear colour of shallow water, over the bottom it shows. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShallowColor: Color
+	-- Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). [All modes; Runtime|Test; pure/read; setter mutates]
+	Shape: WaterShape
+	-- The water column, in metres, under which foam gathers where the surface meets the ground or an object. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShoreFoamDepth: number
+	-- A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: vector
+	-- The linear colour of the fog a camera under the surface sees. [All modes; Runtime|Test; pure/read; setter mutates]
+	UnderwaterColor: Color
+	-- How far a camera under the surface sees, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	UnderwaterVisibility: number
+	-- Multiplies every wave's amplitude: 0 is calm, above 1 a storm. [All modes; Runtime|Test; pure/read; setter mutates]
+	WaveScale: number
+	-- At most eight Gerstner waves summed over the base; empty is a calm surface. [All modes; Runtime|Test; pure/read; setter mutates]
+	Waves: {{Direction: number, Wavelength: number, Amplitude: number, Steepness: number, Speed: number, Phase: number}}
+end
+
 -- Application identity, window state and deferred quit requests.
 declare Application: {
 	-- Returns the video modes of the monitor the game's window is on, sorted by width, height and refresh rate: the resolutions Exclusive mode takes. Empty where display settings do nothing: the editor, headless runs, test runs, replays, recordings and lockstep sessions, and on Linux and macOS. [All modes; Runtime|Test; pure/read]
@@ -2151,6 +2231,8 @@ declare Physics: {
 	Raycast: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?,
 	-- All hits sorted by distance then collider UUID. [All modes; Runtime|Test; pure/read]
 	RaycastAll: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> {RaycastHit},
+	-- The surface of the water that holds the world point position at time seconds of world time (default Time.GetTime()): the Rectangle whose volume holds it with the highest surface there, else the scene's Ocean; nil where no water does. Inside a Rectangle's volume the Ocean is masked, so a cave above its lake is dry. [All modes; Runtime|Test; pure/read]
+	SampleWater: (position: vector, time: number?) -> WaterSample?,
 	-- Set finite gravity within physics bounds for the session. [All modes; Runtime|Test; mutates]
 	SetGravity: (gravity: vector) -> (),
 	-- Closest swept sphere hit; radius obeys collider size bounds. [All modes; Runtime|Test; pure/read]

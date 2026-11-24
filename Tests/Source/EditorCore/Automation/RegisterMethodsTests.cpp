@@ -30,7 +30,8 @@ namespace Engine {
 	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), M35's play.setWorldPaused
 	// (Docs/Decisions/0050-m35-pause-entity-state.md decision 5), M28's savedata.get, savedata.set and savedata.clear
 	// (Docs/Decisions/0043-m28-game-services.md decision 8), M30's navigation.bake (Docs/Decisions/0045-m30-navigation.md
-	// decision 8) and M37's physics.jointInfo (Docs/Decisions/0054-m37-joints.md decision 10), test hooks excluded.
+	// decision 8), M37's physics.jointInfo (Docs/Decisions/0054-m37-joints.md decision 10) and M47's water.sample
+	// (Docs/Decisions/0065-m47-water.md decision 3), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -48,7 +49,8 @@ namespace Engine {
 			"scene.activate", "scene.close", "scene.diff", "scene.get",
 			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
 			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "terrain.edit", "terrain.importHeightmap", "test.list", "test.run",
-			"tilemap.paint", "ui.createWidget", "ui.tree", "viewport.camera", "viewport.frame", "viewport.pick", "viewport.screenshot", "viewport.setOptions" };
+			"tilemap.paint", "ui.createWidget", "ui.tree", "viewport.camera", "viewport.frame", "viewport.pick", "viewport.screenshot", "viewport.setOptions",
+			"water.sample" };
 		return ExpectedNames;
 	}
 
@@ -147,7 +149,7 @@ namespace Engine {
 				"native.write", "physics.bodyInfo", "physics.jointInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
-				"session.info", "stats.get", "tilemap.paint", "ui.createWidget", "ui.tree", "viewport.pick" };
+				"session.info", "stats.get", "tilemap.paint", "ui.createWidget", "ui.tree", "viewport.pick", "water.sample" };
 			for (const MethodDescriptor* method : methods.GetMethods())
 			{
 				const MethodSpecification& specification = method->Specification;

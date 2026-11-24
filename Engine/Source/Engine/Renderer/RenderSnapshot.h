@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory_resource>
 #include <optional>
@@ -47,8 +48,9 @@
 // enum replaces FxaaEnabled (decision 12). M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 4 and 12; ADR 0042's phase-5
 // ledger) added the fog (RenderFog, Fog) after the terrains and the half-resolution SSR trace to the quality settings after
 // SsaoHalfResolution. M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) added the planar
-// reflections (PlanarReflectionItem, PlanarReflections) after the fog. Additions are frozen-header changes reviewed by their
-// contract owner; no member here changes meaning.
+// reflections (PlanarReflectionItem, PlanarReflections) after the fog. M47's contract (C47, Docs/Decisions/0065-m47-water.md
+// decisions 2 and 3; phase 8's ledger) added the waters (MaxWaterWaves, RenderWaterShape, WaterWaveItem, WaterItem, Waters)
+// last. Additions are frozen-header changes reviewed by their contract owner; no member here changes meaning.
 // A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
@@ -58,8 +60,8 @@
 // allocates from std::pmr::get_default_resource(), the global heap unless a host changed it. Assignment keeps the target's
 // resource. SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh
 // item's Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list, a terrain item's Layers)
-// keep the default allocator; M26's ParticleEmitters, Particles, IrradianceVolumes, ReflectionProbes and Terrains and M42's
-// PlanarReflections are the snapshot's own containers and follow the rule.
+// keep the default allocator; M26's ParticleEmitters, Particles, IrradianceVolumes, ReflectionProbes and Terrains, M42's
+// PlanarReflections and M47's Waters are the snapshot's own containers and follow the rule.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
@@ -795,6 +797,73 @@ namespace Engine {
 		UUID Entity{};
 	};
 
+	// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M46's RenderWind): the most waves a water sums,
+	// the Water component's bound (Scene/Components/WaterComponent.h) and the wave function's (Physics/WaterWaves.h:
+	// MaxWaterSurfaceWaves, which equals it), here so that Scene and Renderer share it.
+	inline constexpr uint32_t MaxWaterWaves = 8;
+
+	// What a WaterItem covers (the WaterShape of Scene/Components/WaterComponent.h).
+	enum class RenderWaterShape : uint8_t
+	{
+		Ocean,    // unbounded in X and Z, the scene's one Ocean
+		Rectangle // Size along local X and Z centred on World's origin, from Depth below the base to Headroom above it
+	};
+
+	// One wave of a WaterItem, resolved by Physics/WaterWaves.h's ResolveWaterSurface: its world unit direction (x, z), wave
+	// number k (rad/m), amplitude (m, the water's WaveScale applied), steepness Q (scaled by the fold limit) and phase at the
+	// view's time (radians in [0, 2 pi): ComputeWaterWavePhases at RenderExtractionRequest::SimulationTime). A particle at rest
+	// at world (x, z) = x0 is displaced to x0 + Q A D cos(th) horizontally and A sin(th) above the base, with
+	// th = k dot(D, x0 - origin) + Phase, origin the XZ of World's translation.
+	struct WaterWaveItem
+	{
+		glm::vec2 Direction = glm::vec2(1.0f, 0.0f);
+		float WaveNumber = 0.0f;
+		float Amplitude = 0.0f;
+		float Steepness = 0.0f;
+		float Phase = 0.0f;
+	};
+
+	// One water to draw (M47, decision 3), from render extraction: every effectively enabled Water but a second Ocean, in
+	// canonical entity order, in every view (an edit scene's included, at time 0), at the rendered world matrix (so a tide
+	// written in the fixed step moves smoothly). The base height is World's translation's Y and only its yaw orients the
+	// water; a Rectangle's footprint is Size times World's X and Z column lengths. The renderer draws it in the Forward stage's
+	// Water pass and fogs the view under it in HdrPost's Underwater pass (Architecture §8.3 "Water"); lighting.bake's captures
+	// clear the list (Renderer/ProbeCapture.h) and M42's mirror views never draw it. The look members are the component's;
+	// colours are linear.
+	struct WaterItem
+	{
+		glm::mat4 World = glm::mat4(1.0f);
+		RenderWaterShape Shape = RenderWaterShape::Ocean;
+		glm::vec2 Size = glm::vec2(20.0f); // Rectangle: local X and Z extent
+		float Depth = 5.0f;                // Rectangle: metres below the base
+		float Headroom = 10.0f;            // Rectangle: metres above the base
+		std::array<WaterWaveItem, MaxWaterWaves> Waves{};
+		uint32_t WaveCount = 0; // the first WaveCount of Waves are summed; 0 is a calm surface
+		glm::vec3 ShallowColor = glm::vec3(0.10f, 0.55f, 0.50f);
+		glm::vec3 DeepColor = glm::vec3(0.01f, 0.07f, 0.12f);
+		float Clarity = 4.0f; // metres
+		float Roughness = 0.05f;
+		float RefractionStrength = 0.3f;
+		float FoamAmount = 0.5f;
+		float ShoreFoamDepth = 0.5f; // metres
+		float DetailNormalStrength = 0.5f;
+		float DetailScale = 4.0f; // metres
+		// The detail normals' offset at the view's time: DetailDrift * time in the water's local X and Z, each wrapped into
+		// [0, DetailScale) in double precision.
+		glm::vec2 DetailOffset = glm::vec2(0.0f);
+		glm::vec3 UnderwaterColor = glm::vec3(0.02f, 0.10f, 0.12f);
+		float UnderwaterVisibility = 15.0f; // metres
+		AssetHandle NormalMap{};            // null: the built-in WaterNormal
+		AssetHandle FoamTexture{};          // null: the built-in WaterFoam
+		// The item's World and wave phases at the view's previous rendered frame, for motion vectors: extraction leaves them
+		// empty, and the view's RenderViewHistory fills them by Entity (empty for a water it did not see then, and after a
+		// reset), as a mesh item's PreviousWorld.
+		std::optional<glm::mat4> PreviousWorld{};
+		std::optional<std::array<float, MaxWaterWaves>> PreviousPhases{};
+		UUID Entity{};
+		uint32_t PickId = 0; // 0: not pickable; otherwise PickTable[PickId - 1] is Entity, after the terrains'
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
 	// is deterministic; Sprites (M21) are in draw order instead.
 	struct RenderSnapshot
@@ -875,6 +944,10 @@ namespace Engine {
 		// the view, each rendered by the Forward stage's PlanarReflections pass for a Lit view outside the wireframe, at most
 		// MaxPlanarReflectionsPerView of them (Renderer/PlanarReflections.h).
 		std::pmr::vector<PlanarReflectionItem> PlanarReflections{};
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M46's Wind, the last member): the waters of
+		// the view, drawn by the Forward stage's Water pass and fogged under by HdrPost's Underwater pass in a Lit view with a
+		// camera outside the wireframe. A pickable water's PickId follows the terrains' in PickTable.
+		std::pmr::vector<WaterItem> Waters{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

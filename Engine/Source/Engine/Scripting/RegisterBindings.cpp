@@ -55,6 +55,9 @@ namespace Engine {
 			// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joint proxies' methods, after M30's RegisterNavigation (ADR
 			// 0052's ledger: the only new line).
 			ENGINE_TRY(ScriptBindings::RegisterJoints(api));
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water proxy's methods, Physics.SampleWater and the WaterSample
+			// alias, last (phase 8's ledger: after M44's RegisterVehicles and M46's RegisterWind).
+			ENGINE_TRY(ScriptBindings::RegisterWater(api));
 			return {};
 		}
 

@@ -86,6 +86,7 @@ namespace Engine {
 				{ "ui.tree", SceneRelation::Target },         // M22: the addressed scene's UI (Docs/Decisions/0033-m22-contract.md decision 8)
 				{ "ui.createWidget", SceneRelation::Target }, // M22 C22.2: builds in the addressed scene (decision 32)
 				{ "viewport.screenshot", SceneRelation::Target },
+				{ "water.sample", SceneRelation::Target }, // M47: the addressed scene's waters (Docs/Decisions/0065-m47-water.md decision 3)
 				// The active scene only.
 				{ "editor.screenshot", SceneRelation::ActiveScene }, // the editor window shows the active tab
 				{ "editor.state", SceneRelation::ActiveScene },

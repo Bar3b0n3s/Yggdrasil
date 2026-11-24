@@ -71,6 +71,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scene/TerrainValidation.h"
+#include "Engine/Scene/WaterValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Engine/Session/PlayInput.h"
 
@@ -222,6 +223,11 @@ namespace Engine {
 			// landing order (its ledger: after M41's ANIMATION_ATTACHMENT_INVALID), an array of its own
 			// (PlanarReflectionDiagnosticCodes).
 			RenderReflectionInvalidCode,
+			// M47 (Scene/WaterValidation.h, Docs/Decisions/0065-m47-water.md decision 3), appended in train order (phase 8's ledger:
+			// after M46's ASSET_LOD_INVALID), an array of its own (WaterDiagnosticCodes).
+			WaterInvalidCode,
+			WaterWavesTooSteepCode,
+			PhysicsBuoyancyInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -497,6 +503,20 @@ namespace Engine {
 				"Put the PlanarReflection on the entity whose MeshRenderer draws a flat glass, and set its Normal to the glass's facing axis and "
 				"Offset to its surface (the finding names the axis along which the mesh is thinnest and that face's Offset; the built-in Quad "
 				"faces +Z, the Plane +Y)." },
+			ValidationCodeInfo{ WaterInvalidCode, "Warning", false,
+				"A Water is pitched, rolled, sheared or mirrored (its world matrix is not a yaw, a positive X and Z scale and a translation), so "
+				"it draws and samples level at its yaw; or it is an Ocean after the scene's first, which is neither drawn nor sampled.",
+				"Turn the water only about +Y and give it a positive X and Z scale (its ancestors' too); keep one Ocean a scene and make other "
+				"waters Rectangles." },
+			ValidationCodeInfo{ WaterWavesTooSteepCode, "Warning", false,
+				"A Water's waves at its WaveScale would fold the surface (the sum of Steepness times wave number times amplitude exceeds 0.9), so "
+				"every wave's Steepness is scaled down by the factor the finding names.",
+				"Lower the Steepness or the Amplitude of the short waves, or the WaveScale, until the finding clears." },
+			ValidationCodeInfo{ PhysicsBuoyancyInvalidCode, "Warning", false,
+				"A Buoyancy floats nothing: its RigidBody is not Dynamic or makes no body with a solid collider, or its Water names no entity "
+				"with a Water. At run time the physics skips it and reports it once.",
+				"Make the RigidBody Dynamic with a box, sphere, capsule or convex mesh collider that is not a trigger, and set Water to an entity "
+				"with a Water component or to null." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1370,6 +1390,22 @@ namespace Engine {
 			}
 		}
 
+		// The water checks of §13.7 (M47, Scene/WaterValidation.h): WATER_INVALID, WATER_WAVES_TOO_STEEP and
+		// PHYSICS_BUOYANCY_INVALID on each Water or Buoyancy they name, the bodies composed with the project's layers when they
+		// load. Not fixable.
+		static void CheckWater(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			for (WaterSceneIssue& issue : FindWaterIssues(*checked.Target, checked.Layers))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static Status CheckRenderScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const auto render = EvaluateRenderSceneValidation(*checked.Target, *editor.GetEngine().GetAssetManager());
@@ -1668,6 +1704,8 @@ namespace Engine {
 			CheckTerrain(editor, checked, diagnostics);
 			CheckNavigation(editor, checked, diagnostics);
 			CheckPlanarReflections(editor, checked, diagnostics);
+			// M47 (phase 8's ledger: after M43's CheckStaticScenery and M45's CheckSky).
+			CheckWater(checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

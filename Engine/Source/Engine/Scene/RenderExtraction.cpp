@@ -30,6 +30,7 @@
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/PixelPerfectCamera.h"
@@ -40,10 +41,12 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiExtraction.h"
 #include "Engine/Scene/UiLayout.h"
+#include "Engine/Scene/WaterQueries.h"
 
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory_resource>
 #include <optional>
@@ -554,6 +557,74 @@ namespace Engine {
 			}
 		}
 
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the drawing of `water` at the rendered world matrix `world` and the
+		// view's `time`: its waves resolved at its WaveScale (Physics/WaterWaves.h: ResolveWaterSurface, so the drawn surface
+		// is the one the queries sample) with their phases at `time`, its detail drift at `time` wrapped by DetailScale, and its
+		// look; its PickId is assigned after the canonical loop (AssignWaterPickIds).
+		static WaterItem MakeWaterItem(const WaterComponent& water, const glm::mat4& world, UUID id, double time)
+		{
+			const ResolvedWater resolved = ResolveWater(water, world, id);
+			const std::array<double, MaxWaterSurfaceWaves> phases = ComputeWaterWavePhases(resolved.Surface, time);
+			WaterItem item;
+			item.World = world;
+			item.Shape = water.Shape == WaterShape::Rectangle ? RenderWaterShape::Rectangle : RenderWaterShape::Ocean;
+			item.Size = water.Size;
+			item.Depth = water.Depth;
+			item.Headroom = water.Headroom;
+			item.WaveCount = resolved.Surface.WaveCount;
+			for (uint32_t index = 0; index < item.WaveCount; ++index)
+			{
+				const WaterSurfaceWave& wave = resolved.Surface.Waves[index];
+				item.Waves[index] = WaterWaveItem{
+					.Direction = glm::vec2(wave.Direction),
+					.WaveNumber = static_cast<float>(wave.WaveNumber),
+					.Amplitude = static_cast<float>(wave.Amplitude),
+					.Steepness = static_cast<float>(wave.Steepness),
+					.Phase = static_cast<float>(phases[index]),
+				};
+			}
+			item.ShallowColor = water.ShallowColor;
+			item.DeepColor = water.DeepColor;
+			item.Clarity = water.Clarity;
+			item.Roughness = water.Roughness;
+			item.RefractionStrength = water.RefractionStrength;
+			item.FoamAmount = water.FoamAmount;
+			item.ShoreFoamDepth = water.ShoreFoamDepth;
+			item.DetailNormalStrength = water.DetailNormalStrength;
+			item.DetailScale = water.DetailScale;
+			// The drift wrapped into [0, DetailScale) in double, so the offset keeps its precision at any time.
+			const auto drift = [&water, time](float speed)
+			{
+				const double scale = static_cast<double>(water.DetailScale);
+				const double value = static_cast<double>(speed) * time;
+				const auto wrapped = static_cast<float>(value - scale * std::floor(value / scale));
+				return wrapped < water.DetailScale ? wrapped : 0.0f;
+			};
+			item.DetailOffset = glm::vec2(drift(water.DetailDrift.x), drift(water.DetailDrift.y));
+			item.UnderwaterColor = water.UnderwaterColor;
+			item.UnderwaterVisibility = water.UnderwaterVisibility;
+			item.NormalMap = water.NormalMap.GetHandle();
+			item.FoamTexture = water.FoamTexture.GetHandle();
+			item.Entity = id;
+			return item;
+		}
+
+		// M47 (decision 3): each water's PickId after the terrains' (RenderSnapshot::Waters), by AssignTerrainPickIds' rule.
+		static void AssignWaterPickIds(RenderSnapshot& snapshot)
+		{
+			for (WaterItem& water : snapshot.Waters)
+			{
+				const auto found = std::find(snapshot.PickTable.begin(), snapshot.PickTable.end(), water.Entity);
+				if (found == snapshot.PickTable.end())
+				{
+					snapshot.PickTable.push_back(water.Entity);
+					water.PickId = static_cast<uint32_t>(snapshot.PickTable.size());
+				}
+				else
+					water.PickId = static_cast<uint32_t>(found - snapshot.PickTable.begin()) + 1;
+			}
+		}
+
 		// The camera of `request` in `snapshot`. Errors: those of ExtractRenderSnapshot for Entity and Explicit requests.
 		static Status ExtractCamera(const Scene& scene, const RenderExtractionRequest& request, RenderSnapshot& snapshot)
 		{
@@ -751,7 +822,8 @@ namespace Engine {
 		std::vector<Utils::SpriteDrawKey> spriteKeys;
 		std::vector<uint32_t> tilemapPositions;
 		uint32_t canonicalPosition = 0;
-		scene.ForEachCanonical([&snapshot, &environment, &post, &fog, &request, &spriteKeys, &tilemapPositions, &canonicalPosition](ConstEntity entity)
+		bool ocean = false; // M47: whether the scene's first Ocean was extracted
+		scene.ForEachCanonical([&snapshot, &environment, &post, &fog, &request, &spriteKeys, &tilemapPositions, &canonicalPosition, &ocean](ConstEntity entity)
 		{
 			if (!Utils::IsEffectivelyEnabled(entity))
 				return;
@@ -942,8 +1014,16 @@ namespace Engine {
 			// order, in every view (an edit scene's included: terrain is edited in the scene view).
 			if (const TerrainComponent* terrain = entity.TryGetComponent<TerrainComponent>(); terrain != nullptr && terrain->Heightfield.IsValid())
 				snapshot.Terrains.push_back(Utils::MakeTerrainItem(*terrain, getWorld(), id));
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): a water in canonical order, in every view (an edit scene's
+			// included, at time 0), but an Ocean after the scene's first, which is neither drawn nor sampled (WATER_INVALID).
+			if (const WaterComponent* water = entity.TryGetComponent<WaterComponent>(); water != nullptr && (water->Shape != WaterShape::Ocean || !ocean))
+			{
+				ocean = ocean || water->Shape == WaterShape::Ocean;
+				snapshot.Waters.push_back(Utils::MakeWaterItem(*water, getWorld(), id, request.SimulationTime));
+			}
 		});
 		Utils::AssignTerrainPickIds(snapshot);
+		Utils::AssignWaterPickIds(snapshot);
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
 		snapshot.Fog = fog.value_or(RenderFog{});

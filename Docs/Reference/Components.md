@@ -70,6 +70,8 @@ Every component of the type registry, in canonical component order: the order of
 | `SliderJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking. |
 | `DistanceJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Keeps a point of the body of the RigidBody at or above the entity between a minimum and a maximum distance from a point of another body or of the world, like a rope, a chain link or a rod, with an optional spring and breaking. |
 | `FixedJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break. |
+| `Water` | Water | Serializable, ScriptVisible, EditorVisible, Removable | A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike. |
+| `Buoyancy` | Water | Serializable, ScriptVisible, EditorVisible, Removable | Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag. |
 
 ## ID
 
@@ -2106,6 +2108,98 @@ Script members of `FixedJoint`:
 | `GetForce` | method | `(self: FixedJoint) -> number` |  | All | The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. |
 | `GetTorque` | method | `(self: FixedJoint) -> number` |  | All | The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. |
 
+## Water
+
+A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike.
+
+- Category: Water
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Shape` | `WaterShape` | `"Ocean"` |  |  |  | Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). |
+| `Size` | `Vec2` | `[20,20]` | 0.1 to 1e+05 | m |  | A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). |
+| `Depth` | `Float` | `5` | 0 to 1e+05 | m |  | How far a Rectangle's volume reaches below its base, in metres. |
+| `Headroom` | `Float` | `10` | 0 to 1e+05 | m |  | How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. |
+| `Waves` | `Array<WaterWave>` | `[]` |  |  |  | At most eight Gerstner waves summed over the base; empty is a calm surface. |
+| `WaveScale` | `Float` | `1` | 0 to 10 |  |  | Multiplies every wave's amplitude: 0 is calm, above 1 a storm. |
+| `Current` | `Vec2` | `[0,0]` | -100 to 100 | m/s |  | The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave. |
+| `Density` | `Float` | `1000` | 1 to 20000 | kg/m^3 |  | The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre. |
+| `ShallowColor` | `Color3` | `[0.1,0.55,0.5]` | 0 to 1 |  |  | The linear colour of shallow water, over the bottom it shows. |
+| `DeepColor` | `Color3` | `[0.01,0.07,0.12]` | 0 to 1 |  |  | The linear colour deep water absorbs toward. |
+| `Clarity` | `Float` | `4` | 0.01 to 1000 | m |  | The metres of water column over which the bottom fades toward DeepColor. |
+| `Roughness` | `Float` | `0.05` | 0.02 to 1 |  |  | The surface's perceptual roughness: low is a sharp sun glint and clear reflections. |
+| `RefractionStrength` | `Float` | `0.3` | 0 to 1 |  |  | How far the waves bend the view of what lies under the surface. |
+| `FoamAmount` | `Float` | `0.5` | 0 to 1 |  |  | How much foam the crests and the shallows show: 0 none. |
+| `ShoreFoamDepth` | `Float` | `0.5` | 0 to 10 | m |  | The water column, in metres, under which foam gathers where the surface meets the ground or an object. |
+| `DetailNormalStrength` | `Float` | `0.5` | 0 to 1 |  |  | How strongly the small-scale detail normals ripple the surface. |
+| `DetailScale` | `Float` | `4` | 0.1 to 1000 | m |  | The metres one repeat of the detail normal map covers. |
+| `DetailDrift` | `Vec2` | `[2,1]` | -100 to 100 | m/s |  | How fast the detail normals drift along the water's local X and Z axes, in metres per second. |
+| `UnderwaterColor` | `Color3` | `[0.02,0.1,0.12]` | 0 to 1 |  |  | The linear colour of the fog a camera under the surface sees. |
+| `UnderwaterVisibility` | `Float` | `15` | 0.1 to 10000 | m |  | How far a camera under the surface sees, in metres. |
+| `NormalMap` | `AssetRef(Texture)` | `null` |  |  |  | The detail normal map; null takes the built-in WaterNormal. |
+| `FoamTexture` | `AssetRef(Texture)` | `null` |  |  |  | The foam's texture; null takes the built-in WaterFoam. |
+
+Script members of `Water`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Clarity` | proxy field | `number` | read/write | All | The metres of water column over which the bottom fades toward DeepColor. |
+| `Current` | proxy field | `vector` | read/write | All | The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave. |
+| `DeepColor` | proxy field | `Color` | read/write | All | The linear colour deep water absorbs toward. |
+| `Density` | proxy field | `number` | read/write | All | The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre. |
+| `Depth` | proxy field | `number` | read/write | All | How far a Rectangle's volume reaches below its base, in metres. |
+| `DetailDrift` | proxy field | `vector` | read/write | All | How fast the detail normals drift along the water's local X and Z axes, in metres per second. |
+| `DetailNormalStrength` | proxy field | `number` | read/write | All | How strongly the small-scale detail normals ripple the surface. |
+| `DetailScale` | proxy field | `number` | read/write | All | The metres one repeat of the detail normal map covers. |
+| `FoamAmount` | proxy field | `number` | read/write | All | How much foam the crests and the shallows show: 0 none. |
+| `FoamTexture` | proxy field | `AssetRef?` | read/write | All | The foam's texture; null takes the built-in WaterFoam. |
+| `Headroom` | proxy field | `number` | read/write | All | How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. |
+| `IsUnderwater` | method | `(self: Water, position: vector, time: number?) -> boolean` |  | All | Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. |
+| `NormalMap` | proxy field | `AssetRef?` | read/write | All | The detail normal map; null takes the built-in WaterNormal. |
+| `RefractionStrength` | proxy field | `number` | read/write | All | How far the waves bend the view of what lies under the surface. |
+| `Roughness` | proxy field | `number` | read/write | All | The surface's perceptual roughness: low is a sharp sun glint and clear reflections. |
+| `SampleHeight` | method | `(self: Water, position: vector, time: number?) -> number?` |  | All | Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. |
+| `SampleNormal` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. |
+| `SampleVelocity` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. |
+| `ShallowColor` | proxy field | `Color` | read/write | All | The linear colour of shallow water, over the bottom it shows. |
+| `Shape` | proxy field | `WaterShape` | read/write | All | Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). |
+| `ShoreFoamDepth` | proxy field | `number` | read/write | All | The water column, in metres, under which foam gathers where the surface meets the ground or an object. |
+| `Size` | proxy field | `vector` | read/write | All | A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). |
+| `UnderwaterColor` | proxy field | `Color` | read/write | All | The linear colour of the fog a camera under the surface sees. |
+| `UnderwaterVisibility` | proxy field | `number` | read/write | All | How far a camera under the surface sees, in metres. |
+| `WaveScale` | proxy field | `number` | read/write | All | Multiplies every wave's amplitude: 0 is calm, above 1 a storm. |
+| `Waves` | proxy field | `{{Direction: number, Wavelength: number, Amplitude: number, Steepness: number, Speed: number, Phase: number}}` | read/write | All | At most eight Gerstner waves summed over the base; empty is a calm surface. |
+
+## Buoyancy
+
+Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag.
+
+- Category: Water
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `RigidBody`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Water` | `EntityRef` | `null` |  |  |  | The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre. |
+| `BuoyancyScale` | `Float` | `1` | 0 to 10 |  |  | Multiplies the buoyant force: 1 is physical, 0 none. |
+| `LinearDrag` | `Float` | `0.5` | 0 to 100 |  |  | The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). |
+| `AngularDrag` | `Float` | `0.05` | 0 to 100 |  |  | The water's drag on the body's turning (Jolt's angular drag coefficient). |
+
+Script members of `Buoyancy`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AngularDrag` | proxy field | `number` | read/write | All | The water's drag on the body's turning (Jolt's angular drag coefficient). |
+| `BuoyancyScale` | proxy field | `number` | read/write | All | Multiplies the buoyant force: 1 is physical, 0 none. |
+| `LinearDrag` | proxy field | `number` | read/write | All | The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). |
+| `Water` | proxy field | `Entity?` | read/write | All | The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -2209,6 +2303,19 @@ The state tints of a canvas's widgets: each multiplies the colour of a widget el
 | `Pressed` | `Color4` | `[0.6,0.6,0.6,1]` | 0 to 1 |  |  | The tint of a widget the pointer presses. |
 | `Focused` | `Color4` | `[0.75,0.85,1,1]` | 0 to 1 |  |  | The tint of the widget that has keyboard and gamepad focus. |
 | `Disabled` | `Color4` | `[0.5,0.5,0.5,0.5]` | 0 to 1 |  |  | The tint of a widget whose Interactable is false. |
+
+### WaterWave
+
+One Gerstner wave of a Water, in the water's local frame.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Direction` | `Float` | `0` |  | deg |  | The direction the wave travels, in degrees about +Y in the water's local XZ plane: 0 along local +X, 90 along local -Z. |
+| `Wavelength` | `Float` | `20` | 0.1 to 2000 | m |  | The distance from crest to crest, in metres. |
+| `Amplitude` | `Float` | `0.2` | 0 to 20 | m |  | The height of a crest above the base, in metres, before the water's WaveScale. |
+| `Steepness` | `Float` | `0.5` | 0 to 1 |  |  | Gerstner's steepness Q: 0 is a sine wave, 1 the sharpest crest; scaled down with the others when their sum would fold the surface (WATER_WAVES_TOO_STEEP). |
+| `Speed` | `Float` | `0` | 0 to 200 | m/s |  | The speed of the crests, in metres per second; 0 takes deep water's speed for the wavelength. |
+| `Phase` | `Float` | `0` |  | deg |  | The wave's phase at time 0, in degrees. |
 
 ## Enums
 
@@ -2517,3 +2624,12 @@ Where a UI text block sits in its element's rectangle.
 | `Top` | The first line starts at the rectangle's top edge. |
 | `Middle` | The block is centred vertically in the rectangle. |
 | `Bottom` | The last line ends at the rectangle's bottom edge. |
+
+### WaterShape
+
+What a Water covers.
+
+| Value | Description |
+|---|---|
+| `Ocean` | An unbounded sea: all of X and Z and everything below its surface; one a scene. |
+| `Rectangle` | A bounded water (a pool, a canal, a cave lake): Size along the entity's local X and Z centred on it, from Depth below its base to Headroom above it. |

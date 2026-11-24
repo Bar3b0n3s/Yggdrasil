@@ -118,11 +118,13 @@ namespace Engine {
 			// DepthNormal, TerrainForward after ForwardOpaque, SSR after Skybox, Particles after Lights2D, TAA before Bloom and
 			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get. M42's four
 			// (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) first in the Forward stage, before
-			// ForwardOpaque: 41.
-			constexpr std::array<std::string_view, 41> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
+			// ForwardOpaque: 41. M47's three (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger): WaterRefraction and
+			// Water after Skybox (after M45's Sky at the landing), and Underwater after Particles, first in HdrPost: 44.
+			constexpr std::array<std::string_view, 44> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
 				"DepthNormal", "TerrainDepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters",
 				"PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3", "ForwardOpaque", "TerrainForward", "Skybox",
-				"SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA", "Bloom", "Exposure", "Tonemap", "FXAA", "Text",
+				"WaterRefraction", "Water", "SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "Underwater", "TAA", "Bloom",
+				"Exposure", "Tonemap", "FXAA", "Text",
 				"Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
 				"Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
@@ -190,7 +192,8 @@ namespace Engine {
 			CHECK((find("TerrainForward") - 1)->Name == "ForwardOpaque");
 			CHECK((find("TerrainForward") + 1)->Name == "Skybox");
 			CHECK(find("Ssr")->Stage == RenderStage::Forward);
-			CHECK((find("Ssr") - 1)->Name == "Skybox");
+			// M47's Water sits between them (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger).
+			CHECK(find("Skybox") < find("Ssr"));
 			CHECK((find("Ssr") + 1)->Name == "ForwardTransparent");
 			CHECK(find("Particles")->Stage == RenderStage::Sprites);
 			CHECK((find("Particles") - 1)->Name == "Lights2D");
@@ -208,6 +211,41 @@ namespace Engine {
 			CHECK(find("Ssr")->Targets[0] == "SsrColor");
 			REQUIRE(find("Taa")->Targets.size() == 1);
 			CHECK(find("Taa")->Targets[0] == "TaaHistory");
+		}
+
+		// M47's contract (C47, Docs/Decisions/0065-m47-water.md decisions 2 and 3; phase 8's ledger): the Water pass after the
+		// skybox and before SSR in Forward, with its two rows and its WaterRefraction target, and the Underwater pass first in
+		// HdrPost, before TAA; declared without pipelines until W47.2's render stream and W47.3 set them, as M26's contract
+		// declared its passes, so the startup count is unchanged.
+		TEST_CASE("RenderPassDeclarations: the water comes after the skybox and before SSR, and the underwater view first in HdrPost")
+		{
+			const auto find = [](std::string_view name)
+			{
+				const auto found = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [name](const RenderPassDeclaration& declaration)
+				{
+					return declaration.Name == name;
+				});
+				REQUIRE_MESSAGE(found != ScenePassDeclarations.end(), name);
+				return found;
+			};
+			const auto water = find("Water");
+			CHECK(water->Stage == RenderStage::Forward);
+			CHECK((water - 1)->Name == "Skybox");
+			CHECK((water + 1)->Name == "Ssr");
+			REQUIRE(water->StatsRows.size() == 2);
+			CHECK(water->StatsRows[0] == "WaterRefraction");
+			CHECK(water->StatsRows[1] == "Water");
+			REQUIRE(water->Targets.size() == 1);
+			CHECK(water->Targets[0] == "WaterRefraction");
+			const auto underwater = find("Underwater");
+			CHECK(underwater->Stage == RenderStage::HdrPost);
+			CHECK((underwater - 1)->Stage == RenderStage::Sprites);
+			CHECK((underwater + 1)->Name == "Taa");
+			REQUIRE(underwater->StatsRows.size() == 1);
+			CHECK(underwater->StatsRows[0] == "Underwater");
+			CHECK(underwater->Targets.empty());
+			CHECK(water->PipelineCount == 0);
+			CHECK(underwater->PipelineCount == 0);
 		}
 
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger): the planar reflections first in the Forward

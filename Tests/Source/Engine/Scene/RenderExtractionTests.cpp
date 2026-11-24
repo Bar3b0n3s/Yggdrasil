@@ -35,10 +35,12 @@
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scene/WaterQueries.h"
 #include "Support/GlmApprox.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
@@ -1701,6 +1703,99 @@ namespace Engine {
 			REQUIRE(between->Meshes.size() == 1);
 			CHECK(between->PlanarReflections[0].World[3].z == doctest::Approx(-4.0f));
 			CHECK(between->PlanarReflections[0].World == between->Meshes[0].World);
+		}
+
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): every effectively enabled water but a second Ocean, in canonical
+		// order, at its rendered pose, its waves resolved as the queries resolve them, their phases at the request's simulation
+		// time (an edit view's is 0), the detail drift wrapped, and its PickId after the terrains'.
+		TEST_CASE("RenderExtraction: a water is extracted at its rendered pose with its waves at the request's time, and at time 0 in an edit scene")
+		{
+			const auto addWater = [](Scene& scene, std::string_view name, WaterShape shape, const glm::vec3& translation)
+			{
+				Entity entity = scene.CreateEntity(name);
+				SetTranslation(entity, translation);
+				WaterComponent water;
+				water.Shape = shape;
+				water.Waves = { WaterWave{ .Direction = 30.0f, .Wavelength = 12.0f, .Amplitude = 0.5f, .Steepness = 0.7f, .Speed = 0.0f, .Phase = 45.0f },
+					WaterWave{ .Direction = -60.0f, .Wavelength = 4.0f, .Amplitude = 0.2f, .Steepness = 1.0f, .Speed = 3.0f, .Phase = 0.0f } };
+				water.WaveScale = 1.5f;
+				water.DetailDrift = glm::vec2(2.0f, -1.0f);
+				water.DetailScale = 4.0f;
+				water.ShallowColor = glm::vec3(0.2f, 0.6f, 0.5f);
+				water.UnderwaterVisibility = 22.0f;
+				entity.AddComponent<WaterComponent>(water);
+				return entity;
+			};
+			Test::SceneTestFixture edit;
+			Scene& scene = edit.GetScene();
+			CreateCamera(scene, "Camera", true);
+			const Entity sea = addWater(scene, "Sea", WaterShape::Ocean, glm::vec3(0.0f, -1.0f, 0.0f));
+			const Entity pool = addWater(scene, "Pool", WaterShape::Rectangle, glm::vec3(5.0f, 3.0f, -2.0f));
+			// A second Ocean, which is left out.
+			static_cast<void>(addWater(scene, "Second", WaterShape::Ocean, glm::vec3(0.0f, 2.0f, 0.0f)));
+			const Entity off = addWater(scene, "Off", WaterShape::Rectangle, glm::vec3(0.0f));
+			off.SetActive(false);
+			Entity ground = scene.CreateEntity("Ground");
+			ground.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::PlaneMesh));
+			TransformSystem::Update(scene);
+
+			for (const double time : { 0.0, 7.5 })
+			{
+				CAPTURE(time);
+				const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = time });
+				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+				// The sea and the pool; the second Ocean and the disabled pool are left out.
+				REQUIRE(snapshot->Waters.size() == 2);
+				const WaterItem& item = snapshot->Waters[0];
+				CHECK(item.Entity == sea.GetUUID());
+				CHECK(item.Shape == RenderWaterShape::Ocean);
+				CHECK(snapshot->Waters[1].Entity == pool.GetUUID());
+				CHECK(snapshot->Waters[1].Shape == RenderWaterShape::Rectangle);
+				CHECK(item.World == TransformSystem::ComputeWorldMatrix(sea));
+				// The waves as the queries resolve them, their phases at the request's time.
+				const ResolvedWater resolved = ResolveWater(sea);
+				const std::array<double, MaxWaterSurfaceWaves> phases = ComputeWaterWavePhases(resolved.Surface, time);
+				REQUIRE(item.WaveCount == 2);
+				for (uint32_t index = 0; index < item.WaveCount; ++index)
+				{
+					const WaterSurfaceWave& wave = resolved.Surface.Waves[index];
+					CHECK(item.Waves[index].Direction == glm::vec2(wave.Direction));
+					CHECK(item.Waves[index].WaveNumber == static_cast<float>(wave.WaveNumber));
+					CHECK(item.Waves[index].Amplitude == static_cast<float>(wave.Amplitude));
+					CHECK(item.Waves[index].Steepness == static_cast<float>(wave.Steepness));
+					CHECK(item.Waves[index].Phase == static_cast<float>(phases[index]));
+				}
+				CHECK(item.Waves[0].Amplitude == doctest::Approx(0.75f));
+				// The detail drift at the time, wrapped by DetailScale: 2 m/s and -1 m/s over 7.5 s are 15 and -7.5 m, so 3 and 0.5.
+				CHECK(item.DetailOffset.x == doctest::Approx(time == 0.0 ? 0.0 : 3.0));
+				CHECK(item.DetailOffset.y == doctest::Approx(time == 0.0 ? 0.0 : 0.5));
+				CHECK(item.ShallowColor == glm::vec3(0.2f, 0.6f, 0.5f));
+				CHECK(item.UnderwaterVisibility == 22.0f);
+				CHECK_FALSE(item.PreviousWorld.has_value());
+				CHECK_FALSE(item.PreviousPhases.has_value());
+				// PickIds after the meshes' (the ground's) in the waters' order.
+				REQUIRE(snapshot->PickTable.size() == 3);
+				CHECK(item.PickId == 2);
+				CHECK(snapshot->PickTable[1] == sea.GetUUID());
+				CHECK(snapshot->Waters[1].PickId == 3);
+			}
+			// An edit view (SimulationTime 0, the default) shows the phases at time 0.
+			const Result<RenderSnapshot> editView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(editView.has_value(), editView.error().ToString());
+			REQUIRE(editView->Waters.size() == 2);
+			CHECK(editView->Waters[0].Waves[0].Phase == static_cast<float>(ComputeWaterWavePhases(ResolveWater(sea).Surface, 0.0)[0]));
+
+			// In a runtime scene the item takes the interpolated pose: the tide written in the fixed step moves smoothly.
+			Test::SceneTestFixture runtime(1, true);
+			Entity tide = addWater(runtime.GetScene(), "Tide", WaterShape::Ocean, glm::vec3(0.0f));
+			TransformSystem::Update(runtime.GetScene());
+			SnapshotPreviousPose(tide);
+			SetTranslation(tide, glm::vec3(0.0f, 2.0f, 0.0f));
+			TransformSystem::Update(runtime.GetScene());
+			const Result<RenderSnapshot> between = ExtractRenderSnapshot(runtime.GetScene(), { .Width = 8, .Height = 8, .Alpha = 0.5f });
+			REQUIRE_MESSAGE(between.has_value(), between.error().ToString());
+			REQUIRE(between->Waters.size() == 1);
+			CHECK(between->Waters[0].World[3].y == doctest::Approx(1.0f));
 		}
 	}
 
