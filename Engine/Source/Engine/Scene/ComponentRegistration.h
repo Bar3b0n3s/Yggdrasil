@@ -38,6 +38,12 @@ namespace Engine {
 		}
 
 		template<typename T>
+		void* AddCopyComponentOp(Entity entity, const void* source)
+		{
+			return &entity.AddComponent<T>(*static_cast<const T*>(source));
+		}
+
+		template<typename T>
 		void RemoveComponentOp(Entity entity)
 		{
 			entity.RemoveComponent<T>();
@@ -65,6 +71,7 @@ namespace Engine {
 			.GetConst = &GetConstComponentOp<T>,
 			.Get = &GetComponentOp<T>,
 			.Add = &AddComponentOp<T>,
+			.AddCopy = &AddCopyComponentOp<T>,
 			.Remove = &RemoveComponentOp<T>,
 			.Patch = &PatchComponentOp<T>,
 			.CollectCanonical = &CollectCanonicalComponentOp<T>,

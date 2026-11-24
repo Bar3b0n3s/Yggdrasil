@@ -252,7 +252,8 @@ namespace Engine {
 			const TypeOps& typeOps = component.Info->GetType().GetOps();
 			if (!ops.Has(entity))
 			{
-				typeOps.Copy(ops.Add(entity), component.Object.get());
+				// M43: added with its value, so the scene's added-component state (HierarchyStaticTag) follows it.
+				static_cast<void>(ops.AddCopy(entity, component.Object.get()));
 				return;
 			}
 

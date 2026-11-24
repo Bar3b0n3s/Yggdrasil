@@ -18,7 +18,9 @@
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -34,6 +36,8 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace Engine {
 
@@ -235,6 +239,43 @@ namespace Engine {
 			CHECK(loaded.error().GetMessageText().find('2') != std::string::npos);
 			CHECK(loaded.error().GetMessageText().find('1') != std::string::npos);
 			CHECK(setup.GetScene().GetEntityCount() == 0);
+		}
+
+		TEST_CASE("SceneSerializer: a loaded component reaches the scene with its value, so Static's tags follow its Scope")
+		{
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md, W43.2's first checkpoint): the scene refreshes HierarchyStaticTag
+			// when a Static is added, so a load that added it default-constructed (Scope Subtree) and copied its value in
+			// afterwards, unseen, left a NotStatic entity, and an EntityOnly entity's children, static.
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::Subtree });
+			const Entity mill = scene.CreateEntity("Mill", island);
+			mill.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::NotStatic });
+			static_cast<void>(scene.CreateEntity("Sail", mill));
+			static_cast<void>(scene.CreateEntity("Rock", island));
+			const Entity hut = scene.CreateEntity("Hut");
+			hut.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::EntityOnly });
+			static_cast<void>(scene.CreateEntity("Door", hut));
+			const Result<Json> document = SceneSerializer::ToJson(scene);
+			REQUIRE(document.has_value());
+
+			for (const bool runtime : { false, true })
+			{
+				CAPTURE(runtime);
+				const Scope<Scene> copy = setup.CreateEmptyScene(runtime);
+				LoadReport report;
+				REQUIRE(SceneSerializer::FromJson(*copy, *document, LoadOptions{}, report).has_value());
+				for (const auto& [path, expected] : { std::pair<std::string_view, bool>{ "/Island", true }, { "/Island/Mill", false },
+						 { "/Island/Mill/Sail", false }, { "/Island/Rock", true }, { "/Hut", true }, { "/Hut/Door", false } })
+				{
+					CAPTURE(path);
+					const Entity entity = copy->FindEntityByPath(path);
+					REQUIRE(entity.IsValid());
+					CHECK(entity.HasComponent<HierarchyStaticTag>() == expected);
+					CHECK(entity.HasComponent<HierarchyStaticTag>() == scene.FindEntityByPath(path).HasComponent<HierarchyStaticTag>());
+				}
+			}
 		}
 
 		TEST_CASE("SceneSerializer: serializer copy has the same state hash")

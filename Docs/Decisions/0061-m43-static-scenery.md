@@ -361,6 +361,11 @@ W43.1 makes decision 3 exact for change tracking and the incremental per-tick sy
   - `Lint.py`, `Lint.py --self-test` (39 of 39), `Format.py --check`, `GenerateDocs.py --config Debug --check` and `MakeValidationFixtures.py --check`: passed.
   - No GPU run: nothing W43.1 adds renders.
 
+## The W43.2 record
+
+- **First checkpoint: a loaded component reaches the scene with its value** (a W43.1 bug, found by W43.2's cache work). `SceneSerializer`'s `AddOrOverwriteComponent` added a component the entity lacked default-constructed (`ComponentHostOps::Add`) and copied the loaded value in afterwards without a signal, so `Scene::CommitComponentChange` refreshed `HierarchyStaticTag` from a default `Static` (`Scope` `Subtree`): a loaded `Static` with `Scope` `NotStatic` kept its own entity static, and every file load and play-session copy would have put it in the static set. The fix: a host operation `ComponentHostOps::AddCopy(Entity, const void* source)` (`Entity::AddComponent<T>` copy-constructed from the loaded object, `ComponentRegistration.h`), which the serializer uses, so the scene sees each loaded component added once, with its value. Every other state derived when a component is added was checked: the scene's `CommitComponentChange` reads a value only for `Static` (`Relationship` and `DisabledTag` are never added by a load's copy; `Transform` is always present, so a load patches it and `on_update` fires); the EnTT `on_construct` handlers (`Scene`'s transform tracking, `PhysicsSystem`, `Physics2DSystem`, the joints, `AudioSystem`, the scripts' name and tag index) only mark an entity or reset runtime state, reading no value then. `ComponentAccess::AddComponent` adds and then patches, so the scene saw its value already. Regression case: "SceneSerializer: a loaded component reaches the scene with its value, so Static's tags follow its Scope", which failed before the fix (the `NotStatic` entity and the `EntityOnly` entity's child tagged, in edit and runtime copies).
+- **Backlog §6:** the physics hierarchy record's row names M50 and M65, where structural changes become frequent and the row is decided (the lead's answer to W43.1's question).
+
 ## Before milestone completion
 
 - [x] W43.1 committed; [ ] the lead's review pass taken and every finding fixed.

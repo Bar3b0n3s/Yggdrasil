@@ -29,6 +29,10 @@ namespace Engine {
 		void* (*Get)(Entity entity) = nullptr;
 		// Adds a default-constructed component and returns it (asserts that it is absent).
 		void* (*Add)(Entity entity) = nullptr;
+		// M43: adds a copy of `source` (an object of the component's type) and returns it (asserts that it is absent): the
+		// scene sees the component added with its value, so state the scene derives when a component is added (the Static
+		// rule's HierarchyStaticTag) follows that value. A load adds its components through it.
+		void* (*AddCopy)(Entity entity, const void* source) = nullptr;
 		// Removes the component (asserts that it is present).
 		void (*Remove)(Entity entity) = nullptr;
 		// Calls `mutate(component, context)` inside Entity::Patch<T> (asserts that it is present).
