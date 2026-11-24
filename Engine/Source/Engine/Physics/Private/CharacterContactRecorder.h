@@ -31,16 +31,19 @@
 // CharacterContactSettings::mCanPushCharacter off for one in OnContactAdded and OnContactPersisted, but for a contact
 // of the body the character stands on (its walkable ground of the last update) whose normal is walkable: that body
 // supports the character, Jolt's contact plane and penetration recovery holding it on the surface, so a deck rising
-// under it lifts it and an overlap is pushed out within the update. Jolt keeps the settings of a body and sub-shape for
-// the whole update, decided at their first callback, so the support holds per face for a box or a convex hull (one
-// contact a pass) and per triangle for a mesh, and a steep face of the ground is met with no push and no recovery, as
-// if the body stood still. The character still pushes every light body (mCanReceiveImpulses stays on). Nor does the
-// character climb one by sliding up a surface of it that faces upwards: OnContactSolve meets such a contact as a
-// vertical wall, so the character's motion into the body stops and its vertical motion stays as it was, except on the
-// body the character stands on, which it moves across as Jolt slides it, and, while the character stands on a light
-// body, on another light body's walkable face, which it walks onto as onto any ground (the next plank of a bridge); and
-// whatever the wall leaves moving into the contact's plane (a fall onto a steep face) slides along the plane, never
-// lifting the character, so the solver never leaves it hanging on the face.
+// under it lifts it and an overlap is pushed out within the update. The decision is one per collider of the body
+// (Jolt's sub-shape), taken at the contact's first meeting in ExtendedUpdate, or its second when the contact is new to
+// the update (Jolt asks OnContactPersisted once more then), and taken again in the controller's own stair step, which
+// reads the ground this update found; Jolt reuses it for that collider's later meetings. A box or a convex hull is one
+// collider and meets the capsule in one contact a pass, so a compound's walkable floor supports the character while its
+// wall, a steep face, is met with no push and no recovery, as if the body stood still. The character still pushes every
+// light body (mCanReceiveImpulses stays on). Nor does the character climb one by sliding up a surface of it that faces
+// upwards: OnContactSolve meets such a contact as a vertical wall, so the character's motion into the body stops and
+// its vertical motion stays as it was, except on the body the character stands on, which it moves across as Jolt slides
+// it, and, while the character stands on a light body, on another light body's walkable face, which it walks onto as
+// onto any ground (the next plank of a bridge); and whatever the wall leaves moving into the contact's plane (a fall
+// onto a steep face) slides along the plane, never lifting the character, so the solver never leaves it hanging on the
+// face.
 //
 // Private to the Physics module. Main thread only: CharacterVirtual calls it synchronously from ExtendedUpdate, in an order
 // that depends only on the world's state, so the records are deterministic.
@@ -61,9 +64,9 @@ namespace Engine {
 	};
 
 	// Whether `body` is a Dynamic body lighter than a character of `characterMass` kg (its mass below the character's
-	// CharacterControllerDescription::Mass): such a body never moves the character, which pushes it instead, never steps
-	// up onto it and puts at most the body's own weight on it (CharacterController.h, M34). A body whose translation is
-	// locked has no finite mass and is never light.
+	// CharacterControllerDescription::Mass): such a body moves the character only by supporting it where it stands on it
+	// (M48, see the file comment); the character pushes it, never steps up onto it and puts at most the body's own weight
+	// on it (CharacterController.h, M34). A body whose translation is locked has no finite mass and is never light.
 	[[nodiscard]] bool IsLighterThanCharacter(const JPH::Body& body, float characterMass);
 	// The same for the body `body` read through `locks`; false for a body that no longer exists. Main thread, between
 	// steps: the character's update reads through the world's no-lock interface, as CharacterVirtual's own pushes do.

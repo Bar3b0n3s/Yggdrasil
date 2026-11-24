@@ -28,9 +28,10 @@ fields mean:
 - **Breaking.** `BreakForce` (N) and `BreakTorque` (N m; not on a `DistanceJoint`), 0 never breaking.
 
 Jolt solves a joint only while one of its bodies is Dynamic and awake: a joint between two Static or Kinematic bodies
-does nothing. A trap door that must hold a character needs a mass and a motor torque that carry the character's weight
-(its `CharacterController.Mass` times gravity, at the lever arm), and a door lighter than the character never carries
-it (`skills/luau-gameplay/characters-and-input`).
+does nothing. A trap door at least as heavy as the character takes the character's whole weight, so its motor torque
+must carry it (its `CharacterController.Mass` times gravity, at the lever arm). A door lighter than the character
+still supports a character standing on it and lifts it as it swings up, but takes at most its own weight from it, so
+its motor need not carry the character's (`skills/luau-gameplay/characters-and-input`).
 
 ## Driving and reading
 

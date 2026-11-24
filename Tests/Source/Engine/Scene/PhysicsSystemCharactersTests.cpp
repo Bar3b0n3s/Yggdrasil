@@ -519,6 +519,28 @@ namespace Engine {
 			}
 		}
 
+		// The W48.2 review's finding 2: the moves wait apart from the characters, so the move of a character removed in its
+		// tick is dropped at the end of PreStep's item 5 and never reaches a character created on its entity later.
+		TEST_CASE("PhysicsSystem: a Move made before a character is removed does not reach the character created again on its entity")
+		{
+			Test::SceneTestFixture fixture;
+			static_cast<void>(AddPlayer(fixture.GetScene(), glm::vec3(0.0f, 20.0f, 0.0f)));
+			Scope<PlaySession> session = StartCharacterSession(fixture, nullptr);
+			PhysicsSystem& physics = session->GetPhysics();
+			const UUID player = Test::GetEntityId(session->GetScene(), "/Player");
+			Test::RunTicks(*session, 2);
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(1.0f, 0.0f, 0.0f)).has_value());
+			session->GetScene().FindEntityByPath("/Player").RemoveComponent<CharacterControllerComponent>();
+			session->Tick();
+			REQUIRE_FALSE(physics.GetCharacterState(player).has_value());
+			session->GetScene().FindEntityByPath("/Player").AddComponent<CharacterControllerComponent>(CharacterControllerComponent{});
+			session->Tick();
+			const Result<PhysicsCharacterState> state = physics.GetCharacterState(player);
+			REQUIRE(state.has_value());
+			CHECK(state->LastMove == CharacterMoveMode::Walk);
+			CHECK(state->Velocity.x == 0.0f);
+		}
+
 		TEST_CASE("PhysicsSystem: the last Move or MoveFree of a tick decides the next update")
 		{
 			Test::SceneTestFixture fixture;

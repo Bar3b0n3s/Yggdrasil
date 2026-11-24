@@ -2899,6 +2899,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/CharacterMoves.scene",
+			"XXH64": "9c2c6d368b139d82",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/CharacterMoves.scene.meta",
+			"XXH64": "2bda2fbbcb696804",
+			"Method": "edit.batch",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Combined2DUiGolden/Combined2DUi.scene",
 			"XXH64": "561804a66b56514f",
 			"Method": "scene.save",
@@ -4671,6 +4687,54 @@
 			"XXH64": "1748d75863321f05",
 			"Method": "script.write",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/CharacterMoves/BridgeWalker.luau",
+			"XXH64": "96d0d5f3f7397dbb",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/CharacterMoves/BridgeWalker.luau.meta",
+			"XXH64": "7f7a50fb4b2780c1",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/CharacterMoves/Climber.luau",
+			"XXH64": "c560cb0a88df7eaf",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/CharacterMoves/Climber.luau.meta",
+			"XXH64": "ab3e6313315cdf25",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/CharacterMoves/Swimmer.luau",
+			"XXH64": "b0000c77518e378d",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/CharacterMoves/Swimmer.luau.meta",
+			"XXH64": "62bf559a19b1e22f",
+			"Method": "script.write",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6835,6 +6899,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/CharacterMoves/CharacterMoves.test.luau",
+			"XXH64": "d097c53ee172499d",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/CharacterMoves/CharacterMoves.test.luau.meta",
+			"XXH64": "6a6b5c7ab86f3d8e",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Components/AuthoredValues.luau",
 			"XXH64": "6cec8b686fbc785e",
 			"Method": "script.write",
@@ -7331,6 +7411,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Record/CharacterMoves.test.luau",
+			"XXH64": "f383a67f8ba9d111",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Record/CharacterMoves.test.luau.meta",
+			"XXH64": "d99cddb72a26c403",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Record/Physics2D.test.luau",
 			"XXH64": "92a8c902b7ccf500",
 			"Method": "script.write",
@@ -7423,6 +7519,22 @@
 			"XXH64": "2b5c7e019acf250e",
 			"Method": "input.record",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/CharacterMoves.replay",
+			"XXH64": "23e3b05c9574d270",
+			"Method": "test.run",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/CharacterMoves.replay.meta",
+			"XXH64": "9be62d12bc93f80e",
+			"Method": "test.run",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -8532,7 +8644,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "a7ffeb5069b91268",
+			"XXH64": "4ddb15514af57c84",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

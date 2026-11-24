@@ -1619,7 +1619,8 @@ namespace Engine {
 			}
 			entry.Controller->Update(deltaTime, move.Velocity, characterGravity, move.Mode);
 		}
-		// The move of a character that no longer exists goes with it; one skipped above waits, as it waits in its entry.
+		// The move of a character that no longer exists goes with it; one skipped above (its entity disabled or pending
+		// destruction) waits for its next update.
 		std::erase_if(state.PendingMoves, [&state](const std::pair<const UUID, PhysicsCharacterMove>& pending)
 		{
 			return !state.Characters.contains(pending.first);

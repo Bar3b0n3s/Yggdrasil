@@ -1,0 +1,1258 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "CharacterMoves",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"CharacterController": 1,
+		"AudioListener": 1,
+		"Script": 2,
+		"HingeJoint": 1
+	},
+	"Entities": [
+		{
+			"ID": "c512bf779a415c17",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 10, 28],
+					"Rotation": [-0.190809, 0, 0, 0.98162717],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "bf3c69675219048a",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.45080334, 0.19198428, 0.099940695, 0.86598516],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "c6bb1ed64ac9f384",
+			"Name": "Shelf",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-13, -1.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [6, 1, 6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["d31facacf6bb6908"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "ca8c3426bbc18d98",
+			"Name": "Ramp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-18.074438, -2.311915, 0],
+					"Rotation": [0, 0, 0.1784248, 0.98395354],
+					"Scale": [4.806002, 1, 6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["d31facacf6bb6908"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "2f0c2ae995f6482e",
+			"Name": "Pit",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-32, -8.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [24, 1, 6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["d31facacf6bb6908"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "427327ab41966a8f",
+			"Name": "Swimmer",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-12, -0.98, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CharacterController": {
+					"Height": 1.8,
+					"Radius": 0.3,
+					"MaxSlopeAngle": 45,
+					"StepHeight": 0.3,
+					"Mass": 70,
+					"GravityFactor": 1,
+					"Layer": "Default",
+					"InheritGroundVelocity": false
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "3762c0d1e16aaa83",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "9238b6ddff95eb63",
+			"Name": "LadderFloor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, -0.5, 12],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [10, 1, 6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["d31facacf6bb6908"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "8d80620a1810a3a5",
+			"Name": "Tower",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.5, 3, 12],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [3, 6, 4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["103291d13c7ad4df"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "c231e1d7b795e57a",
+			"Name": "Ladder",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.75, 3, 12],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 6, 1]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "ed740c97eb37bff1",
+			"Name": "Climber",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.5, 0.02, 12],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CharacterController": {
+					"Height": 1.8,
+					"Radius": 0.3,
+					"MaxSlopeAngle": 45,
+					"StepHeight": 0.3,
+					"Mass": 70,
+					"GravityFactor": 1,
+					"Layer": "Default",
+					"InheritGroundVelocity": false
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "2f065a03ca36288c",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "66f0d805d9d25e30",
+			"Name": "LeftRim",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.08, -0.5, -14],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 1, 3]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["d31facacf6bb6908"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "b757ff33cd428935",
+			"Name": "RightRim",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [13.624691, -0.5, -14],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 1, 3]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["d31facacf6bb6908"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "535c31209384c1a3",
+			"Name": "Plank01",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.421726, -0.164765, -14],
+					"Rotation": [0, 0, -0.13052619, 0.9914449],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": null,
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "02b11eb76bc92d1e",
+			"Name": "Plank02",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.297844, -0.37915, -14],
+					"Rotation": [0, 0, -0.10886688, 0.99405634],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "535c31209384c1a3",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "c74678562e5a4947",
+			"Name": "Plank03",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.182481, -0.555115, -14],
+					"Rotation": [0, 0, -0.087155744, 0.9961947],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "02b11eb76bc92d1e",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "026a58becc85a376",
+			"Name": "Plank04",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.073951, -0.692325, -14],
+					"Rotation": [0, 0, -0.065403126, 0.99785894],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "c74678562e5a4947",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "176f68f43dbf5761",
+			"Name": "Plank05",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.970557, -0.79052, -14],
+					"Rotation": [0, 0, -0.043619387, 0.99904823],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "026a58becc85a376",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "1208a3f29597ffa1",
+			"Name": "Plank06",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4.870593, -0.849511, -14],
+					"Rotation": [0, 0, -0.021814885, 0.999762],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "176f68f43dbf5761",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "022f3b0a1eafb778",
+			"Name": "Plank07",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5.772346, -0.869187, -14],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "1208a3f29597ffa1",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "158b4767cc063bb0",
+			"Name": "Plank08",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6.674098, -0.849511, -14],
+					"Rotation": [0, 0, 0.021814885, 0.999762],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "022f3b0a1eafb778",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "0e643e71dd1d2dec",
+			"Name": "Plank09",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [7.574134, -0.79052, -14],
+					"Rotation": [0, 0, 0.043619387, 0.99904823],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "158b4767cc063bb0",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "80821bad92393259",
+			"Name": "Plank10",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [8.470741, -0.692325, -14],
+					"Rotation": [0, 0, 0.065403126, 0.99785894],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "0e643e71dd1d2dec",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "f723edf9058a36e6",
+			"Name": "Plank11",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [9.362211, -0.555115, -14],
+					"Rotation": [0, 0, 0.087155744, 0.9961947],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "80821bad92393259",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "3c35782665dc9eb7",
+			"Name": "Plank12",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [10.246847, -0.37915, -14],
+					"Rotation": [0, 0, 0.10886688, 0.99405634],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "f723edf9058a36e6",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "605b4ae5dd790fc6",
+			"Name": "Plank13",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [11.122966, -0.164765, -14],
+					"Rotation": [0, 0, 0.13052619, 0.9914449],
+					"Scale": [0.9, 0.1, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 25,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"HingeJoint": {
+					"ConnectedBody": "3c35782665dc9eb7",
+					"Anchor": [-0.5, 0.5, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "fe3ae84a81dc238f",
+			"Name": "End",
+			"Parent": "605b4ae5dd790fc6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.5, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"HingeJoint": {
+					"ConnectedBody": null,
+					"Anchor": [0, 0, 0],
+					"Axis": [0, 0, 1],
+					"UseLimits": false,
+					"LowerAngle": -90,
+					"UpperAngle": 90,
+					"MaxFrictionTorque": 0,
+					"Motor": "Off",
+					"MotorTargetVelocity": 0,
+					"MotorTargetAngle": 0,
+					"MotorMaxTorque": 1000,
+					"MotorFrequency": 2,
+					"MotorDamping": 1,
+					"CollideConnected": false,
+					"BreakForce": 0,
+					"BreakTorque": 0,
+					"Broken": false
+				}
+			}
+		},
+		{
+			"ID": "3cbe846849ce4468",
+			"Name": "Walker",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.02, -14],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CharacterController": {
+					"Height": 1.8,
+					"Radius": 0.3,
+					"MaxSlopeAngle": 45,
+					"StepHeight": 0.3,
+					"Mass": 70,
+					"GravityFactor": 1,
+					"Layer": "Default",
+					"InheritGroundVelocity": false
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "83c3f54e878ffc81",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

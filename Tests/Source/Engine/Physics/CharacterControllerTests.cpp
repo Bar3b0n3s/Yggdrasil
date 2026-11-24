@@ -1859,6 +1859,52 @@ namespace Engine {
 				REQUIRE(nearest < standing.x + 0.6f);
 				CHECK(glm::length(glm::vec2(character->GetPose().Position.x - standing.x, character->GetPose().Position.z - standing.z)) < 0.01f);
 			}
+
+			// The W48.2 review's finding 3 (a): from a light ground, only another light body's walkable face is walked onto. A
+			// 0.35 kg box 0.25 m high, held by a static stop, is a wall to a character walking into it from the light trough's
+			// floor: the box's top edge meets the capsule with a steep normal, so the character never slides up onto it.
+			{
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				const BodyHandle trough = standOnTrough(*world);
+				static_cast<void>(CreateBlock(*world, glm::vec3(1.55f, 0.6f, 0.0f), glm::vec3(0.05f, 0.3f, 0.5f)));
+				static_cast<void>(CreateCrate(*world, glm::vec3(1.25f, 0.1f, 0.0f), glm::vec3(0.25f, 0.125f, 0.4f), 0.35f));
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.12f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().GroundBody == trough);
+				const float floor = character->GetPose().Position.y;
+				float highest = -std::numeric_limits<float>::infinity();
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					world->SetLinearVelocity(trough, glm::vec3(0.0f));
+					Walk(*world, *character, glm::vec3(2.0f, 0.0f, 0.0f), 1);
+					highest = std::max(highest, character->GetPose().Position.y);
+				}
+				REQUIRE(character->GetPose().Position.x > 0.5f);
+				CHECK(highest - floor < 0.05f);
+			}
+
+			// The W48.2 review's finding 3 (b): only the light body the character stands on supports it. A 2 kg board 6 cm thick
+			// is driven along X at 1 m/s under the feet of a character standing on the static floor, which stays its ground
+			// (the earlier body of two equally flat ones). The board's top meets the capsule with a straight-up walkable normal
+			// (no wall to the slide), and still neither lifts nor carries the character: it passes into the capsule.
+			{
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				const BodyHandle board = CreateCrate(*world, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.4f, 0.03f, 0.5f), 2.0f);
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().IsGrounded);
+				const glm::vec3 standing = character->GetPose().Position;
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					world->SetLinearVelocity(board, glm::vec3(1.0f, 0.0f, 0.0f));
+					Walk(*world, *character, glm::vec3(0.0f), 1);
+				}
+				// The board lies under the character's base.
+				REQUIRE(std::abs(world->GetPose(board).Position.x) < 0.3f);
+				CHECK(character->GetPose().Position.y - standing.y < 0.01f);
+				CHECK(glm::length(glm::vec2(character->GetPose().Position.x - standing.x, character->GetPose().Position.z - standing.z)) < 0.01f);
+			}
 		}
 
 		// The bridge's simulation, the character's support on the light deck included, is the same whatever Jolt's thread count
