@@ -48,6 +48,15 @@ namespace Engine {
 				&& std::isfinite(draw.Rotation) && std::isfinite(draw.Velocity.x) && std::isfinite(draw.Velocity.y) && std::isfinite(draw.Velocity.z);
 		}
 
+		// M47: whether every recorded wave phase is finite.
+		static bool AreFinitePhases(const std::array<float, MaxWaterWaves>& phases)
+		{
+			return std::ranges::all_of(phases, [](float phase)
+			{
+				return std::isfinite(phase);
+			});
+		}
+
 		// Whether `camera` is another camera than `previous` for the history: another entity, projection kind or viewport.
 		static bool IsCut(const CameraData& camera, const CameraData& previous)
 		{
@@ -81,6 +90,7 @@ namespace Engine {
 			m_Frame = 0;
 			m_Worlds.clear();
 			m_Particles.clear();
+			m_Waters.clear();
 			camera.PreviousViewProjection.reset();
 			camera.DeltaTime = 0.0f;
 		}
@@ -156,6 +166,23 @@ namespace Engine {
 			}
 		}
 
+		// M47 (decision 3): each water's previous World and phases, by its Entity (the first recorded water of that entity; a
+		// Water is one per entity).
+		for (WaterItem& water : snapshot.Waters)
+		{
+			water.PreviousWorld.reset();
+			water.PreviousPhases.reset();
+			const auto match = std::lower_bound(m_Waters.begin(), m_Waters.end(), water.Entity, [](const WaterHistoryRecord& record, const UUID& entity)
+			{
+				return record.Entity < entity;
+			});
+			if (match != m_Waters.end() && match->Entity == water.Entity && Utils::IsFinite(match->World) && Utils::AreFinitePhases(match->Phases))
+			{
+				water.PreviousWorld = match->World;
+				water.PreviousPhases = match->Phases;
+			}
+		}
+
 		// This frame becomes the next Apply's previous one.
 		if (snapshot.HasCamera)
 			m_Camera = camera;
@@ -201,6 +228,19 @@ namespace Engine {
 		}
 		if (m_Particles.capacity() > std::max<size_t>(4 * m_Particles.size(), MaxRetainedParticleRecords))
 			std::vector<ParticleRecord>(m_Particles.begin(), m_Particles.end()).swap(m_Particles);
+		m_Waters.clear();
+		m_Waters.reserve(snapshot.Waters.size());
+		for (const WaterItem& water : snapshot.Waters)
+		{
+			WaterHistoryRecord record{ .Entity = water.Entity, .World = water.World };
+			for (uint32_t wave = 0; wave < MaxWaterWaves; ++wave)
+				record.Phases[wave] = water.Waves[wave].Phase;
+			m_Waters.push_back(record);
+		}
+		std::ranges::stable_sort(m_Waters, [](const WaterHistoryRecord& left, const WaterHistoryRecord& right)
+		{
+			return left.Entity < right.Entity;
+		});
 		m_ResetPending = false;
 	}
 

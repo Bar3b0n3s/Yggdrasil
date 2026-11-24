@@ -32,7 +32,7 @@ namespace Engine {
 			AssetType Type = AssetType::None;
 		};
 
-		constexpr std::array<ProceduralEntry, 22> ProceduralEntries = { {
+		constexpr std::array<ProceduralEntry, 24> ProceduralEntries = { {
 			{ BuiltinAssetHandles::CubeMesh, "engine://Meshes/Cube", AssetType::Mesh },
 			{ BuiltinAssetHandles::SphereMesh, "engine://Meshes/Sphere", AssetType::Mesh },
 			{ BuiltinAssetHandles::PlaneMesh, "engine://Meshes/Plane", AssetType::Mesh },
@@ -53,6 +53,8 @@ namespace Engine {
 			{ BuiltinAssetHandles::SpriteCircleTexture, "engine://Textures/SpriteCircle", AssetType::Texture },
 			{ BuiltinAssetHandles::ParticleTexture, "engine://Textures/Particle", AssetType::Texture },
 			{ BuiltinAssetHandles::DissolveNoiseTexture, "engine://Textures/DissolveNoise", AssetType::Texture },
+			{ BuiltinAssetHandles::WaterNormalTexture, "engine://Textures/WaterNormal", AssetType::Texture },
+			{ BuiltinAssetHandles::WaterFoamTexture, "engine://Textures/WaterFoam", AssetType::Texture },
 			{ BuiltinAssetHandles::SilentClip, "engine://Audio/Silence", AssetType::AudioClip },
 			// M26 (Docs/Decisions/0037-m26-contract.md decision 15): the built-in LUTs' block, 0x0281 to 0x02c0.
 			{ BuiltinAssetHandles::IdentityLut, "engine://Luts/Identity", AssetType::Lut },
@@ -72,7 +74,7 @@ namespace Engine {
 			{ BuiltinAssetHandles::DefaultMaterial, BuiltinMaterial::Default },
 			{ BuiltinAssetHandles::ErrorMaterial, BuiltinMaterial::Error },
 		} };
-		constexpr std::array<std::pair<AssetHandle, BuiltinTexture>, 11> ProceduralTextures = { {
+		constexpr std::array<std::pair<AssetHandle, BuiltinTexture>, 13> ProceduralTextures = { {
 			{ BuiltinAssetHandles::WhiteTexture, BuiltinTexture::White },
 			{ BuiltinAssetHandles::BlackTexture, BuiltinTexture::Black },
 			{ BuiltinAssetHandles::FlatNormalTexture, BuiltinTexture::FlatNormal },
@@ -88,6 +90,9 @@ namespace Engine {
 			{ BuiltinAssetHandles::ParticleTexture, BuiltinTexture::Particle },
 			// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6): the dissolve noise, never compressed.
 			{ BuiltinAssetHandles::DissolveNoiseTexture, BuiltinTexture::DissolveNoise },
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): the water's normal map and foam map, never compressed.
+			{ BuiltinAssetHandles::WaterNormalTexture, BuiltinTexture::WaterNormal },
+			{ BuiltinAssetHandles::WaterFoamTexture, BuiltinTexture::WaterFoam },
 		} };
 		// M26 (Docs/Decisions/0037-m26-contract.md decision 15): the built-in LUTs, generated in code (GenerateBuiltinLut).
 		constexpr std::array<std::pair<AssetHandle, BuiltinLut>, 1> ProceduralLuts = { {

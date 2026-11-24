@@ -213,6 +213,26 @@
 			"Generator": ""
 		},
 		{
+			"Handle": "000000000000018d",
+			"Path": "engine://Textures/WaterNormal",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "000000000000018e",
+			"Path": "engine://Textures/WaterFoam",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
 			"Handle": "00000000000001c1",
 			"Path": "engine://Fonts/Default",
 			"Type": "Font",

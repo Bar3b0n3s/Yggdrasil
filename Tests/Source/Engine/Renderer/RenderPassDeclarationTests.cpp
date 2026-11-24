@@ -27,6 +27,7 @@
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
 #include "Engine/Renderer/UpscalePass.h"
+#include "Engine/Renderer/WaterPass.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <algorithm>
@@ -216,7 +217,8 @@ namespace Engine {
 		// M47's contract (C47, Docs/Decisions/0065-m47-water.md decisions 2 and 3; phase 8's ledger): the Water pass after the
 		// skybox and before SSR in Forward, with its two rows and its WaterRefraction target, and the Underwater pass first in
 		// HdrPost, before TAA; declared without pipelines until W47.2's render stream and W47.3 set them, as M26's contract
-		// declared its passes, so the startup count is unchanged.
+		// declared its passes. W47.2's render stream gives Water its two pipelines of the program Water (the surface, and the
+		// surface with EntityId); Underwater has none until W47.3.
 		TEST_CASE("RenderPassDeclarations: the water comes after the skybox and before SSR, and the underwater view first in HdrPost")
 		{
 			const auto find = [](std::string_view name)
@@ -244,7 +246,11 @@ namespace Engine {
 			REQUIRE(underwater->StatsRows.size() == 1);
 			CHECK(underwater->StatsRows[0] == "Underwater");
 			CHECK(underwater->Targets.empty());
-			CHECK(water->PipelineCount == 0);
+			CHECK(water->PipelineCount == 2);
+			CHECK(water->PipelineCount == WaterPass::PipelineCount);
+			REQUIRE(water->Programs.size() == 1);
+			CHECK(water->Programs[0] == "Water");
+			CHECK(WaterPass::GetLayoutDescriptions().size() == WaterPass::PipelineCount);
 			CHECK(underwater->PipelineCount == 0);
 		}
 
@@ -286,8 +292,9 @@ namespace Engine {
 			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22); 74 with M32's Ssr classification
 			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14), 77 with M33's Particles pass
 			// (Docs/Decisions/0048-m33-particle-look.md decision 4) and 76 without M26's HdrAdditive, which M33's merge removed
-			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			CHECK(GetDeclaredPipelineCount() == 77);
+			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3);
+			// 79 with M47's Water pass (Docs/Decisions/0065-m47-water.md decision 3, W47.2's render stream).
+			CHECK(GetDeclaredPipelineCount() == 79);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -316,8 +323,9 @@ namespace Engine {
 			CHECK((lights - 1)->Name == "Sprites");
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
 			CHECK(QuadBatcher::PipelineCount == 5);
-			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain.
-			CHECK(GetDeclaredPipelineCount() == 77);
+			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain, 79 with
+			// M47's Water pass.
+			CHECK(GetDeclaredPipelineCount() == 79);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -349,8 +357,9 @@ namespace Engine {
 			// 1 and the Ssr pass's 2, decision 13, and the terrain pass's 3, decision 22), M32's 1 (the Ssr classification,
 			// Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and M33's 3 (the Particles pass,
 			// Docs/Decisions/0048-m33-particle-look.md decision 4), less the QuadBatcher's HdrAdditive, which M33's merge removed
-			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			static_assert(GetDeclaredPipelineCount() == 77);
+			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3),
+			// and M47's 2 (the Water pass's surfaces, Docs/Decisions/0065-m47-water.md decision 3).
+			static_assert(GetDeclaredPipelineCount() == 79);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

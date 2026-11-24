@@ -47,6 +47,7 @@
 #include "Shared/TextVertex.h"
 #include "Shared/TonemapConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Shared/WaterConstants.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/MatrixConventionProgram.h"
 #include "Support/SmokeProgram.h"
@@ -725,6 +726,50 @@ namespace Engine {
 				.Program = "Smoke",
 				.Entry = "CSMain",
 				.Permutation = { { .Key = "SMOKE_SATURATE", .Value = "0" } },
+			},
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: last): the Water pass's records (set 1's t0, a
+			// structured buffer) and its per-draw push constants.
+			{
+				.Name = "WaterRecord",
+				.Size = sizeof(WaterRecord),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, PreviousFromCurrent),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Waves),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, WavePhases),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Origin),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, CameraOffset),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, FrameOrigin),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, AxisX),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, HalfExtents),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Depth),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Headroom),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, BaseHeight),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, WaveCount),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, WaterCount),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Flags),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, ShallowColor),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, DeepColor),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Look),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Detail),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Underwater),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, PickId),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, PlanarSlot),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Padding0),
+					ENGINE_TEST_SHARED_FIELD(WaterRecord, Padding1),
+				},
+				.Program = "Water",
+				.Entry = "VSSurface",
+			},
+			{
+				.Name = "WaterDrawConstants",
+				.Size = sizeof(WaterDrawConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(WaterDrawConstants, LevelOrigin),
+					ENGINE_TEST_SHARED_FIELD(WaterDrawConstants, CellSize),
+					ENGINE_TEST_SHARED_FIELD(WaterDrawConstants, Water),
+				},
+				.Program = "Water",
+				.Entry = "VSSurface",
 			},
 		};
 	}

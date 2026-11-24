@@ -86,6 +86,23 @@ namespace Engine {
 		constexpr uint32_t DissolveNoiseLowest = 1;
 		constexpr uint32_t DissolveNoiseLevels = 254;
 
+		// The water's maps (M47, BuiltinTexture::WaterNormal and WaterFoam): their side; each one's octaves' cell sizes in texels
+		// with their weights, and the first lattice of its hash (GetDissolveLatticeValue's octave argument), apart from the
+		// dissolve noise's 0 to 2.
+		constexpr uint32_t WaterMapSize = 128;
+		constexpr std::array<uint32_t, 4> WaterNormalCellSizes = { 32, 16, 8, 4 };
+		constexpr std::array<int64_t, 4> WaterNormalWeights = { 8, 4, 2, 1 };
+		constexpr uint32_t WaterNormalFirstLattice = 16;
+		constexpr std::array<uint32_t, 3> WaterFoamCellSizes = { 16, 8, 4 };
+		constexpr std::array<int64_t, 3> WaterFoamWeights = { 4, 2, 1 };
+		constexpr uint32_t WaterFoamFirstLattice = 32;
+		// The normal map's heights are its noise shifted right by WaterHeightShift (at most about 10^6), so the squares of its
+		// slopes stay far inside int64_t.
+		constexpr uint32_t WaterHeightShift = 28;
+		// The foam: clear below WaterFoamThreshold hundredths of the noise's range, dense WaterFoamRamp hundredths above it.
+		constexpr int64_t WaterFoamThreshold = 45;
+		constexpr int64_t WaterFoamRamp = 30;
+
 	}
 
 	namespace Utils {
@@ -329,6 +346,76 @@ namespace Engine {
 			return total;
 		}
 
+		// M47: the value noise of texel (x, y) of a WaterMapSize texture, GetDissolveNoiseValue's sum over `cellSizes` with
+		// `weights` (each cell size dividing WaterMapSize and 2 * cellSizes[0]), its lattices GetDissolveLatticeValue's from
+		// `firstLattice` on. Exact integers, at most 255 * (the weights' sum) * (2 * cellSizes[0])^6.
+		template<size_t Octaves>
+		static int64_t GetWaterNoiseValue(uint32_t x, uint32_t y, const std::array<uint32_t, Octaves>& cellSizes, const std::array<int64_t, Octaves>& weights,
+			uint32_t firstLattice)
+		{
+			int64_t total = 0;
+			const int64_t largest = 2 * static_cast<int64_t>(cellSizes[0]);
+			for (uint32_t octave = 0; octave < Octaves; ++octave)
+			{
+				const uint32_t cellSize = cellSizes[octave];
+				const uint32_t cells = WaterMapSize / cellSize;
+				const uint32_t i = x / cellSize;
+				const uint32_t j = y / cellSize;
+				const int64_t side = 2 * static_cast<int64_t>(cellSize);
+				const int64_t whole = side * side * side;
+				const int64_t sx = GetDissolveSmoothstep(x % cellSize, cellSize);
+				const int64_t sy = GetDissolveSmoothstep(y % cellSize, cellSize);
+				const uint32_t nextI = (i + 1) % cells;
+				const uint32_t nextJ = (j + 1) % cells;
+				const uint32_t lattice = firstLattice + octave;
+				const int64_t blend = GetDissolveLatticeValue(lattice, i, j) * (whole - sx) * (whole - sy)
+					+ GetDissolveLatticeValue(lattice, nextI, j) * sx * (whole - sy) + GetDissolveLatticeValue(lattice, i, nextJ) * (whole - sx) * sy
+					+ GetDissolveLatticeValue(lattice, nextI, nextJ) * sx * sy;
+				const int64_t ratio = largest / side;
+				total += weights[octave] * blend * (ratio * ratio * ratio * ratio * ratio * ratio);
+			}
+			return total;
+		}
+
+		// The largest integer whose square is at most `value`.
+		static uint64_t IntegerSquareRoot(uint64_t value)
+		{
+			uint64_t root = 0;
+			uint64_t bit = uint64_t{ 1 } << 62;
+			while (bit > value)
+				bit >>= 2;
+			while (bit != 0)
+			{
+				if (value >= root + bit)
+				{
+					value -= root + bit;
+					root = (root >> 1) + bit;
+				}
+				else
+					root >>= 1;
+				bit >>= 2;
+			}
+			return root;
+		}
+
+		// `numerator` / `denominator` (positive) rounded half away from zero.
+		static int64_t RoundedQuotient(int64_t numerator, int64_t denominator)
+		{
+			return numerator >= 0 ? (2 * numerator + denominator) / (2 * denominator) : -((-2 * numerator + denominator) / (2 * denominator));
+		}
+
+		// Appends `texels`' level and every smaller one, each Downsample's of the one before, down to 1 x 1.
+		static void AppendMipChain(TextureData& texture, std::vector<Texel> texels, uint32_t size)
+		{
+			for (uint32_t extent = size;; extent /= 2)
+			{
+				AppendLevel(texture, extent, extent, texels);
+				if (extent == 1)
+					break;
+				texels = Downsample(texels, extent, extent, false);
+			}
+		}
+
 		[[maybe_unused]] static bool IsSpriteTexture(BuiltinTexture texture)
 		{
 			return texture == BuiltinTexture::SpriteSquare || texture == BuiltinTexture::SpriteRounded || texture == BuiltinTexture::SpriteBevel
@@ -353,6 +440,10 @@ namespace Engine {
 					return GenerateBuiltinParticleTexture();
 				case BuiltinTexture::DissolveNoise:
 					return GenerateBuiltinDissolveNoiseTexture();
+				case BuiltinTexture::WaterNormal:
+					return GenerateBuiltinWaterNormalTexture();
+				case BuiltinTexture::WaterFoam:
+					return GenerateBuiltinWaterFoamTexture();
 			}
 			ENGINE_CORE_ASSERT(false, "Unknown BuiltinTexture {}", std::to_underlying(texture));
 			return CreateChecker(Magenta, Black);
@@ -375,6 +466,8 @@ namespace Engine {
 			case BuiltinTexture::SpriteCircle:  return "SpriteCircle";
 			case BuiltinTexture::Particle:      return "Particle";
 			case BuiltinTexture::DissolveNoise: return "DissolveNoise";
+			case BuiltinTexture::WaterNormal:   return "WaterNormal";
+			case BuiltinTexture::WaterFoam:     return "WaterFoam";
 		}
 		return "Unknown";
 	}
@@ -446,6 +539,91 @@ namespace Engine {
 		}
 		// One level: the dissolve samples the noise without mips, so a distant surface keeps its pattern instead of a grey mean.
 		generated.Mips.push_back({ .Width = DissolveNoiseSize, .Height = DissolveNoiseSize, .Offset = 0, .Size = TexelCount });
+		return generated;
+	}
+
+	TextureData GenerateBuiltinWaterNormalTexture()
+	{
+		// The heights, then their wrapping central differences, whose normal (-dx, -dy, s) has s the largest difference of the
+		// map, so its steepest point leans 45 degrees.
+		constexpr size_t TexelCount = static_cast<size_t>(WaterMapSize) * WaterMapSize;
+		std::vector<int64_t> heights(TexelCount);
+		for (uint32_t y = 0; y < WaterMapSize; ++y)
+		{
+			for (uint32_t x = 0; x < WaterMapSize; ++x)
+			{
+				heights[static_cast<size_t>(y) * WaterMapSize + x] =
+					Utils::GetWaterNoiseValue(x, y, WaterNormalCellSizes, WaterNormalWeights, WaterNormalFirstLattice) >> WaterHeightShift;
+			}
+		}
+		const auto height = [&heights](uint32_t x, uint32_t y)
+		{
+			return heights[static_cast<size_t>(y % WaterMapSize) * WaterMapSize + x % WaterMapSize];
+		};
+		std::vector<int64_t> slopesX(TexelCount);
+		std::vector<int64_t> slopesY(TexelCount);
+		int64_t steepest = 1;
+		for (uint32_t y = 0; y < WaterMapSize; ++y)
+		{
+			for (uint32_t x = 0; x < WaterMapSize; ++x)
+			{
+				const size_t index = static_cast<size_t>(y) * WaterMapSize + x;
+				slopesX[index] = height(x + 1, y) - height(x + WaterMapSize - 1, y);
+				slopesY[index] = height(x, y + 1) - height(x, y + WaterMapSize - 1);
+				steepest = std::max({ steepest, slopesX[index] < 0 ? -slopesX[index] : slopesX[index], slopesY[index] < 0 ? -slopesY[index] : slopesY[index] });
+			}
+		}
+		std::vector<Texel> texels(TexelCount);
+		for (size_t index = 0; index < TexelCount; ++index)
+		{
+			const int64_t nx = -slopesX[index];
+			const int64_t ny = -slopesY[index];
+			const auto length = static_cast<int64_t>(Utils::IntegerSquareRoot(static_cast<uint64_t>(nx * nx + ny * ny + steepest * steepest)));
+			const auto encode = [length](int64_t component)
+			{
+				return static_cast<uint8_t>(128 + Utils::RoundedQuotient(127 * component, length));
+			};
+			texels[index] = Texel{ .R = encode(nx), .G = encode(ny), .B = encode(steepest), .A = 255 };
+		}
+		TextureData generated;
+		generated.Format = TextureFormat::RGBA8Unorm;
+		generated.Width = WaterMapSize;
+		generated.Height = WaterMapSize;
+		Utils::AppendMipChain(generated, std::move(texels), WaterMapSize);
+		return generated;
+	}
+
+	TextureData GenerateBuiltinWaterFoamTexture()
+	{
+		// The noise's range, 255 times the weights' sum times (2 * the largest cell)^6, and each texel's foam past the threshold.
+		int64_t range = 255 * (WaterFoamWeights[0] + WaterFoamWeights[1] + WaterFoamWeights[2]);
+		for (uint32_t power = 0; power < 6; ++power)
+			range *= 2 * static_cast<int64_t>(WaterFoamCellSizes[0]);
+		std::vector<Texel> texels(static_cast<size_t>(WaterMapSize) * WaterMapSize);
+		for (uint32_t y = 0; y < WaterMapSize; ++y)
+		{
+			for (uint32_t x = 0; x < WaterMapSize; ++x)
+			{
+				const int64_t noise = Utils::GetWaterNoiseValue(x, y, WaterFoamCellSizes, WaterFoamWeights, WaterFoamFirstLattice);
+				const int64_t above = std::clamp<int64_t>(100 * noise - WaterFoamThreshold * range, 0, WaterFoamRamp * range);
+				const auto value = static_cast<uint8_t>(Utils::RoundedQuotient(255 * above, WaterFoamRamp * range));
+				texels[static_cast<size_t>(y) * WaterMapSize + x] = Texel{ .R = value, .G = value, .B = value, .A = value };
+			}
+		}
+		// Built as RGBA8 levels, then kept to their red channel.
+		TextureData chain;
+		Utils::AppendMipChain(chain, std::move(texels), WaterMapSize);
+		TextureData generated;
+		generated.Format = TextureFormat::R8Unorm;
+		generated.Width = WaterMapSize;
+		generated.Height = WaterMapSize;
+		for (const TextureMip& mip : chain.Mips)
+		{
+			const uint64_t offset = generated.Pixels.size();
+			for (uint64_t texel = 0; texel < mip.Size / 4; ++texel)
+				generated.Pixels.push_back(chain.Pixels[mip.Offset + texel * 4]);
+			generated.Mips.push_back({ .Width = mip.Width, .Height = mip.Height, .Offset = offset, .Size = mip.Size / 4 });
+		}
 		return generated;
 	}
 

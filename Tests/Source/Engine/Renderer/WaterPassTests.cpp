@@ -11,6 +11,10 @@
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/TemporalHistory.h"
+#include "Shared/WaterConstants.h"
+#include "Support/BindingSetCreationFails.h"
+#include "Support/BufferCreationFails.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/RenderReference.h"
@@ -33,8 +37,8 @@
 // targets back: SceneColor (linear HDR radiance), SceneVelocity, SceneRoughness and EntityId. The waters are built as render
 // extraction builds them (Scene/RenderExtraction.cpp's MakeWaterItem): Physics/WaterWaves.h's ResolveWaterSurface and
 // ComputeWaterWavePhases at the case's time, so the CPU surface the cases compare with is the one the queries sample.
-// The render stream (W47.2) commits these acceptance cases skipped first, with their bodies, each recorded failing on C47's
-// stubs (the W47.2 record), and lifts the skips with the pass.
+// The render stream (W47.2) committed the seven acceptance cases skipped first, with their bodies, each recorded failing on
+// C47's stubs (the W47.2 record), and lifted the skips with the pass.
 
 namespace Engine {
 
@@ -214,7 +218,7 @@ namespace Engine {
 		// precision, about 0.3 mm here). The CPU height under the pixel's centre is within 1 mm of it at every pixel: the GPU's
 		// waves (Common/Waves.slang, displacing the clipmap's vertices forward) are the CPU's, and the grid's linear
 		// interpolation of this swell stays far under 1 mm in the finest level's 0.25 m cells.
-		TEST_CASE("Water: the GPU surface equals the CPU surface within 1 mm" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Water: the GPU surface equals the CPU surface within 1 mm" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -269,7 +273,7 @@ namespace Engine {
 		// A scene without water records nothing of the water: no Water or WaterRefraction row, no depth pyramid for it (SSAO
 		// and SSR off) and no surfaces counted, and renders the same bytes before and after a render that drew a water (which
 		// changes the image and records the rows and the pyramid), so the water leaves no state that reaches a later render.
-		TEST_CASE("Water: a scene without water renders the same bytes" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Water: a scene without water renders the same bytes" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -318,7 +322,7 @@ namespace Engine {
 		// refracts, absorbed by Beer-Lambert over the water column (Clarity 4 m): the shallows let exp(-0.2 / 4), about 95 %, of
 		// the floor through (less the little the surface reflects), the deep water about 0.06 %. Without the water both halves
 		// show the floor.
-		TEST_CASE("Water: shallow water shows the bottom and deep water absorbs it" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Water: shallow water shows the bottom and deep water absorbs it" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -355,7 +359,7 @@ namespace Engine {
 		// the marker's mirror image in the water (the marker's centre reflected in the base plane) is green; without SSR it is
 		// black. The water flags its pixels in SceneRoughness (word 1's y byte, so the composite takes the water's own occlusion)
 		// and writes a non-zero specular multiplier there (word 0), so SSR traces them.
-		TEST_CASE("Water: SSR traces and composites over the water" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Water: SSR traces and composites over the water" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -404,7 +408,7 @@ namespace Engine {
 		// lake under the sea's level). With a Headroom of 5 m its volume reaches above the sea, so inside its footprint the Ocean
 		// writes zero coverage and the picking view's EntityId shows the lake; outside it, the sea. With a Headroom of 0.5 m the
 		// volume ends under the sea's surface, which is then drawn over the lake inside the footprint too.
-		TEST_CASE("Water: a Rectangle's volume masks the Ocean" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Water: a Rectangle's volume masks the Ocean" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -451,7 +455,7 @@ namespace Engine {
 		// snapshot as without it, and its mirror view records as many draws, while the main view draws the sea below the glass
 		// (whose crests stay under its lower edge). A probe captured over the sea gives the same texels with the Ocean as
 		// without it.
-		TEST_CASE("Water: mirror views and probe captures leave the water out" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Water: mirror views and probe captures leave the water out" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -511,10 +515,10 @@ namespace Engine {
 			device.RunGarbageCollection();
 		}
 
-		// The pass's pipelines and ring meshes live in the pipeline set (place 1 of Architecture Â§8.14 item 10) and its records,
+		// The pass's pipelines and ring meshes live in the pipeline set (place 1 of Architecture §8.14 item 10) and its records,
 		// binding sets and WaterRefraction in the renderer's state and pool (place 2): the recovery releases and creates them
 		// again, and a scene of a swell over a floor renders the same bytes.
-		TEST_CASE("Water: a water scene renders the same bytes after a device loss" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Water: a water scene renders the same bytes after a device loss" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -559,6 +563,138 @@ namespace Engine {
 			}
 			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+		}
+
+		// The motion vectors through the view's history (Renderer/TemporalHistory.h fills a water's previous pose and phases by
+		// its entity): a still water under a still camera has exactly zero motion at every pixel; waves a moment later move its
+		// pixels; a tide that raises it (its pose, at the same waves) moves them up the image, as a camera looking down at it
+		// sees.
+		TEST_CASE("Water: the motion vectors follow the waves and the water's pose across frames, and a still water has none"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				RenderViewHistory history;
+				const auto render = [&device, &fixture, &history](const RenderSnapshot& source)
+				{
+					RenderSnapshot snapshot = source;
+					history.Apply(snapshot, 0.0f);
+					const Status rendered = RenderStatus(device, fixture, snapshot);
+					REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+					CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 1);
+					const Image velocity = ReadTexture(device, fixture.Renderer().GetSceneVelocityTexture());
+					glm::dvec2 sum(0.0);
+					uint32_t moving = 0;
+					for (uint32_t y = 0; y < Size; ++y)
+					{
+						for (uint32_t x = 0; x < Size; ++x)
+						{
+							const glm::dvec2 motion(HalfTexel(velocity, x, y, 2));
+							sum += motion;
+							moving += motion != glm::dvec2(0.0) ? 1U : 0U;
+						}
+					}
+					return std::pair{ sum / static_cast<double>(Size * Size), moving };
+				};
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 4.0f, 3.0f), glm::vec3(0.0f, 0.0f, -4.0f),
+					glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+				snapshot.Camera.Entity = UUID(77);
+				snapshot.Waters.push_back(MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), SwellWaves, 2.0, 600, 0));
+
+				static_cast<void>(render(snapshot));
+				const auto [stillMean, still] = render(snapshot);
+				CHECK(still == 0);
+
+				snapshot.Waters[0] = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), SwellWaves, 2.25, 600, 0);
+				const auto [wavingMean, waving] = render(snapshot);
+				CHECK(waving > Size * Size / 2);
+
+				snapshot.Waters[0] = MakeWater(RenderWaterShape::Ocean, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, 0.0f)), SwellWaves, 2.25, 600, 0);
+				const auto [risingMean, rising] = render(snapshot);
+				CHECK(rising > Size * Size / 2);
+				// Up the image is -y in scene pixels.
+				CHECK(risingMean.y < -0.5);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// Out of memory (Architecture §8.14 item 7, the per-render rule of ADR 0029 decision 44). Under oom-rendertarget the first
+		// render target created after the fault is armed is the render's WaterRefraction (the depth pyramid's and SSR's targets
+		// exist since the first render), so that render draws no water: the same bytes as the scene without it, no Water row,
+		// no surface counted, and the Gpu error returned, as a host trims after the frame. In the next render the water's set
+		// cannot be created: it draws no water either (its copy of SceneColor changes nothing) and returns the error; the render
+		// after it draws the water. A second water outgrows the view's records, whose buffer then cannot be created: that render
+		// draws neither water and returns the error, and the next render draws both.
+		TEST_CASE("Water: a water whose refraction, set or records cannot be created is left out of the render, which returns the error, and the next render draws it"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomRenderTarget });
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot dry = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, -3.0f), glm::vec3(0.0f, 1.0f, 0.0f),
+					100.0f);
+				dry.Environment.FallbackColor = glm::vec3(0.3f);
+				dry.Post.SsrEnabled = true;
+				dry.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(0.0f, -1.0f, -3.0f), glm::vec2(10.0f)), .Mesh = QuadMeshHandle, .Materials = { GreyMaterialHandle }, .Entity = UUID(1) });
+				const Image without = fixture.Render(dry);
+				device.RunGarbageCollection(); // the first frame's collection arms the fault
+
+				RenderSnapshot wet = dry;
+				wet.Waters.push_back(MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), SwellWaves, 1.0, 600, 0));
+				const Status failed = RenderStatus(device, fixture, wet);
+				REQUIRE_FALSE(failed.has_value());
+				CHECK(failed.error().GetCode() == ErrorCode::Gpu);
+				CHECK_FALSE(device.IsLost());
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 0);
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Water") == nullptr);
+				CHECK(fixture.Read().Pixels == without.Pixels);
+
+				Status unbound;
+				{
+					// The water's set 1: its records, the refraction, the pyramid and its two maps (Renderer/WaterPass.h).
+					const Test::BindingSetCreationFails fails(device, [](const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& /*layout*/)
+					{
+						return desc.bindings.size() == 5 && desc.bindings[0].type == nvrhi::ResourceType::StructuredBuffer_SRV;
+					});
+					unbound = RenderStatus(device, fixture, wet);
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				CHECK_FALSE(unbound.has_value());
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 0);
+				CHECK(fixture.Read().Pixels == without.Pixels);
+
+				const Status recovered = RenderStatus(device, fixture, wet);
+				REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 1);
+				CHECK(fixture.Read().Pixels != without.Pixels);
+
+				WaterItem pool = MakeWater(RenderWaterShape::Rectangle, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, -3.0f)), {}, 0.0, 601, 0);
+				pool.Size = glm::vec2(2.0f);
+				wet.Waters.push_back(pool);
+				Status outgrown;
+				{
+					// The view's records for two waters are the only storage buffer of their size the render creates.
+					const Test::BufferCreationFails fails([](const VkBufferCreateInfo& info)
+					{
+						return info.size == 2 * sizeof(WaterRecord) && (info.usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) != 0;
+					});
+					outgrown = RenderStatus(device, fixture, wet);
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				CHECK_FALSE(outgrown.has_value());
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 0);
+				CHECK(fixture.Read().Pixels == without.Pixels);
+				const Status grown = RenderStatus(device, fixture, wet);
+				REQUIRE_MESSAGE(grown.has_value(), grown.error().ToString());
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 2);
+			}
+			device.RunGarbageCollection();
 		}
 	}
 

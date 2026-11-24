@@ -541,6 +541,24 @@
 					"Stage": "fragment"
 				}
 			]
+		},
+		{
+			"Name": "Water",
+			"File": "Passes/Water.slang",
+			"Entries": [
+				{
+					"Name": "VSSurface",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSSurface",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSPicking",
+					"Stage": "fragment"
+				}
+			]
 		}
 	]
 }

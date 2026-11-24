@@ -226,17 +226,100 @@ namespace Engine {
 			CHECK(base[8 * 4] == std::byte{ 0 });
 		}
 
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the water's built-in maps, 128 x 128 with their full mip chains (each
+		// level the exact 2 x 2 box mean of the one above), tiling seamlessly: the normal map's texels unit-length normals that
+		// lean every way about +Z, and the foam map clear in places, dense in others.
+		TEST_CASE("BuiltinTextures: the water's normal and foam maps are 128x128 tiling noise with full mip chains, identical on every run")
+		{
+			const TextureData normals = GenerateBuiltinWaterNormalTexture();
+			const TextureData foam = GenerateBuiltinWaterFoamTexture();
+			for (const TextureData* texture : { &normals, &foam })
+			{
+				REQUIRE(ValidateTextureData(*texture).has_value());
+				CHECK(texture->Width == 128);
+				CHECK(texture->Height == 128);
+				REQUIRE(texture->Mips.size() == 8);
+				for (uint32_t level = 0; level < 8; ++level)
+				{
+					CHECK(texture->Mips[level].Width == 128U >> level);
+					CHECK(texture->Mips[level].Height == 128U >> level);
+				}
+			}
+			CHECK(normals.Format == TextureFormat::RGBA8Unorm);
+			CHECK(foam.Format == TextureFormat::R8Unorm);
+			CHECK(std::ranges::equal(normals.Pixels, GenerateBuiltinWaterNormalTexture().Pixels));
+			CHECK(std::ranges::equal(normals.Pixels, GenerateBuiltinTexture(BuiltinTexture::WaterNormal).Pixels));
+			CHECK(std::ranges::equal(foam.Pixels, GenerateBuiltinWaterFoamTexture().Pixels));
+			CHECK(std::ranges::equal(foam.Pixels, GenerateBuiltinTexture(BuiltinTexture::WaterFoam).Pixels));
+
+			// The normals: each texel's decoded (x, y, z) within rounding of unit length, z positive, leaning every way.
+			const std::span<const std::byte> base = GetMipPixels(normals, 0);
+			REQUIRE(base.size() == 128 * 128 * 4);
+			int64_t sumX = 0;
+			int64_t sumY = 0;
+			bool leansLeft = false;
+			bool leansRight = false;
+			for (size_t texel = 0; texel < 128 * 128; ++texel)
+			{
+				const double x = std::to_integer<int>(base[texel * 4]) - 128.0;
+				const double y = std::to_integer<int>(base[texel * 4 + 1]) - 128.0;
+				const double z = std::to_integer<int>(base[texel * 4 + 2]) - 128.0;
+				CHECK(std::to_integer<int>(base[texel * 4 + 3]) == 255);
+				CHECK(z > 0.0);
+				CHECK(std::abs(std::sqrt(x * x + y * y + z * z) - 127.0) < 1.5);
+				sumX += static_cast<int64_t>(x);
+				sumY += static_cast<int64_t>(y);
+				leansLeft = leansLeft || x < -40.0;
+				leansRight = leansRight || x > 40.0;
+			}
+			// A tiling height field's slopes sum to zero across a period, so the mean lean is within rounding of none.
+			CHECK(std::abs(static_cast<double>(sumX) / (128.0 * 128.0)) < 1.0);
+			CHECK(std::abs(static_cast<double>(sumY) / (128.0 * 128.0)) < 1.0);
+			CHECK(leansLeft);
+			CHECK(leansRight);
+
+			// The foam: clear and dense texels both, and seamless across the wrapping edges as inside.
+			const std::span<const std::byte> cover = GetMipPixels(foam, 0);
+			REQUIRE(cover.size() == 128 * 128);
+			const auto value = [&cover](uint32_t x, uint32_t y)
+			{
+				return std::to_integer<int>(cover[static_cast<size_t>(y % 128) * 128 + x % 128]);
+			};
+			int clear = 0;
+			int dense = 0;
+			int largestStep = 0;
+			int wrapStep = 0;
+			for (uint32_t y = 0; y < 128; ++y)
+			{
+				for (uint32_t x = 0; x < 128; ++x)
+				{
+					clear += value(x, y) == 0 ? 1 : 0;
+					dense += value(x, y) == 255 ? 1 : 0;
+					const int step = std::max(std::abs(value(x, y) - value(x + 1, y)), std::abs(value(x, y) - value(x, y + 1)));
+					largestStep = std::max(largestStep, step);
+					if (x == 127 || y == 127)
+						wrapStep = std::max(wrapStep, step);
+				}
+			}
+			CAPTURE(largestStep);
+			CAPTURE(wrapStep);
+			CHECK(clear > 128 * 128 / 10);
+			CHECK(dense > 0);
+			CHECK(wrapStep <= largestStep);
+		}
+
 		TEST_CASE("BuiltinTextures: the generated texels match the hashes recorded in every configuration")
 		{
 			// Integer arithmetic and a fixed table only, so the recorded hashes hold in every configuration and on every platform.
 			// M21's sprite textures (Docs/Decisions/0032-m21-contract.md decision 7) follow the M6 textures, and M26's particle
-			// texture (Docs/Decisions/0037-m26-contract.md decision 7) follows them.
-			constexpr std::array<BuiltinTexture, 10> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
+			// texture (Docs/Decisions/0037-m26-contract.md decision 7) follows them, and M47's water normal and foam maps
+			// (Docs/Decisions/0065-m47-water.md decision 3) follow it.
+			constexpr std::array<BuiltinTexture, 12> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
 				BuiltinTexture::Checker, BuiltinTexture::Missing, BuiltinTexture::SpriteSquare, BuiltinTexture::SpriteRounded, BuiltinTexture::SpriteBevel,
-				BuiltinTexture::SpriteCircle, BuiltinTexture::Particle };
-			constexpr std::array<uint64_t, 10> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
+				BuiltinTexture::SpriteCircle, BuiltinTexture::Particle, BuiltinTexture::WaterNormal, BuiltinTexture::WaterFoam };
+			constexpr std::array<uint64_t, 12> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
 				0xc4e010a786d84db6ull, 0x959a5dac370947e5ull, 0x9ea922e57a320e17ull, 0xc0165963ae845894ull, 0xbb5ce8d25334fb6dull, 0x3737bbbc5466cf4eull,
-				0x6b032256171593caull };
+				0x6b032256171593caull, 0x10e3bc3c39ac7b6aull, 0x6a4d21ad10ef4fa7ull };
 			for (size_t index = 0; index < Textures.size(); ++index)
 			{
 				CAPTURE(std::string(BuiltinTextureToString(Textures[index])));

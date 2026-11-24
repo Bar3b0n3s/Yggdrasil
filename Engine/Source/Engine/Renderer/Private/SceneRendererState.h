@@ -38,6 +38,7 @@
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
 #include "Engine/Renderer/UpscalePass.h"
+#include "Engine/Renderer/WaterPass.h"
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
@@ -238,6 +239,13 @@ namespace Engine {
 			// targets until the size changes or a device loss's release drops them.
 			nvrhi::TextureHandle SsrColor{};
 			nvrhi::FramebufferHandle SsrFramebuffer{};
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3 and the W47.2 record): the Water pass's copy of SceneColor
+			// (WaterRefraction, SceneColorFormat, from the pool) and the surfaces' framebuffers (SceneColor, SceneNormals,
+			// SceneVelocity and SceneRoughness with SceneDepth, and the picking one with EntityId after them), created by the first
+			// render that draws water (SceneRenderer::State::EnsureWaterTargets) and dropped by the first that draws none.
+			nvrhi::TextureHandle WaterRefraction{};
+			nvrhi::FramebufferHandle WaterFramebuffer{};
+			nvrhi::FramebufferHandle WaterPickingFramebuffer{};
 		};
 
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): one timing slot's SSR area readback: the copy of the arguments
@@ -400,6 +408,12 @@ namespace Engine {
 			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 11): the trace at half resolution
 			// (RenderQualitySettings::SsrHalfResolution).
 			bool HalfSsr = false;
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water pass records this render (a snapshot with water in a Lit
+			// view with a camera outside the wireframe), so the Ambient stage records the depth pyramid for it; cleared when its
+			// targets or the pyramid fail (their error kept), so the Forward stage draws no water. Set by the Forward stage:
+			// WaterSurfaces, the waters it drew (RenderStats::WaterSurfaces).
+			bool Water = false;
+			uint32_t WaterSurfaces = 0;
 			// M32's milestone review: the skybox draws over the cleared pixels (a Lit view clearing to a skybox it has and shows).
 			bool DrawsSkybox = false;
 			ViewConstants View{};
@@ -575,6 +589,8 @@ namespace Engine {
 		// a drawn reflection, binds at t17 to t20.
 		Scope<PlanarReflectionPass> PlanarReflections{};
 		nvrhi::TextureHandle EmptyPlanarReflection{};
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water pass's pipelines and clipmap meshes (place 1).
+		Scope<WaterPass> Water{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -781,6 +797,8 @@ namespace Engine {
 		// (TerrainPass.h, the placement rule's place 2): its chunk meshes, its terrains' constants and sets, and the render's
 		// prepared terrains, which the DepthNormal stage prepares and the Forward stage draws again.
 		TerrainViewResources TerrainResources{};
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the view's water records and their sets (WaterPass.h, place 2).
+		WaterViewResources WaterResources{};
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the deformed items' GPU state (place 2), the
 		// next VertexStream value to give a new entry (from 1), and the render count that stamps LastRender. A skinned item
 		// whose palette is shorter than its mesh's skin draws its bind pose, which is logged once per renderer
@@ -939,6 +957,16 @@ namespace Engine {
 		// constants, frame's occlusion, its depth and environment cube, and the reflection probes' cubes or the neutral array).
 		// A record error is the render's, and SceneColor keeps the forward passes' image.
 		void RecordSsr(Detail::SceneRendererFrame& frame);
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): with frame.Water, after the skybox and before SSR: the copy of
+		// SceneColor into WaterRefraction (row WaterRefraction), then WaterPass::RecordSurface (row Water) with the forward set
+		// `forwardDesc` with SceneNormals and the ambient occlusion swapped for the neutral textures, the depth pyramid and the
+		// surfaces' framebuffer (the picking one with frame.Picking); frame.WaterSurfaces counts the snapshot's waters when it
+		// succeeds. An error is the render's, and nothing of the water is drawn.
+		void RecordWater(Detail::SceneRendererFrame& frame, const nvrhi::BindingSetDesc& forwardDesc);
+		// M47: WaterRefraction at the scene resolution, the surfaces' framebuffer (with `picking` the picking one, with EntityId),
+		// and the depth pyramid's ViewDepth when GTAO and SSR did not create it, each created when missing. Errors: those of the
+		// pool and the framebuffer creations (Gpu).
+		[[nodiscard]] Status EnsureWaterTargets(bool picking);
 		// M26 (stream X-D): SsrColor and SsrFramebuffer at the scene resolution (Targets), and the depth pyramid's ViewDepth when
 		// GTAO did not create it, each created when missing. M32: SsrColor at the trace image's size (SsrPass::GetTraceSize with
 		// `halfResolution`), replaced when it has another size; the tile list when missing or too small for the trace image's
