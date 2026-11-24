@@ -14,6 +14,7 @@
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsComposition.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
@@ -109,7 +110,7 @@ namespace Engine {
 			const RigidBodyComponent* body = owner.IsValid() ? owner.TryGetComponent<RigidBodyComponent>() : nullptr;
 			if (body == nullptr)
 				return std::nullopt;
-			const Status checked = shape.CheckDynamicBody(body->Mass, GetRigidBodyDofs(*body));
+			const Status checked = shape.CheckDynamicBody(body->Mass, GetRigidBodyDofs(*body), GetPhysicsMassOverride(owner));
 			if (checked.has_value())
 				return std::nullopt;
 

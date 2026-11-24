@@ -12,6 +12,7 @@
 #include "Engine/Scene/Components/ColliderSurfaceComponent.h"
 #include "Engine/Scene/Components/DisabledTag.h"
 #include "Engine/Scene/Components/IDComponent.h"
+#include "Engine/Scene/Components/MassPropertiesComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
@@ -23,6 +24,7 @@
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
 #include "Engine/Scene/Private/PhysicsSystemState.h"
 #include "Engine/Scene/Scene.h"
@@ -319,6 +321,9 @@ namespace Engine {
 				settings.MaxAngularVelocity = body.MaxAngularVelocity;
 				settings.AllowSleeping = body.AllowSleeping;
 				settings.EnhancedInternalEdgeRemoval = body.EnhancedInternalEdgeRemoval;
+				// M44: a Dynamic body's MassProperties (the world ignores it for any other, so it is read for none).
+				if (plan.MotionType == PhysicsMotionType::Dynamic && !plan.IsSensor)
+					settings.MassOverride = GetPhysicsMassOverride(owner);
 			}
 			else if (plan.Origin == PhysicsBodyOrigin::ImplicitStatic && HoldsOwnTerrainCollider(plan.Colliders, plan.Owner))
 			{
@@ -334,10 +339,10 @@ namespace Engine {
 		{
 			return std::tie(a.MotionType, a.Layer, a.IsSensor, a.CollideKinematicVsNonDynamic, a.MotionQuality, a.AllowedDofs, a.Mass, a.Friction,
 					   a.Restitution, a.LinearDamping, a.AngularDamping, a.GravityFactor, a.MaxLinearVelocity, a.MaxAngularVelocity, a.AllowSleeping,
-					   a.EnhancedInternalEdgeRemoval, a.UserData, a.CollisionGroup)
+					   a.EnhancedInternalEdgeRemoval, a.UserData, a.CollisionGroup, a.MassOverride)
 				== std::tie(b.MotionType, b.Layer, b.IsSensor, b.CollideKinematicVsNonDynamic, b.MotionQuality, b.AllowedDofs, b.Mass, b.Friction,
 					b.Restitution, b.LinearDamping, b.AngularDamping, b.GravityFactor, b.MaxLinearVelocity, b.MaxAngularVelocity, b.AllowSleeping,
-					b.EnhancedInternalEdgeRemoval, b.UserData, b.CollisionGroup);
+					b.EnhancedInternalEdgeRemoval, b.UserData, b.CollisionGroup, b.MassOverride);
 		}
 
 		static bool SameGeometry(const PhysicsShapeGeometry& a, const PhysicsShapeGeometry& b)
@@ -516,6 +521,8 @@ namespace Engine {
 		Utils::ConnectComponentSignals<TerrainComponent, &State::OnComponentChanged>(registry, *this);
 		// M36: a surface never recomposes the scene (PhysicsSystemSurfaces.cpp).
 		Utils::ConnectComponentSignals<ColliderSurfaceComponent, &State::OnSurfaceChanged>(registry, *this);
+		// M44: a mass override is a body setting, as a RigidBody field is.
+		Utils::ConnectComponentSignals<MassPropertiesComponent, &State::OnComponentChanged>(registry, *this);
 		registry.on_construct<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_destroy<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_construct<PendingDestroyTag>().connect<&State::OnEntityLeavingPlay>(*this);
@@ -537,6 +544,7 @@ namespace Engine {
 		Utils::DisconnectComponentSignals<TerrainColliderComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<TerrainComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<ColliderSurfaceComponent>(registry, *this);
+		Utils::DisconnectComponentSignals<MassPropertiesComponent>(registry, *this);
 		registry.on_construct<DisabledTag>().disconnect(this);
 		registry.on_destroy<DisabledTag>().disconnect(this);
 		registry.on_construct<PendingDestroyTag>().disconnect(this);
@@ -1019,7 +1027,7 @@ namespace Engine {
 		if (plan.MotionType == PhysicsMotionType::Dynamic)
 		{
 			// The world checks the same; checked here, the refusal names the RigidBody's field.
-			if (const Status checked = (*shape)->CheckDynamicBody(body.Mass, body.AllowedDofs); !checked)
+			if (const Status checked = (*shape)->CheckDynamicBody(body.Mass, body.AllowedDofs, body.MassOverride); !checked)
 			{
 				RaiseBodyError(plan, checked.error(), Utils::GetDynamicBodyField(checked.error()));
 				return false;
@@ -1199,7 +1207,7 @@ namespace Engine {
 			}
 			if (plan.MotionType == PhysicsMotionType::Dynamic)
 			{
-				if (const Status checked = (*shape)->CheckDynamicBody(entry.Settings.Mass, entry.Settings.AllowedDofs); !checked)
+				if (const Status checked = (*shape)->CheckDynamicBody(entry.Settings.Mass, entry.Settings.AllowedDofs, entry.Settings.MassOverride); !checked)
 				{
 					RaiseBodyError(plan, checked.error(), Utils::GetDynamicBodyField(checked.error()));
 					RemoveBody(handle, woken);
@@ -2469,6 +2477,7 @@ namespace Engine {
 			report.AngularVelocity = state.World->GetAngularVelocity(entry->Handle);
 			report.IsSleeping = state.World->IsSleeping(entry->Handle);
 			report.Bounds = state.World->GetBodyBounds(entry->Handle).value_or(Aabb{});
+			report.CenterOfMass = state.World->GetCenterOfMassPosition(entry->Handle);
 		}
 		else
 		{
@@ -2479,6 +2488,8 @@ namespace Engine {
 			report.LinearVelocity = character->Controller->GetVelocity();
 			report.Bounds = state.World->GetBodyBounds(character->Controller->GetInnerBody()).value_or(Aabb{});
 			report.Character = state.MakeCharacterState(*character->Controller);
+			if (state.World->IsBodyValid(character->Controller->GetInnerBody()))
+				report.CenterOfMass = state.World->GetCenterOfMassPosition(character->Controller->GetInnerBody());
 		}
 		report.LayerName = report.Layer < state.Layers.GetLayerCount() ? state.Layers.GetName(report.Layer) : std::string();
 		if (const auto owned = state.PairsByOwner.find(report.Owner); owned != state.PairsByOwner.end())

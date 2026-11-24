@@ -61,6 +61,7 @@
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/PhysicsJoints.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
@@ -222,6 +223,9 @@ namespace Engine {
 			// landing order (its ledger: after M41's ANIMATION_ATTACHMENT_INVALID), an array of its own
 			// (PlanarReflectionDiagnosticCodes).
 			RenderReflectionInvalidCode,
+			// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), appended in train order
+			// (ADR 0060's phase-8 ledger: after M43's SCENE_STATIC_MOVES), an array of its own (PhysicsMassDiagnosticCodes).
+			PhysicsMassUnusedCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -497,6 +501,10 @@ namespace Engine {
 				"Put the PlanarReflection on the entity whose MeshRenderer draws a flat glass, and set its Normal to the glass's facing axis and "
 				"Offset to its surface (the finding names the axis along which the mesh is thinnest and that face's Offset; the built-in Quad "
 				"faces +Z, the Plane +Y)." },
+			ValidationCodeInfo{ PhysicsMassUnusedCode, "Warning", false,
+				"A MassProperties changes no body: its entity's RigidBody makes no Dynamic body (it is Static or Kinematic, its colliders are "
+				"triggers, or the scene creates no body for it), so its centre-of-mass offset and inertia scale are not used.",
+				"Set the RigidBody's Type to Dynamic and give the entity a solid collider, or remove the MassProperties." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1259,6 +1267,9 @@ namespace Engine {
 			// composition over the scene's bodies, as the play session's PhysicsSystem raises it.
 			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, ComposePhysicsBodies(*checked.Target, *checked.Layers));
 			found.insert(found.end(), std::make_move_iterator(joints.Diagnostics.begin()), std::make_move_iterator(joints.Diagnostics.end()));
+			// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): PHYSICS_MASS_UNUSED.
+			std::vector<PhysicsDiagnostic> masses = ValidateSceneMassProperties(*checked.Target, *checked.Layers);
+			found.insert(found.end(), std::make_move_iterator(masses.begin()), std::make_move_iterator(masses.end()));
 			for (const PhysicsDiagnostic& physics : found)
 			{
 				DiagnosticSite site;

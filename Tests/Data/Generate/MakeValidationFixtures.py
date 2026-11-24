@@ -73,8 +73,8 @@ PLANE_MESH = "0000000000000103"
 COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
-    "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface", "AudioSource",
-    "AudioListener",
+    "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface", "MassProperties",
+    "AudioSource", "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
@@ -1061,6 +1061,14 @@ return Script.Define("Jumper", Jumper)
     item = fixture("RENDER_REFLECTION_INVALID")
     item.entities.append(entity("e000000000000042", "Mirror", {
         "Transform": transform(0, 0, -20), "MeshRenderer": {"Mesh": CUBE_MESH}, "PlanarReflection": {}}))
+
+    # M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a lowered centre of mass on a Static wall, which no
+    # Dynamic body uses.
+    item = fixture("PHYSICS_MASS_UNUSED")
+    wall = body("e000000000000042", "Wall", 0, "Static")
+    wall["Components"]["MassProperties"] = {"CenterOfMassOffset": [0, -0.25, 0], "InertiaScale": [1, 1, 1]}
+    wall["Components"] = {key: wall["Components"][key] for key in COMPONENT_ORDER if key in wall["Components"]}
+    item.entities.append(wall)
 
     return fixtures
 

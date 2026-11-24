@@ -13,6 +13,7 @@
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/MassPropertiesComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
@@ -1001,6 +1002,50 @@ namespace Engine {
 			box.RemoveComponent<RigidBodyComponent>();
 			session->Tick();
 			CHECK(physics.GetBodyInfo(id).value_or(PhysicsBodyReport{}).Origin == PhysicsBodyOrigin::ImplicitStatic);
+		}
+
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): MassProperties is a body setting of a Dynamic RigidBody.
+		TEST_CASE("PhysicsSystem: a MassProperties moves a Dynamic body's centre of mass, and a write creates the body again with its velocities")
+		{
+			Test::SceneTestFixture fixture;
+			Entity box = Test::AddBoxBody(fixture.GetScene(), "Box", glm::vec3(0.0f, 10.0f, 0.0f), glm::vec3(0.5f), BodyType::Dynamic);
+			Test::PatchRigidBody(box, [](RigidBodyComponent& body)
+			{
+				body.GravityFactor = 0.0f;
+				body.LinearDamping = 0.0f;
+				body.InitialLinearVelocity = glm::vec3(1.0f, 0.0f, 0.0f);
+			});
+			box.AddComponent<MassPropertiesComponent>(MassPropertiesComponent{ .CenterOfMassOffset = glm::vec3(0.0f, -0.25f, 0.0f) });
+			// A Static body ignores its MassProperties.
+			Entity wall = Test::AddBoxBody(fixture.GetScene(), "Wall", glm::vec3(10.0f, 0.0f, 0.0f), glm::vec3(0.5f), BodyType::Static);
+			wall.AddComponent<MassPropertiesComponent>(MassPropertiesComponent{ .CenterOfMassOffset = glm::vec3(0.0f, -0.25f, 0.0f) });
+			Scope<PlaySession> session = StartSession(fixture);
+			PhysicsSystem& physics = session->GetPhysics();
+			const UUID id = Test::GetEntityId(session->GetScene(), "/Box");
+			const auto centerOffset = [&physics, id]
+			{
+				const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(id);
+				REQUIRE(report.has_value());
+				return report->CenterOfMass - report->Pose.Position;
+			};
+			CHECK(Test::ApproxEqual(centerOffset(), glm::vec3(0.0f, -0.25f, 0.0f), 1.0e-5f));
+			const std::optional<PhysicsBodyReport> wallReport = physics.GetBodyInfo(Test::GetEntityId(session->GetScene(), "/Wall"));
+			REQUIRE(wallReport.has_value());
+			CHECK(wallReport->CenterOfMass == glm::vec3(10.0f, 0.0f, 0.0f));
+
+			Test::RunTicks(*session, 10);
+			session->GetScene().FindEntityByID(id).Patch<MassPropertiesComponent>([](MassPropertiesComponent& mass)
+			{
+				mass.CenterOfMassOffset = glm::vec3(0.5f, 0.0f, 0.0f);
+			});
+			session->Tick();
+			CHECK(Test::ApproxEqual(centerOffset(), glm::vec3(0.5f, 0.0f, 0.0f), 1.0e-5f));
+			CHECK(physics.GetBodyInfo(id)->LinearVelocity.x == doctest::Approx(1.0f).epsilon(1.0e-5));
+
+			session->GetScene().FindEntityByID(id).RemoveComponent<MassPropertiesComponent>();
+			session->Tick();
+			CHECK(Test::ApproxEqual(centerOffset(), glm::vec3(0.0f), 1.0e-5f));
+			CHECK(physics.GetBodyInfo(id)->LinearVelocity.x == doctest::Approx(1.0f).epsilon(1.0e-5));
 		}
 
 		TEST_CASE("PhysicsSystem: reparenting and scale changes rebuild the bodies they affect")

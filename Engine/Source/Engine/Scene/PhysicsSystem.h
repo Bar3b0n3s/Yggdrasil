@@ -162,8 +162,9 @@
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decisions 11 to 13); M20, which owns the contact path in
 // phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md); M36 adds the collider surfaces (the
 // step's M36 paragraph), PhysicsCharacterState's GroundCollider, IsSqueezed and SqueezedBy, PhysicsSurfaceInfo and GetSurface
-// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), and M37 appends its joints (the M37 paragraph
-// above), each reviewed as a change to a frozen interface.
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), M37 appends its joints (the M37 paragraph
+// above), and M44 appends PhysicsBodyReport::CenterOfMass and its vehicles (Docs/Decisions/0062-m44-wheeled-vehicles.md
+// decision 3), each reviewed as a change to a frozen interface.
 
 namespace Engine {
 
@@ -423,6 +424,9 @@ namespace Engine {
 		std::vector<PhysicsContactInfo> Contacts{};
 		// Characters only.
 		std::optional<PhysicsCharacterState> Character{};
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the world position of the body's centre of mass
+		// (PhysicsWorld::GetCenterOfMassPosition; a MassProperties' offset included), a character's inner body's.
+		glm::vec3 CenterOfMass = glm::vec3(0.0f);
 	};
 
 	struct PhysicsSystemStats

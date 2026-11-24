@@ -241,6 +241,30 @@ namespace Engine {
 			CHECK((*checkpoint)["colliders"][0]["name"] == Json("Checkpoint"));
 		}
 
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): centerOfMass, before tick.
+		TEST_CASE("PhysicsMethods: physics.bodyInfo reports the body's centre of mass")
+		{
+			Test::AutomationFixture setup("PhysicsBodyInfoCenterOfMass");
+			REQUIRE(setup.Call("edit.batch", ParsePhysicsMethodJson(R"({"label":"Masses","ops":[
+				{"method":"entity.create","params":{"name":"Buggy","components":{"Transform":{"Translation":[2,5,0]},
+					"RigidBody":{"Type":"Dynamic","GravityFactor":0},"BoxCollider":{"Offset":[0,0.5,0]},
+					"MassProperties":{"CenterOfMassOffset":[0,-0.75,0.25]}}}},
+				{"method":"entity.create","params":{"name":"Crate","components":{"Transform":{"Translation":[-2,5,0]},
+					"RigidBody":{"Type":"Dynamic","GravityFactor":0},"BoxCollider":{}}}}]})"))
+					.has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "mode", "simulate" } }).has_value());
+			const Result<Json> buggy = setup.Call("physics.bodyInfo", Json{ { "entity", "/Buggy" } });
+			REQUIRE_MESSAGE(buggy.has_value(), buggy.error().ToString());
+			// The collider's centre (0.5 m above the origin) moved by the offset, in world space.
+			CHECK(ReadComponent((*buggy)["centerOfMass"], 0) == doctest::Approx(2.0f).epsilon(1.0e-4));
+			CHECK(ReadComponent((*buggy)["centerOfMass"], 1) == doctest::Approx(4.75f).epsilon(1.0e-4));
+			CHECK(ReadComponent((*buggy)["centerOfMass"], 2) == doctest::Approx(0.25f).epsilon(1.0e-4));
+			const Result<Json> crate = setup.Call("physics.bodyInfo", Json{ { "entity", "/Crate" } });
+			REQUIRE_MESSAGE(crate.has_value(), crate.error().ToString());
+			CHECK(ReadComponent((*crate)["centerOfMass"], 0) == doctest::Approx(-2.0f).epsilon(1.0e-4));
+			CHECK(ReadComponent((*crate)["centerOfMass"], 1) == doctest::Approx(5.0f).epsilon(1.0e-4));
+		}
+
 		TEST_CASE("PhysicsMethods: physics.jointInfo reports a joint's bodies, reading, force and motor in play")
 		{
 			Test::AutomationFixture setup("PhysicsJointInfo");

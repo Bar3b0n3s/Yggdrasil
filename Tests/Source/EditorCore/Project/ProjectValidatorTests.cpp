@@ -44,6 +44,7 @@
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/PhysicsJoints.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/ProbeValidation.h"
@@ -1382,10 +1383,11 @@ end
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
 			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
-			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes).
+			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes), and phase 8's (M44's
+			// PhysicsMassDiagnosticCodes).
 			CHECK(codes.size()
 				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
-					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size());
+					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size() + PhysicsMassDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1446,12 +1448,14 @@ end
 			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36. Phase 7's follow (ADR 0058's
 			// ledger): M41's ANIMATION_ATTACHMENT_INVALID (Docs/Decisions/0058-m41-bone-attachments.md decision 3), then M42's
 			// RENDER_REFLECTION_INVALID (Docs/Decisions/0059-m42-planar-reflections.md, its ledger's validation row), which lands after
-			// M41 and ends the list.
+			// M41. Phase 8's follow (ADR 0060's ledger): M44's PHYSICS_MASS_UNUSED (Docs/Decisions/0062-m44-wheeled-vehicles.md
+			// decision 3), which ends the list on M44's branch.
 			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
 			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
 			CHECK(position(AnimationAttachmentInvalidCode) + 1 == position(RenderReflectionInvalidCode));
-			CHECK(codes.back() == RenderReflectionInvalidCode);
+			CHECK(position(RenderReflectionInvalidCode) + 1 == position(PhysicsMassUnusedCode));
+			CHECK(codes.back() == PhysicsMassUnusedCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -2348,6 +2352,69 @@ end
 			check("/Locked", "HingeJoint", "UpperAngle");
 			check("/Pointless", "SliderJoint", "Axis");
 			CHECK_FALSE(joints.contains(editor.GetScene().FindEntityByPath("/Door").GetUUID().ToString()));
+		}
+
+		// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a MassProperties on a Static,
+		// a Kinematic and a trigger body, and on a Dynamic RigidBody that makes no body, is reported once each; a Dynamic body's
+		// and a disabled entity's are not.
+		TEST_CASE("ProjectValidator: PHYSICS_MASS_UNUSED reports MassProperties on a body that is not Dynamic")
+		{
+			Test::EditorTestFixture fixture("ValidatorMassProperties");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto addBody = [&editor](std::string_view name, std::string_view body, std::string_view collider)
+			{
+				Entity entity = editor.GetScene().CreateEntity(name);
+				const Json bodyValue = ParseValidatorJson(body);
+				REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", &bodyValue).has_value());
+				if (!collider.empty())
+				{
+					const Json colliderValue = ParseValidatorJson(collider);
+					REQUIRE(ComponentAccess::AddComponent(entity, "BoxCollider", &colliderValue).has_value());
+				}
+				const Json mass = ParseValidatorJson(R"({"CenterOfMassOffset":[0,-0.25,0]})");
+				REQUIRE(ComponentAccess::AddComponent(entity, "MassProperties", &mass).has_value());
+				return entity;
+			};
+			{
+				SceneEdit edit(editor, "Masses");
+				static_cast<void>(addBody("Buggy", R"({"Type":"Dynamic"})", "{}"));
+				static_cast<void>(addBody("Wall", R"({"Type":"Static"})", "{}"));
+				static_cast<void>(addBody("Lift", R"({"Type":"Kinematic"})", "{}"));
+				static_cast<void>(addBody("Zone", R"({"Type":"Dynamic"})", R"({"IsTrigger":true})"));
+				static_cast<void>(addBody("Bare", R"({"Type":"Dynamic"})", ""));
+				Entity parked = addBody("Parked", R"({"Type":"Static"})", "{}");
+				parked.SetActive(false);
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> masses;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == PhysicsMassUnusedCode)
+					CHECK(masses.emplace(diagnostic.Entity, &diagnostic).second);
+			}
+			const auto reported = [&editor, &masses](std::string_view path)
+			{
+				return masses.contains(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+			};
+			CHECK(masses.size() == 4);
+			CHECK(reported("/Wall"));
+			CHECK(reported("/Lift"));
+			CHECK(reported("/Zone"));
+			CHECK(reported("/Bare"));
+			CHECK_FALSE(reported("/Buggy"));
+			CHECK_FALSE(reported("/Parked"));
+			for (const auto& [entity, diagnostic] : masses)
+			{
+				CHECK(diagnostic->Severity == DiagnosticSeverity::Warning);
+				CHECK_FALSE(diagnostic->AutoFixable);
+				CHECK(diagnostic->Component == "MassProperties");
+				CHECK(diagnostic->File == "Assets/Scenes/Main.scene");
+			}
 		}
 
 		// M42 (Scene/PlanarReflectionValidation.h, Docs/Decisions/0059-m42-planar-reflections.md decision 3): a mirror without a

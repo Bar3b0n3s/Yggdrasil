@@ -22,6 +22,7 @@
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
+#include "Engine/Scene/Components/MassPropertiesComponent.h"
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
@@ -83,9 +84,10 @@ namespace Engine {
 		MeshRendererComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent,
 		EnvironmentComponent, PostProcessComponent, TextComponent,
 		// Physics (Registration/PhysicsRegistration.cpp). M36's ColliderSurface follows CharacterController
-		// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1; ADR 0052's phase-6 ledger, the categories row).
+		// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1; ADR 0052's phase-6 ledger, the categories row), and M44's
+		// MassProperties follows it (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; ADR 0060's phase-8 ledger).
 		RigidBodyComponent, BoxColliderComponent, SphereColliderComponent, CapsuleColliderComponent, MeshColliderComponent,
-		CharacterControllerComponent, ColliderSurfaceComponent,
+		CharacterControllerComponent, ColliderSurfaceComponent, MassPropertiesComponent,
 		// Audio (Registration/AudioRegistration.cpp)
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)

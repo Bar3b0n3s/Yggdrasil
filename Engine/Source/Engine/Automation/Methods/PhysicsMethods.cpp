@@ -147,6 +147,7 @@ namespace Engine {
 				if (report->Character->SqueezedBy.IsValid())
 					result.SqueezedBy = Utils::SummarizeEntityId(context, scene, report->Character->SqueezedBy);
 			}
+			result.CenterOfMass = report->CenterOfMass;
 			result.Tick = ToAutomationCounter(session->GetTick());
 			return result;
 		}
@@ -230,6 +231,9 @@ namespace Engine {
 			.Field("squeezedBy", &PhysicsBodyInfoResult::SqueezedBy,
 				"The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty "
 				"when it is not squeezed, for other bodies, and when that entity is disabled or destroyed.")
+			.Field("centerOfMass", &PhysicsBodyInfoResult::CenterOfMass,
+				"The world position of the body's centre of mass, in metres: its colliders' centre of mass, moved by a MassProperties' "
+				"CenterOfMassOffset (a character's capsule centre).")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).

@@ -28,6 +28,7 @@ Every component of the type registry, in canonical component order: the order of
 | `MeshCollider` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies. |
 | `CharacterController` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Moves the entity as a walking character that climbs steps and slopes and collides with the world. |
 | `ColliderSurface` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them (a conveyor belt). |
+| `MassProperties` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright. |
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
@@ -727,6 +728,28 @@ Script members of `ColliderSurface`:
 | `Friction` | proxy field | `number` | read/write | All | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
 | `Restitution` | proxy field | `number` | read/write | All | The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. |
 | `SurfaceVelocity` | proxy field | `vector` | read/write | All | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
+
+## MassProperties
+
+Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright.
+
+- Category: Physics
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`, `RigidBody`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `CenterOfMassOffset` | `Vec3` | `[0,0,0]` | -1e+05 to 1e+05 | m |  | Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it. |
+| `InertiaScale` | `Vec3` | `[1,1,1]` | 0.01 to 100 |  |  | Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less. |
+
+Script members of `MassProperties`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `CenterOfMassOffset` | proxy field | `vector` | read/write | All | Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it. |
+| `InertiaScale` | proxy field | `vector` | read/write | All | Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less. |
 
 ## AudioSource
 

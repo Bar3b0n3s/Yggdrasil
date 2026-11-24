@@ -1176,6 +1176,59 @@
 			},
 			"additionalProperties": false
 		},
+		"MassProperties": {
+			"description": "Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright.",
+			"type": "object",
+			"properties": {
+				"CenterOfMassOffset": {
+					"description": "Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -100000,
+							"maximum": 100000
+						},
+						{
+							"type": "number",
+							"minimum": -100000,
+							"maximum": 100000
+						},
+						{
+							"type": "number",
+							"minimum": -100000,
+							"maximum": 100000
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"InertiaScale": {
+					"description": "Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0.01,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": 0.01,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": 0.01,
+							"maximum": 100
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				}
+			},
+			"additionalProperties": false
+		},
 		"AudioSource": {
 			"description": "Plays an audio clip, optionally positioned at the entity.",
 			"type": "object",
@@ -4230,6 +4283,9 @@
 						},
 						"ColliderSurface": {
 							"$ref": "#/$defs/ColliderSurface"
+						},
+						"MassProperties": {
+							"$ref": "#/$defs/MassProperties"
 						},
 						"AudioSource": {
 							"$ref": "#/$defs/AudioSource"

@@ -62,6 +62,9 @@ namespace Engine {
 			bool WantsLinearCast = false;
 			// BodyDescription::SpheresAsDiscs of a Dynamic body, which PhysicsWorld::SetShape keeps.
 			bool SpheresAsDiscs = false;
+			// M44: BodyDescription::MassOverride of a Dynamic body (the identity for any other), which PhysicsWorld::SetShape keeps
+			// and applies to the new shape.
+			PhysicsMassOverride MassOverride{};
 			// M36: the surfaces of the body's colliders (PhysicsWorld::SetColliderSurfaces), sorted by collider, at most one
 			// each; empty for a body without any (every body until it is given some).
 			std::vector<PhysicsColliderSurface> Surfaces{};
@@ -77,8 +80,9 @@ namespace Engine {
 		// The collider index of `subShape` on a body whose Jolt shape is `shape` (PhysicsShape.h "Collider identity"): for a
 		// compound, the compound's sub-shape user data of the SubShapeID's first level (never the leaf's own user data, which
 		// colliders sharing a cached shape have in common); for any other shape, or an ID that names no sub-shape of the
-		// compound, `singleCollider` (the one collider's UserData). The one rule behind contacts, query hits and character
-		// contacts. Any thread: reads only the immutable shape.
+		// compound, `singleCollider` (the one collider's UserData). M44: a body's OffsetCenterOfMassShape (its mass override,
+		// UnwrapBodyShape) is seen through first; it passes sub-shape IDs through unchanged. The one rule behind contacts,
+		// query hits and character contacts. Any thread: reads only the immutable shape.
 		[[nodiscard]] uint32_t ResolveColliderIndex(const JPH::Shape& shape, const JPH::SubShapeID& subShape, uint32_t singleCollider);
 
 		// The collider index of `subShape` on `body` (ResolveColliderIndex with the one collider of the body's record; 0 for a

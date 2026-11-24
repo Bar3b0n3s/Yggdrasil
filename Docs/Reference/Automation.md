@@ -1688,6 +1688,7 @@ Reports the physics body of an entity of the play scene (the body it owns, or th
 | `groundCollider` | `EntitySummary` | The collider entity a grounded character's last update stood on (another character's entity when it stood on one), as CharacterController:GetGroundCollider reads it; empty for other bodies, a character in the air, and a ground that is disabled or destroyed. |
 | `squeezed` | `Bool` | Whether a character's last update found it squeezed (a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it), as CharacterController:IsSqueezed reads it; false for other bodies. |
 | `squeezedBy` | `EntitySummary` | The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty when it is not squeezed, for other bodies, and when that entity is disabled or destroyed. |
+| `centerOfMass` | `Vec3` | The world position of the body's centre of mass, in metres: its colliders' centre of mass, moved by a MassProperties' CenterOfMassOffset (a character's capsule centre). |
 | `tick` | `UInt32` | The play session's tick when the body was read. |
 
 Example: Check whether the ball rests on the ground.

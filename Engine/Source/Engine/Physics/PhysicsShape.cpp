@@ -538,9 +538,14 @@ namespace Engine {
 
 	Status PhysicsShape::CheckDynamicBody(float mass, PhysicsDofs allowedDofs) const
 	{
+		return CheckDynamicBody(mass, allowedDofs, PhysicsMassOverride{});
+	}
+
+	Status PhysicsShape::CheckDynamicBody(float mass, PhysicsDofs allowedDofs, const PhysicsMassOverride& massOverride) const
+	{
 		if (m_State->Shape == nullptr)
 			return MakeError(ErrorCode::InvalidState, "the shape was not built");
-		const Result<JPH::MassProperties> properties = Detail::GetDynamicMassProperties(*m_State->Shape, m_State->HasMesh, mass, allowedDofs);
+		const Result<JPH::MassProperties> properties = Detail::GetDynamicMassProperties(*m_State->Shape, m_State->HasMesh, mass, allowedDofs, massOverride);
 		if (!properties)
 			return std::unexpected(properties.error());
 		return {};

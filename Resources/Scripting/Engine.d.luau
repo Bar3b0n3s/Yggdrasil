@@ -727,6 +727,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "MeshCollider"): MeshCollider?
 	function GetComponent(self, name: "CharacterController"): CharacterController?
 	function GetComponent(self, name: "ColliderSurface"): ColliderSurface?
+	function GetComponent(self, name: "MassProperties"): MassProperties?
 	function GetComponent(self, name: "AudioSource"): AudioSource?
 	function GetComponent(self, name: "AudioListener"): AudioListener?
 	function GetComponent(self, name: "Script"): Script?
@@ -795,6 +796,8 @@ declare extern type Entity with
 	IsValid: (self: Entity) -> boolean
 	-- The entity's Light2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Light2D: Light2D?
+	-- The entity's MassProperties component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	MassProperties: MassProperties?
 	-- The entity's MaterialParameters component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	MaterialParameters: MaterialParameters?
 	-- The entity's MeshCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -1023,6 +1026,14 @@ declare extern type Light2D with
 	Radius: number
 	-- Whether the light is a point light around the entity or a global light of the whole view. [All modes; Runtime|Test; pure/read; setter mutates]
 	Type: Light2DType
+end
+
+-- Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright.
+declare extern type MassProperties with
+	-- Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it. [All modes; Runtime|Test; pure/read; setter mutates]
+	CenterOfMassOffset: vector
+	-- Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less. [All modes; Runtime|Test; pure/read; setter mutates]
+	InertiaScale: vector
 end
 
 -- Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes.

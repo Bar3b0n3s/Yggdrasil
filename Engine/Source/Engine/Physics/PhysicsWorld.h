@@ -48,7 +48,9 @@
 // Docs/Decisions/0031-m20-contract.md decisions 2 and 3). M36, which owns the contact path in phase 6, appends the collider
 // surfaces (PhysicsColliderSurface, SetColliderSurfaces; Docs/Decisions/0053-m36-contact-surfaces.md decision 2) and
 // bounds BodyDescription::Friction by MaxPhysicsFriction (the W36.1 review's finding 1); M37 appends the joints section
-// (Docs/Decisions/0054-m37-joints.md decision 2); each reviewed as a change to a frozen interface.
+// (Docs/Decisions/0054-m37-joints.md decision 2); M44 appends BodyDescription::MassOverride and the centres of mass and
+// vehicles sections (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3); each reviewed as a change to a frozen
+// interface.
 
 namespace Engine {
 
@@ -130,6 +132,15 @@ namespace Engine {
 		// body its plan's group (PhysicsBodyPlan::CollisionGroup: the nearest body or character owner at or above it), so a
 		// trigger attached to a moving body or a character never reports that body or character (§5.3).
 		uint64_t CollisionGroup = 0;
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; §9.2 "Body settings"): Dynamic bodies only (ignored
+		// otherwise). A non-zero CenterOfMassOffset wraps the body's Jolt shape in an OffsetCenterOfMassShape, whose mass
+		// properties are the shape's translated by the offset (the parallel axis theorem, as Jolt's wrapper gives them); the
+		// result is scaled to Mass, then InertiaScale scales it (S^1/2 I S^1/2), then Mass's rules above make it safe and
+		// limit it (PhysicsShape::CheckDynamicBody's overload with the override refuses the same bodies). The body's origin
+		// and every collider stay where they are; only the centre of mass and the inertia move. SetShape keeps it and wraps
+		// the new shape. The default (a zero offset, a unit scale) creates exactly the body it did before M44. Errors:
+		// InvalidArgument for a value that is not finite or out of PhysicsMassOverride's range.
+		PhysicsMassOverride MassOverride{};
 	};
 
 	// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 2): the longest surface velocity a collider may have, in m/s
@@ -215,9 +226,10 @@ namespace Engine {
 		// sub-shape contacts that ended and began as usual). A Dynamic body keeps its Mass, its inertia recomputed from the
 		// new shape and scaled to it; other bodies keep the mass properties CreateBody gave them (never the shape's, so a
 		// Kinematic body may take a mesh). M37: the body's joints keep their frames, which are relative to the body's origin;
-		// the world moves their centre-of-mass offsets (Jolt's NotifyShapeChanged). Errors: InvalidArgument for a dead handle
-		// or a missing shape; for a Dynamic body, PhysicsShape::CheckDynamicBody's errors with its Mass and degrees of
-		// freedom.
+		// the world moves their centre-of-mass offsets (Jolt's NotifyShapeChanged) by the difference of the body's two Jolt
+		// shapes' centres of mass, M44's wrappers included. M44: a Dynamic body keeps its MassOverride, and the new shape is
+		// wrapped as CreateBody wraps it. Errors: InvalidArgument for a dead handle or a missing shape; for a Dynamic body,
+		// PhysicsShape::CheckDynamicBody's errors with its Mass, degrees of freedom and mass override.
 		[[nodiscard]] Status SetShape(BodyHandle body, const Ref<const PhysicsShape>& shape);
 		// The collider index (ColliderShapeDescription::UserData) of the sub-shape `subShape`, a Jolt SubShapeID value as a
 		// ContactEvent's SubShapeA or SubShapeB reports it, on the body's current shape (§9.2 "Collider identity in compounds"):
@@ -346,6 +358,12 @@ namespace Engine {
 		[[nodiscard]] PhysicsJointState GetJointState(JointHandle joint) const;
 		// The number of live joints.
 		[[nodiscard]] uint32_t GetJointCount() const;
+
+		// --- Centres of mass (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3) --------------------------------
+		// The world position of the body's centre of mass (Jolt's GetCenterOfMassPosition: its colliders' centre of mass,
+		// plus BodyDescription::MassOverride's offset for a Dynamic body), for physics.bodyInfo. `body` live (asserted; the
+		// origin otherwise).
+		[[nodiscard]] glm::vec3 GetCenterOfMassPosition(BodyHandle body) const;
 	private:
 		// The Jolt objects (Physics/Private/PhysicsWorldState.h, shared by the world's .cpp files and CharacterController).
 		struct State;

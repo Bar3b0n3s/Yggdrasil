@@ -2,6 +2,7 @@
 #include "Engine/Physics/Private/PhysicsContactListener.h"
 
 #include "Engine/Physics/Private/PhysicsConversions.h"
+#include "Engine/Physics/Private/PhysicsMassProperties.h"
 
 #include <Jolt/Physics/Collision/Shape/CompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeIDPair.h>
@@ -15,11 +16,13 @@ namespace Engine {
 
 		uint32_t ResolveColliderIndex(const JPH::Shape& shape, const JPH::SubShapeID& subShape, uint32_t singleCollider)
 		{
-			if (shape.GetType() == JPH::EShapeType::Compound)
+			// M44: a mass override's wrapper consumes no sub-shape ID bits, so the ID names the wrapped shape's sub-shapes.
+			const JPH::Shape& colliders = UnwrapBodyShape(shape);
+			if (colliders.GetType() == JPH::EShapeType::Compound)
 			{
 				// The compound's own sub-shape user data, never GetSubShapeUserData: that is the leaf shape's, which colliders
 				// sharing a cached shape have in common (PhysicsShape.h).
-				const JPH::CompoundShape& compound = static_cast<const JPH::CompoundShape&>(shape);
+				const JPH::CompoundShape& compound = static_cast<const JPH::CompoundShape&>(colliders);
 				if (compound.IsSubShapeIDValid(subShape))
 				{
 					JPH::SubShapeID remainder;

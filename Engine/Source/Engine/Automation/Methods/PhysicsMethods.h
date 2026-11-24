@@ -22,8 +22,10 @@
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 18): the wire format below. M36 adds the
 // character's ground collider, its squeeze and the body that squeezes it after groundNormal
-// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 7 and 14), and M37 appends physics.jointInfo
-// (Docs/Decisions/0054-m37-joints.md decision 10), each reviewed as a change to the frozen wire format.
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 7 and 14), M37 appends physics.jointInfo
+// (Docs/Decisions/0054-m37-joints.md decision 10), and M44 adds physics.bodyInfo's centerOfMass before tick and appends
+// physics.vehicleInfo (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), each reviewed as a change to the frozen wire
+// format.
 
 namespace Engine {
 
@@ -78,6 +80,9 @@ namespace Engine {
 		EntitySummary GroundCollider{};
 		bool Squeezed = false;
 		EntitySummary SqueezedBy{};
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the world position of the body's centre of mass, in
+		// metres (PhysicsBodyReport::CenterOfMass).
+		glm::vec3 CenterOfMass = glm::vec3(0.0f);
 		uint32_t Tick = 0; // the session's tick when read
 	};
 
