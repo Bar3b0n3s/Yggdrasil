@@ -147,6 +147,13 @@ namespace Engine {
 				if (report->Character->SqueezedBy.IsValid())
 					result.SqueezedBy = Utils::SummarizeEntityId(context, scene, report->Character->SqueezedBy);
 			}
+			// M47: the buoyancy item's last application.
+			if (report->Buoyancy.has_value())
+			{
+				result.Buoyancy = VariantValue(Json{ { "water", Utils::SummarizeNullableEntityId(context, scene, report->Buoyancy->Water).Get() },
+					{ "submergedVolume", report->Buoyancy->SubmergedVolume },
+					{ "totalVolume", report->Buoyancy->TotalVolume } });
+			}
 			result.Tick = ToAutomationCounter(session->GetTick());
 			return result;
 		}
@@ -230,6 +237,10 @@ namespace Engine {
 			.Field("squeezedBy", &PhysicsBodyInfoResult::SqueezedBy,
 				"The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty "
 				"when it is not squeezed, for other bodies, and when that entity is disabled or destroyed.")
+			.Field("buoyancy", &PhysicsBodyInfoResult::Buoyancy,
+				"For a body whose owner holds a Buoyancy, what the physics last floated it with: {water (the water its colliders' planes "
+				"came from, as {id, name, path}, null when nothing was submerged), submergedVolume, totalVolume (m^3)}, kept while it sleeps "
+				"and 0 while it is skipped as invalid; null for any other body.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).

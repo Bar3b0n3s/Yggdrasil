@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scripting/Private/BindingRegistration.h"
 
+#include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -12,6 +13,8 @@
 #include "Engine/Scripting/ScriptProxy.h"
 
 #include <algorithm>
+#include <cmath>
+#include <format>
 #include <optional>
 
 // The water's script surface (M47, Docs/Decisions/0065-m47-water.md decision 3; Architecture §11.5, §9.12): the Water proxy's
@@ -39,6 +42,16 @@ namespace Engine {
 			return Lua::IsNoneOrNil(call, index) ? WaterWorldTime(call) : Lua::Check<double>(call, index);
 		}
 
+		// The world point of argument `index`: a finite vector within the physics' world (each coordinate within
+		// MaxPhysicsCoordinate), as the physics queries take theirs.
+		static glm::vec3 CheckWaterPosition(ScriptCall& call, int index)
+		{
+			const glm::vec3 position = Lua::Check<glm::vec3>(call, index);
+			if (std::abs(position.x) > MaxPhysicsCoordinate || std::abs(position.y) > MaxPhysicsCoordinate || std::abs(position.z) > MaxPhysicsCoordinate)
+				Lua::RaiseError(call, std::format("position lies outside the world (each coordinate within {:g} m)", MaxPhysicsCoordinate));
+			return position;
+		}
+
 		// The receiver of a water method: a Water that is live, or pending destruction until the flush (M20, W-P02).
 		static ConstEntity WaterSelf(ScriptCall& call)
 		{
@@ -56,7 +69,7 @@ namespace Engine {
 		static std::optional<SceneWaterSample> SampleOwnWater(ScriptCall& call)
 		{
 			const ConstEntity entity = WaterSelf(call);
-			const glm::vec3 position = Lua::Check<glm::vec3>(call, 2);
+			const glm::vec3 position = CheckWaterPosition(call, 2);
 			const double time = WaterTimeArgument(call, 3);
 			return SampleWater(ResolveWater(entity), glm::dvec3(position), time);
 		}
@@ -106,7 +119,7 @@ namespace Engine {
 		static int WaterIsUnderwater(ScriptCall& call)
 		{
 			const ConstEntity entity = WaterSelf(call);
-			const glm::vec3 position = Lua::Check<glm::vec3>(call, 2);
+			const glm::vec3 position = CheckWaterPosition(call, 2);
 			const double time = WaterTimeArgument(call, 3);
 			Lua::Push(call, IsUnderwater(ResolveWater(entity), glm::dvec3(position), time));
 			return 1;
@@ -116,7 +129,7 @@ namespace Engine {
 		// as a WaterSample table; nil where no water does.
 		static int PhysicsSampleWater(ScriptCall& call)
 		{
-			const glm::vec3 position = Lua::Check<glm::vec3>(call, 1);
+			const glm::vec3 position = CheckWaterPosition(call, 1);
 			const double time = WaterTimeArgument(call, 2);
 			IScriptHost& host = call.Engine->GetHost();
 			const std::optional<SceneWaterSample> sample = SampleSceneWater(host.GetScene(), glm::dvec3(position), time);
@@ -170,7 +183,8 @@ namespace Engine {
 				.Function("SampleWater", Utils::PhysicsSampleWater, "(position: vector, time: number?) -> WaterSample?",
 					"The surface of the water that holds the world point position at time seconds of world time (default Time.GetTime()): the "
 					"Rectangle whose volume holds it with the highest surface there, else the scene's Ocean; nil where no water does. Inside a "
-					"Rectangle's volume the Ocean is masked, so a cave above its lake is dry.",
+					"Rectangle's volume the Ocean is masked, so a cave above its lake is dry. A position beyond the world (a coordinate past 1e9 m) is an "
+					"error, as for every water method.",
 					read);
 			return {};
 		}

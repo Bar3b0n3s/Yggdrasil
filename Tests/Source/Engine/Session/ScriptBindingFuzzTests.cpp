@@ -89,6 +89,8 @@ namespace Engine {
 			AddFuzzFamily(cases, "RigidBody:Teleport", "dynamic:Teleport(@)", invalidVectors, std::array<std::string_view, 1>{ "vector.create(10,2,0)" });
 			AddFuzzFamily(cases, "RigidBody:MoveKinematic", "kinematic:MoveKinematic(@, Quat.Identity())", invalidVectors, std::array<std::string_view, 1>{ "vector.create(20,2,0)" });
 			AddFuzzFamily(cases, "CharacterController:Move", "character:Move(@)", invalidVectors, finiteVectors);
+			// M47 (Docs/Decisions/0065-m47-water.md decision 6): the water query's point (phase 8's ledger: before M48's MoveFree).
+			AddFuzzFamily(cases, "Physics.SampleWater", "Physics.SampleWater(@)", invalidVectors, finiteVectors);
 			AddFuzzFamily(cases, "Time.SetTimeScale", "Time.SetTimeScale(@); assert(Time.GetTimeScale() == @)", invalidNumbers, durations);
 			AddFuzzFamily(cases, "Task.Delay", "local task = Task.Delay(@, function() end); Task.Cancel(task)", invalidNumbers, durations);
 			AddFuzzFamily(cases, "Input.IsGamepadConnected", "Input.IsGamepadConnected(@)", invalidNumbers, durations);

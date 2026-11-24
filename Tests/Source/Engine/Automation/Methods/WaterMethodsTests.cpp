@@ -92,6 +92,7 @@ namespace Engine {
 			CHECK_FALSE(setup.Call("water.sample", ParseWaterMethodJson(R"({"entity":"/Rock","points":[[0,0,0]]})")).has_value());
 			CHECK_FALSE(setup.Call("water.sample", ParseWaterMethodJson(R"({"points":[[0,0,0]],"time":-1})")).has_value());
 			CHECK_FALSE(setup.Call("water.sample", ParseWaterMethodJson(R"({"time":1})")).has_value());
+			CHECK_FALSE(setup.Call("water.sample", ParseWaterMethodJson(R"({"points":[[0,0,0],[0,2e9,0]]})")).has_value());
 		}
 
 		TEST_CASE("WaterMethods: water.sample samples the edit scene at the given time or 0, and the play scene at the world's time")

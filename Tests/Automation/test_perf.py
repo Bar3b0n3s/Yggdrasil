@@ -177,6 +177,20 @@ class PerfTests(unittest.TestCase):
             self.assertEqual(mirror["params"]["components"]["MeshRenderer"]["Mesh"], "engine://Meshes/Quad")
         self.assertEqual(perf.BUDGETS[Perf.MIRROR_METRIC], 2.0)
 
+    def test_the_water_part_floats_64_four_pontoon_boats_against_its_budget(self) -> None:
+        """M47 (Docs/Decisions/0065-m47-water.md decision 3): water/Buoyancy64/tickMs's scene and budget."""
+        self.assertIn("water", Perf.CAPTURE_PARTS)
+        self.assertEqual(perf.BUDGETS[Perf.WATER_BUOYANCY_METRIC], 1.0)
+        ops = Perf.water_buoyancy_ops()
+        seas = [op for op in ops if "Water" in op["params"].get("components", {})]
+        boats = [op for op in ops if "Buoyancy" in op["params"].get("components", {})]
+        pontoons = [op for op in ops if "BoxCollider" in op["params"].get("components", {})]
+        self.assertEqual(len(seas), 1)
+        self.assertEqual(len(boats), Perf.WATER_BOATS)
+        self.assertEqual(len(pontoons), 4 * Perf.WATER_BOATS)
+        for boat in boats:
+            self.assertEqual(boat["params"]["components"]["RigidBody"]["Type"], "Dynamic")
+
     def test_the_mirror_cost_is_captured_only_when_the_view_drew_the_three_mirrors(self) -> None:
         class FakeEditor:
             def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:

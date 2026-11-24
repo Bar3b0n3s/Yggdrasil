@@ -1689,6 +1689,7 @@ Reports the physics body of an entity of the play scene (the body it owns, or th
 | `groundCollider` | `EntitySummary` | The collider entity a grounded character's last update stood on (another character's entity when it stood on one), as CharacterController:GetGroundCollider reads it; empty for other bodies, a character in the air, and a ground that is disabled or destroyed. |
 | `squeezed` | `Bool` | Whether a character's last update found it squeezed (a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it), as CharacterController:IsSqueezed reads it; false for other bodies. |
 | `squeezedBy` | `EntitySummary` | The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty when it is not squeezed, for other bodies, and when that entity is disabled or destroyed. |
+| `buoyancy` | `Variant` | For a body whose owner holds a Buoyancy, what the physics last floated it with: {water (the water its colliders' planes came from, as {id, name, path}, null when nothing was submerged), submergedVolume, totalVolume (m^3)}, kept while it sleeps and 0 while it is skipped as invalid; null for any other body. |
 | `tick` | `UInt32` | The play session's tick when the body was read. |
 
 Example: Check whether the ball rests on the ground.
@@ -3716,7 +3717,7 @@ Samples the water surface under world points, as scripts and the physics read it
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `points` | `Array<Vec3>` | yes | `[]` | The world points to sample under, as [x, y, z], 1 to 4096 of them. |
+| `points` | `Array<Vec3>` | yes | `[]` | The world points to sample under, as [x, y, z], 1 to 4096 of them, each coordinate within 1e9 m. |
 | `entity` | `String` |  | `""` | An entity with a Water (16 hex digits, a unique id prefix or a path): that water's own surface, other waters' masks aside; omitted: the water that holds each point. |
 | `time` | `Float` |  | `0` | The world time to sample at, in seconds; omitted: 0 in the edit scene, the world's time now (the world tick times the fixed delta) in the play scene. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to read; omitted: the play scene while playing, else the edit scene. |

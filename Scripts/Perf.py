@@ -29,8 +29,13 @@ resolution (ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also 
 (Assets/Perf/Mirrors.scene: three built-in Quad mirrors on its walls at the default half resolution, facing a
 perspective camera across a floor of props lit by a shadowed sun and a shadowed point light; reflections/Mirrors3/gpuMs:
 the sum of the PlanarReflection<k> rows, each a mirror's whole view; budget 2.0 ms, World Tree's brief 23's target),
-captured only when the view drew all three.
---only selects some of the parts (playCopy, scenes, navigation, replay, look), a development aid for one measurement.
+captured only when the view drew all three; and (M47, Docs/Decisions/0065-m47-water.md decision 3; the "water" part,
+in the --renderer none editor) water/Buoyancy64/tickMs: a new scene (Assets/Scenes/PerfWaterBuoyancy64.scene) of an
+Ocean with a three-wave swell and 64 Dynamic 400 kg boats, each with four box pontoons on child entities and a
+Buoyancy; in a lockstep session, the play.step time per tick of 8 calls of 30 ticks with render "None", after a
+warm-up (budget 1.0 ms, UNVERIFIED until measured on nvidia-62x).
+--only selects some of the parts (playCopy, scenes, navigation, replay, look, water), a development aid for one
+measurement.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
 (--gpu-optional: no frame or GPU times) makes the step a warning. Only a capture that cannot run fails it: a missing
@@ -85,7 +90,12 @@ for index = 0, 149 do
 end
 return stuck"""
 NAVIGATION_METRIC = "navigation/150Agents/tickMs"
-CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay", "look")
+CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay", "look", "water")
+# M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: the part water, after M43's staticScenery): 64
+# boats of four pontoons each with a Buoyancy on a swell, in a --renderer none editor's lockstep ticks.
+WATER_BUOYANCY_METRIC = "water/Buoyancy64/tickMs"
+WATER_PERF_SCENE = "Assets/Scenes/PerfWaterBuoyancy64.scene"
+WATER_BOATS = 64
 GENERATED_SCENE = "Assets/Perf/Entities1000.scene"
 GENERATED_EMPTY_SCENE = "Assets/Perf/Empty.scene"
 GENERATED_ENTITIES = 1000
@@ -484,6 +494,34 @@ class Capture:
         self.metrics.append(metric)
         self.console.print(f"  {NAVIGATION_METRIC}: median {metric.median:.3f} ms per tick")
 
+    def water(self, client: Any) -> None:
+        """water/Buoyancy64/tickMs (module docstring); an engine error makes it a warning."""
+        ops = water_buoyancy_ops()
+        playing = False
+        try:
+            self.call(client, "scene.new", {"path": WATER_PERF_SCENE, "template": "Empty", "discardChanges": True},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "edit.batch", {"label": "Perf: 64 buoyant boats", "ops": ops},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            self.call(client, "play.start", {"lockstep": True})
+            playing = True
+            self.call(client, "play.step", {"ticks": WARM_UP_TICKS, "render": "None"}, timeout=STEP_TIMEOUT_SECONDS)
+            metric = perf.summarize(WATER_BUOYANCY_METRIC, "ms", self.step_chunks(client, "None"))
+        except (self.engine_client.EngineError, ValueError) as error:
+            engine_error = isinstance(error, self.engine_client.EngineError)
+            detail = f"{error.method}: {error.detail}" if engine_error else str(error)
+            self.warnings.append(f"{WATER_BUOYANCY_METRIC}: {detail}; not captured")
+            return
+        finally:
+            if playing:
+                try:
+                    self.call(client, "play.stop", {})
+                except self.engine_client.EngineError as error:
+                    self.warnings.append(f"{WATER_BUOYANCY_METRIC}: play.stop failed: {error.detail}")
+        self.metrics.append(metric)
+        self.console.print(f"  {WATER_BUOYANCY_METRIC}: median {metric.median:.3f} ms per tick")
+
     def replay(self, client: Any) -> None:
         """replay/Determinism/tickMs (module docstring)."""
         samples: list[float] = []
@@ -553,6 +591,28 @@ def ssr_floor_ops() -> list[dict[str, Any]]:
         ops.append({"method": "entity.create", "params": {"name": f"Column{index}", "components": {
             "Transform": {"Translation": [-4.0 + index * 2.5, 1.5, -3.0], "Scale": [0.6, 3, 0.6]},
             "MeshRenderer": {"Mesh": BUILTIN_CUBE_MESH, "Materials": ["Assets/Perf/Rough.material"]}}}})
+    return ops
+
+
+def water_buoyancy_ops() -> list[dict[str, Any]]:
+    """The edit.batch ops of water/Buoyancy64/tickMs's scene: an Ocean with a three-wave swell, then WATER_BOATS Dynamic
+    400 kg boats on an 8-column grid 6 m apart, each with a Buoyancy and four 1 m x 0.6 m x 0.8 m box pontoons on child
+    entities."""
+    swell = [{"Direction": 10, "Wavelength": 24, "Amplitude": 0.6, "Steepness": 0.6},
+             {"Direction": 75, "Wavelength": 9, "Amplitude": 0.2, "Steepness": 0.8, "Speed": 3},
+             {"Direction": -40, "Wavelength": 4, "Amplitude": 0.05, "Steepness": 1}]
+    ops: list[dict[str, Any]] = [{"method": "entity.create",
+                                  "params": {"name": "PerfSea", "components": {"Water": {"Waves": swell}}}}]
+    for index in range(WATER_BOATS):
+        name = f"PerfBoat{index:02}"
+        ops.append({"method": "entity.create",
+                    "params": {"name": name, "components": {
+                        "Transform": {"Translation": [(index % 8) * 6.0, 0.3, (index // 8) * 6.0]},
+                        "RigidBody": {"Type": "Dynamic", "Mass": 400}, "Buoyancy": {}}}})
+        for pontoon, offset in enumerate(([-1.5, 0, -0.8], [1.5, 0, -0.8], [-1.5, 0, 0.8], [1.5, 0, 0.8])):
+            ops.append({"method": "entity.create",
+                        "params": {"name": f"Pontoon{pontoon}", "parent": f"/{name}", "components": {
+                            "Transform": {"Translation": offset}, "BoxCollider": {"HalfExtents": [0.5, 0.3, 0.4]}}}})
     return ops
 
 
@@ -665,10 +725,12 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
                     capture.navigation(client)
                 if "replay" in parts:
                     capture.replay(client)
+                if "water" in parts:
+                    capture.water(client)
 
             if "playCopy" in parts or "scenes" in parts:
                 run_editor(capture, editor, project_file, renderer, root / "UserData", measure)
-            if "navigation" in parts or "replay" in parts:
+            if "navigation" in parts or "replay" in parts or "water" in parts:
                 run_editor(capture, editor, project_file, "none", root / "ReplayUserData", measure_cpu)
             if "look" in parts and renderer == "vulkan":
                 def look(client: Any, _pid: int) -> None:

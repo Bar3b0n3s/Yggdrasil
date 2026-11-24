@@ -216,6 +216,33 @@ namespace Engine {
 			CHECK_FALSE(method->Pending);
 		}
 
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): a body whose owner holds a Buoyancy reports its water and its
+		// volumes; any other body reports null.
+		TEST_CASE("PhysicsMethods: physics.bodyInfo reports a floating body's water and volumes")
+		{
+			Test::AutomationFixture setup("PhysicsBodyInfoBuoyancy");
+			REQUIRE(setup.Call("edit.batch", ParsePhysicsMethodJson(R"({"label":"Float","ops":[
+				{"method":"entity.create","params":{"name":"Sea","components":{"Water":{}}}},
+				{"method":"entity.create","params":{"name":"Crate","components":{"Transform":{"Translation":[0,0.25,0]},
+					"RigidBody":{"Type":"Dynamic","Mass":250},"BoxCollider":{"HalfExtents":[0.5,0.5,0.5]},"Buoyancy":{}}}},
+				{"method":"entity.create","params":{"name":"Stone","components":{"Transform":{"Translation":[5,0.25,0]},
+					"RigidBody":{"Type":"Dynamic"},"SphereCollider":{"Radius":0.5}}}}]})"))
+					.has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "seed", 3 } }).has_value());
+			StepPhysicsScene(setup, 240);
+			const Result<Json> crate = setup.Call("physics.bodyInfo", Json{ { "entity", "/Crate" } });
+			REQUIRE_MESSAGE(crate.has_value(), crate.error().ToString());
+			const Json& buoyancy = (*crate)["buoyancy"];
+			REQUIRE(buoyancy.is_object());
+			CHECK(buoyancy["water"]["path"] == "/Sea");
+			// A 1 m box of 250 kg on water of 1000 kg/m^3 floats with 0.25 m^3 submerged.
+			CHECK(JsonReader(buoyancy["totalVolume"]).ReadFloat().value_or(0.0f) == doctest::Approx(1.0f).epsilon(1e-4));
+			CHECK(JsonReader(buoyancy["submergedVolume"]).ReadFloat().value_or(0.0f) == doctest::Approx(0.25f).epsilon(0.08));
+			const Result<Json> stone = setup.Call("physics.bodyInfo", Json{ { "entity", "/Stone" } });
+			REQUIRE(stone.has_value());
+			CHECK((*stone)["buoyancy"].is_null());
+		}
+
 		TEST_CASE("PhysicsMethods: physics.bodyInfo of a trigger reports a Kinematic sensor")
 		{
 			// A goal authored as a Static RigidBody with a trigger collider is planned Kinematic (§9.2: triggers are kinematic

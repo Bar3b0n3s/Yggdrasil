@@ -11,6 +11,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/WaterValidation.h"
 #include "Support/PhysicsTestScene.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -23,17 +24,16 @@
 
 // Buoyancy in the play session (M47, Docs/Decisions/0065-m47-water.md decision 3; Architecture §9.12): PhysicsSystem's PreStep
 // item 4c floats every Buoyancy's Dynamic body on the planes its colliders' waters give at the tick's world time, a body on
-// calm, unchanged water sleeps and a change wakes it, and the result is deterministic across Jolt thread counts. C47 commits
-// the physics stream's acceptance cases skipped; W47.2's physics stream implements item 4c and lifts the skips, recording the
-// committed hash from the implementation.
+// calm, unchanged water sleeps and a change wakes it, and the result is deterministic across Jolt thread counts.
 
 namespace Engine {
 
 	namespace {
 
 		// The 16 swell bodies' state hash after BuoyancySwellTicks ticks, recorded by W47.2's physics stream from its
-		// implementation and verified equal in Debug, Release and Dist (§9.1; decision 6).
-		constexpr uint64_t CommittedBuoyancySwellHash = 0x0000000000000000;
+		// implementation and verified equal in the Debug and Release unit runs (§9.1; decision 6). A change of the buoyancy or of
+		// the wave function that legitimately changes the simulation updates it with the reason in the change's review.
+		constexpr uint64_t CommittedBuoyancySwellHash = 0x5839cad91ba7b98a;
 		constexpr uint32_t BuoyancySwellTicks = 300;
 
 		// An Ocean at y = 0 with `waves` at `waveScale`, named "Sea".
@@ -120,7 +120,7 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
-		TEST_CASE("Buoyancy: two pontoons pitch with a swell's slope" * doctest::skip(true))
+		TEST_CASE("Buoyancy: two pontoons pitch with a swell's slope")
 		{
 			// On calm water the raft settles level. On a 6 m swell the pontoons, 3 m apart, are half a wavelength apart: one rides
 			// a crest while the other sits in a trough, each on the surface under it, so the raft pitches with the slope between them.
@@ -153,7 +153,7 @@ namespace Engine {
 			CHECK(swell > 4.0f);
 		}
 
-		TEST_CASE("Buoyancy: a buoyant body on calm water sleeps and a tide wakes it" * doctest::skip(true))
+		TEST_CASE("Buoyancy: a buoyant body on calm water sleeps and a tide wakes it")
 		{
 			Test::SceneTestFixture fixture;
 			static_cast<void>(AddSea(fixture.GetScene(), {}, 1.0f));
@@ -189,7 +189,7 @@ namespace Engine {
 			CHECK(report->Buoyancy->SubmergedVolume == doctest::Approx(0.2f).epsilon(0.05));
 		}
 
-		TEST_CASE("Buoyancy: 16 bodies on a swell end at their committed hash at Jolt thread counts 0, 1 and 8" * doctest::skip(true))
+		TEST_CASE("Buoyancy: 16 bodies on a swell end at their committed hash at Jolt thread counts 0, 1 and 8")
 		{
 			const uint64_t none = RunSwell(0);
 			const uint64_t one = RunSwell(1);
@@ -199,6 +199,57 @@ namespace Engine {
 			CHECK(eight == none);
 			// One committed value for every configuration (§9.1: a configuration-dependent result is a bug).
 			CHECK(none == CommittedBuoyancySwellHash);
+		}
+
+		// A Buoyancy on a Kinematic body, and one naming no Water, float nothing: each is skipped, reported once (the run-time
+		// PHYSICS_BUOYANCY_INVALID) and reports zero volumes, while a Buoyancy naming a pool floats on the pool alone.
+		TEST_CASE("Buoyancy: a Buoyancy that cannot float is skipped and reported once, and a named water floats its body alone")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(AddSea(scene, {}, 1.0f));
+			Entity pool = scene.CreateEntity("Pool");
+			pool.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(20.0f, 3.0f, 0.0f);
+			});
+			pool.AddComponent<WaterComponent>(WaterComponent{ .Shape = WaterShape::Rectangle, .Size = glm::vec2(10.0f), .Depth = 4.0f, .Headroom = 2.0f });
+			Entity lift = Test::AddBoxBody(scene, "Lift", glm::vec3(-6.0f, 0.0f, 0.0f), glm::vec3(0.5f), BodyType::Kinematic);
+			lift.AddComponent<BuoyancyComponent>();
+			Entity lost = Test::AddBoxBody(scene, "Lost", glm::vec3(-12.0f, 0.0f, 0.0f), glm::vec3(0.5f), BodyType::Dynamic);
+			lost.AddComponent<BuoyancyComponent>(BuoyancyComponent{ .Water = lift.GetUUID() });
+			// A 250 kg crate placed at its draft in the pool, 3 m above the sea: the pool alone floats it there.
+			Entity crate = Test::AddBoxBody(scene, "Crate", glm::vec3(20.0f, 3.25f, 0.0f), glm::vec3(0.5f), BodyType::Dynamic);
+			Test::PatchRigidBody(crate, [](RigidBodyComponent& body)
+			{
+				body.Mass = 250.0f;
+			});
+			crate.AddComponent<BuoyancyComponent>(BuoyancyComponent{ .Water = pool.GetUUID() });
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture));
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			PlaySession& play = **session;
+			Test::RunTicks(play, 600);
+			const auto countInvalid = [&play](UUID entity)
+			{
+				return std::ranges::count_if(play.GetPhysics().GetDiagnostics(), [entity](const PhysicsDiagnostic& diagnostic)
+				{
+					return diagnostic.Entity == entity && diagnostic.Code == PhysicsBuoyancyInvalidCode;
+				});
+			};
+			CHECK(countInvalid(lift.GetUUID()) == 1);
+			CHECK(countInvalid(lost.GetUUID()) == 1);
+			CHECK(countInvalid(crate.GetUUID()) == 0);
+			const std::optional<PhysicsBodyReport> lostReport = play.GetPhysics().GetBodyInfo(lost.GetUUID());
+			REQUIRE(lostReport.has_value());
+			REQUIRE(lostReport->Buoyancy.has_value());
+			CHECK(lostReport->Buoyancy->TotalVolume == 0.0f);
+			CHECK_FALSE(lostReport->Buoyancy->Water.IsValid());
+			// The crate floats on the pool, with 0.25 m^3 of its 1 m^3 submerged: its centre 0.25 m above the pool's surface.
+			CHECK(Test::GetWorldPosition(play, "/Crate").y == doctest::Approx(3.25f).epsilon(0.01));
+			const std::optional<PhysicsBodyReport> crateReport = play.GetPhysics().GetBodyInfo(crate.GetUUID());
+			REQUIRE(crateReport.has_value());
+			REQUIRE(crateReport->Buoyancy.has_value());
+			CHECK(crateReport->Buoyancy->Water == pool.GetUUID());
 		}
 
 		// Nothing new is hashed and nothing steps differently without a Buoyancy: a box falling past a sea's surface lands as

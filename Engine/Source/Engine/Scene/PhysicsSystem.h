@@ -69,6 +69,15 @@
 //          A pose that is not IsPlaceablePhysicsPose (a Transform written beyond MaxPhysicsCoordinate) is not applied:
 //          the entity's local Translation and Rotation go back to the body's (the values PostStep last wrote, or those
 //          the body was placed from; a Kinematic body's current pose, where it then stops).
+//       4c. M47 (Docs/Decisions/0065-m47-water.md decision 3; Scene/PhysicsSystemBuoyancy.cpp; after M44's 4b at the merge):
+//          buoyancy. Every effectively enabled Buoyancy, in canonical order of the owners, whose owner holds a created
+//          Dynamic body takes per collider the plane of its water's surface (Scene/WaterQueries.h: the Buoyancy's Water, a
+//          Rectangle's only within its volume, else the water that holds the collider's world bounds' centre) at the tick's
+//          world time (SimStep::Time, held by the world pause), and PhysicsWorld::ApplyBuoyancy floats the body with the
+//          density of the named water, else of the first collider's water in collider order. Any other Buoyancy is skipped and
+//          reported once (PHYSICS_BUOYANCY_INVALID, a Warning). A body whose planes are bit-identical to its last tick's may
+//          sleep and is skipped while asleep, keeping its last report; one whose planes changed (waves, a tide, a WaveScale
+//          write) is woken first. The planes are runtime state, never hashed, and a scene without a Buoyancy runs nothing.
 //       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes.
 //     M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 3): between items 1-2 and 3, the collider surfaces. A
 //     ColliderSurface's signals mark its entity (never ComponentsChanged, so a surface write never recomposes the scene), and
@@ -436,8 +445,7 @@ namespace Engine {
 		std::vector<PhysicsContactInfo> Contacts{};
 		// Characters only.
 		std::optional<PhysicsCharacterState> Character{};
-		// M47 (decision 3): bodies whose owner holds a Buoyancy only (empty otherwise). C47 leaves it empty until W47.2's
-		// physics stream fills it.
+		// M47 (decision 3): bodies whose owner holds a Buoyancy only (empty otherwise).
 		std::optional<PhysicsBuoyancyReport> Buoyancy{};
 	};
 

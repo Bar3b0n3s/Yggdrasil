@@ -858,7 +858,7 @@ All modes; Runtime|Test; pure/read.
 
 `(position: vector, time: number?) -> WaterSample?`
 
-The surface of the water that holds the world point position at time seconds of world time (default Time.GetTime()): the Rectangle whose volume holds it with the highest surface there, else the scene's Ocean; nil where no water does. Inside a Rectangle's volume the Ocean is masked, so a cave above its lake is dry.
+The surface of the water that holds the world point position at time seconds of world time (default Time.GetTime()): the Rectangle whose volume holds it with the highest surface there, else the scene's Ocean; nil where no water does. Inside a Rectangle's volume the Ocean is masked, so a cave above its lake is dry. A position beyond the world (a coordinate past 1e9 m) is an error, as for every water method.
 
 All modes; Runtime|Test; pure/read.
 

@@ -4,6 +4,7 @@
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -11,6 +12,7 @@
 #include "Engine/Scene/WaterQueries.h"
 #include "Engine/Session/PlaySession.h"
 
+#include <cmath>
 #include <format>
 #include <optional>
 #include <utility>
@@ -54,6 +56,16 @@ namespace Engine {
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/points",
 					std::format("water.sample takes 1 to {} points, not {}", MaxWaterSamplePoints, params.Points.size()),
 					"split the points over several calls"));
+			}
+			for (size_t index = 0; index < params.Points.size(); ++index)
+			{
+				const glm::vec3& point = params.Points[index];
+				if (std::abs(point.x) > MaxPhysicsCoordinate || std::abs(point.y) > MaxPhysicsCoordinate || std::abs(point.z) > MaxPhysicsCoordinate)
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("/points/{}", index),
+						std::format("point {} lies outside the world (each coordinate within {:g} m)", index, MaxPhysicsCoordinate),
+						"sample points within the physics' world"));
+				}
 			}
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), false));
 
@@ -112,7 +124,7 @@ namespace Engine {
 	void RegisterWaterMethodTypes(TypeRegistry& registry)
 	{
 		registry.Struct<WaterSampleParams>("WaterSampleParams", "The params of water.sample.")
-			.Field("points", &WaterSampleParams::Points, "The world points to sample under, as [x, y, z], 1 to 4096 of them.")
+			.Field("points", &WaterSampleParams::Points, "The world points to sample under, as [x, y, z], 1 to 4096 of them, each coordinate within 1e9 m.")
 			.Field("entity", &WaterSampleParams::Entity,
 				"An entity with a Water (16 hex digits, a unique id prefix or a path): that water's own surface, other waters' masks aside; "
 				"omitted: the water that holds each point.")

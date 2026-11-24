@@ -131,6 +131,8 @@ assert(not pcall(function() return sea:SampleHeight(vector.create(0 / 0, 0, 0)) 
 assert(not pcall(function() return sea:SampleHeight(point, 0 / 0) end))
 assert(not pcall(function() return Physics.SampleWater(point, math.huge) end))
 assert(not pcall(function() return Physics.SampleWater("here") end))
+assert(not pcall(function() return Physics.SampleWater(vector.create(0, 2e9, 0)) end))
+assert(not pcall(function() return sea:IsUnderwater(vector.create(-2e9, 0, 0)) end))
 return true
 )",
 										  FormatVector(point), now->Height, early->Height, FormatVector(now->Normal), FormatVector(early->Normal), FormatVector(now->Velocity), FormatVector(below), FormatVector(above), FormatVector(below), FormatVector(inPool), FormatVector(inPool), now->Height, now->Depth, FormatVector(now->Normal), FormatVector(now->Velocity), early->Height, FormatVector(inPool), pool->Depth));

@@ -2,6 +2,7 @@
 
 #include "Engine/Physics/PhysicsWorld.h"
 
+#include <algorithm>
 #include <array>
 #include <span>
 #include <string>
@@ -9,8 +10,8 @@
 
 // The world's buoyancy (M47, Docs/Decisions/0065-m47-water.md decision 3; Physics/PhysicsBuoyancy.h): each collider of a
 // Dynamic body is submerged against its own fluid plane through Jolt's exact submerged volumes, and the body takes the
-// physical buoyancy of the water's density with Jolt's drag. C47 commits these acceptance cases skipped; W47.2's physics
-// stream implements PhysicsWorld::ApplyBuoyancy and lifts the skip.
+// physical buoyancy of the water's density with Jolt's drag; each plane's submerged volume is reported; refusals change
+// nothing.
 
 namespace Engine {
 
@@ -50,7 +51,7 @@ namespace Engine {
 
 	TEST_SUITE("Physics")
 	{
-		TEST_CASE("PhysicsWorld: a box of known mass floats at its analytic draft within 1 cm" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: a box of known mass floats at its analytic draft within 1 cm")
 		{
 			// A 2 m x 0.5 m x 1 m box of 400 kg on fresh water. At rest the displaced water weighs as much as the box:
 			// rho V_sub = m, so V_sub = 400 / 1000 = 0.4 m^3, and over its 2 m x 1 m base the draft is V_sub / A = 0.4 / 2 = 0.2 m.
@@ -60,21 +61,40 @@ namespace Engine {
 				{ ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(1.0f, 0.25f, 0.5f) } } }, 400.0f, glm::vec3(0.0f, 0.5f, 0.0f));
 			const std::array<PhysicsFluidPlane, 1> planes = { StillWater(0.0f) };
 			const PhysicsBuoyancySettings settings{ .Density = 1000.0f };
-			for (int step = 0; step < 600; ++step)
+			// Dropped from 0.45 m above its draft, it bobs about its draft under Jolt's quadratic drag: the mean height over the
+			// last 5 s (about five and a half periods of 0.9 s, 2 pi sqrt(m / (rho g A))) is the draft's.
+			double sum = 0.0;
+			double submerged = 0.0;
+			float lowest = 1.0f;
+			float highest = -1.0f;
+			for (int step = 0; step < 900; ++step)
 			{
 				const Result<PhysicsBuoyancyResult> result = world->ApplyBuoyancy(box, planes, settings, BuoyancyStep);
 				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 				CHECK(result->TotalVolume == doctest::Approx(1.0f).epsilon(1e-5));
+				if (step >= 600)
+					submerged += result->SubmergedVolume;
 				REQUIRE(world->Step(BuoyancyStep, 1));
+				if (step >= 600)
+				{
+					const float height = world->GetPose(box).Position.y;
+					sum += height;
+					lowest = std::min(lowest, height);
+					highest = std::max(highest, height);
+				}
 			}
-			const float height = world->GetPose(box).Position.y;
-			CAPTURE(height);
-			CHECK(std::abs(height - 0.05f) < 0.01f);
-			// At rest the submerged volume carries the weight: rho V_sub = m.
+			const double mean = sum / 300.0;
+			CAPTURE(mean);
+			CAPTURE(lowest);
+			CAPTURE(highest);
+			CHECK(std::abs(mean - 0.05) < 0.01);
+			// On average the submerged volume carries the weight: rho V_sub = m.
+			CHECK(std::abs(submerged / 300.0 - 0.4) < 0.02);
 			const Result<PhysicsBuoyancyResult> rest = world->ApplyBuoyancy(box, planes, settings, BuoyancyStep);
 			REQUIRE(rest.has_value());
 			CHECK(rest->Submerged);
-			CHECK(rest->SubmergedVolume == doctest::Approx(0.4f).epsilon(0.03));
+			REQUIRE(rest->PlaneSubmergedVolumes.size() == 1);
+			CHECK(rest->PlaneSubmergedVolumes[0] == rest->SubmergedVolume);
 			// A body above the water displaces nothing; refusals change nothing.
 			const BodyHandle high = CreateFloater(*world, { ColliderShapeDescription{} }, 10.0f, glm::vec3(5.0f, 10.0f, 0.0f));
 			const Result<PhysicsBuoyancyResult> dry = world->ApplyBuoyancy(high, planes, settings, BuoyancyStep);
@@ -87,7 +107,7 @@ namespace Engine {
 			CHECK_FALSE(world->ApplyBuoyancy(BodyHandle(), planes, settings, BuoyancyStep).has_value());
 		}
 
-		TEST_CASE("PhysicsWorld: each collider is submerged against its own plane" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: each collider is submerged against its own plane")
 		{
 			// Two 1 m pontoons 4 m apart on one body, the left one's plane at its centre's height and the right one's 1 m below
 			// its bottom: half the left pontoon is under water and none of the right one.

@@ -18,6 +18,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/luau-gameplay/game-services` ([game-services.md](game-services.md)): display settings (`Application.GetDisplayModes`, `GetDisplaySettings`, `SetDisplaySettings`), save data (`SaveData`), the session's audio mix, music across scenes (`Audio.PlayMusic`, `StopMusic`, `GetMusic`), the performance readout (`Application.GetStats`), presentation text for frame-paced values (`UiText:SetPresentationText`) and frame-time signals recorded as input (`Input.PostSignal`, `Input.WasSignalled`).
 - `skills/luau-gameplay/joints` ([joints.md](joints.md)): joints between bodies: `HingeJoint`, `SliderJoint`, `DistanceJoint` and `FixedJoint`, their limits and motors, driving them from scripts, `GetAngle`, `GetPosition`, `GetDistance`, `GetForce` and `GetTorque`, breaking and `OnJointBreak`, mending.
 - `skills/luau-gameplay/navigation` ([navigation.md](navigation.md)): the `Navigation` module: paths, closest points, walks along the surface and random points on the baked navigation mesh, an agent type per query, determinism in the fixed step and a chaser behaviour.
+- `skills/luau-gameplay/water` ([water.md](water.md)): water in scripts: `Physics.SampleWater` and the `Water` proxy's `SampleHeight`, `SampleNormal`, `SampleVelocity` and `IsUnderwater` at the world's time, the tide and the storm, floating with `Buoyancy` or a script's float points (`RigidBody:AddForceAtPosition`), and wading and swimming by the depth under a character's feet.
 
 ## Script shape
 

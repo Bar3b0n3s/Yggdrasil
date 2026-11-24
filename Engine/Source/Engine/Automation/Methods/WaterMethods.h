@@ -61,7 +61,8 @@ namespace Engine {
 	namespace Automation {
 
 		// water.sample. Errors: those of the target (ResolveTargetScene) and of `entity` (ResolveEntity at /entity);
-		// InvalidArgument at /points for no point or more than MaxWaterSamplePoints, at /entity for an entity without a Water.
+		// InvalidArgument at /points for no point or more than MaxWaterSamplePoints, at /points/<i> for a point beyond the world
+		// (a coordinate past MaxPhysicsCoordinate), at /entity for an entity without a Water.
 		[[nodiscard]] Result<WaterSampleResult> WaterSample(AutomationMethodContext& context, const WaterSampleParams& params);
 
 	}

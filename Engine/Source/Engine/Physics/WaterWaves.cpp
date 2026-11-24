@@ -190,6 +190,10 @@ namespace Engine {
 				candidate = Utils::EvaluateInversionPoint(surface, current.Rest + step * fraction, point, time);
 				++evaluations;
 			}
+			// A step never raises the merit: when the halving ends at its smallest fraction or at the cap without a decrease, the
+			// inversion stops at the point it had.
+			if (!(candidate.Merit < current.Merit))
+				break;
 			current = candidate;
 		}
 		// The analytic height, tangents and particle velocity at the rest point found, from its evaluation's angles.

@@ -47,7 +47,7 @@ PERF_REPORT_NAME = "Perf.json"
 # 1920 x 1080, World Tree's brief 23's "about 2 ms or less", Docs/Decisions/0059-m42-planar-reflections.md decision 3).
 # Exceeding one is a warning.
 BUDGETS = {"playCopy/1000Entities": 30.0, "fog/Fog/gpuCostMs": 0.5, "navigation/150Agents/tickMs": 8.0,
-           "reflections/Mirrors3/gpuMs": 2.0}
+           "reflections/Mirrors3/gpuMs": 2.0, "water/Buoyancy64/tickMs": 1.0}
 
 _CAPTURE_MEMBERS = {"format": str, "version": int, "commit": str, "config": str, "host": dict, "metrics": list,
                     "scenes": list, "warnings": list}

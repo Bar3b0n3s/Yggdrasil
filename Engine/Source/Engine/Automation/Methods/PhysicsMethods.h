@@ -78,6 +78,10 @@ namespace Engine {
 		EntitySummary GroundCollider{};
 		bool Squeezed = false;
 		EntitySummary SqueezedBy{};
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M44's centerOfMass): a body whose owner holds a
+		// Buoyancy, {water, submergedVolume, totalVolume} (PhysicsBodyReport::Buoyancy, water as {id, name, path} or null);
+		// null for any other body.
+		VariantValue Buoyancy{};
 		uint32_t Tick = 0; // the session's tick when read
 	};
 

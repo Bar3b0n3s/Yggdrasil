@@ -30,11 +30,12 @@
 // 2 x 2 Jacobian for Newton's step and halves it (down to WaterInversionMinStep) until the squared residual |H(x0) - x|^2 falls
 // by Armijo's rule (factor 1 - 2 WaterInversionArmijo t for step fraction t), which converges from any start where plain
 // Newton steps fall into cycles (a short wave riding a long, high one; Docs/Decisions/0065-m47-water.md, the W47.1 record).
-// The inversion stops when the residual is at most WaterInversionTolerance or after WaterInversionMaxEvaluations evaluations
-// of the waves. The number of steps depends on the inputs alone, through the same double arithmetic in every configuration,
-// so the result is bit-identical in Debug, Release and Dist. The normal and the particle's velocity are analytic at the x0
-// found, from the last evaluation's sines and cosines; the velocity adds the water's Current, a horizontal flow that moves no
-// wave.
+// A candidate replaces the current point only when its squared residual is lower, so no step raises it: the inversion stops
+// at the current point when the halving ends at WaterInversionMinStep or the cap without a decrease, when the residual is at
+// most WaterInversionTolerance, or after WaterInversionMaxEvaluations evaluations of the waves. The number of steps depends on
+// the inputs alone, through the same double arithmetic in every configuration, so the result is bit-identical in Debug,
+// Release and Dist. The normal and the particle's velocity are analytic at the x0 found, from that point's evaluation's sines
+// and cosines; the velocity adds the water's Current, a horizontal flow that moves no wave.
 
 namespace Engine {
 

@@ -23,7 +23,9 @@
 		"CharacterController": 1,
 		"AudioSource": 1,
 		"AudioListener": 1,
-		"Script": 2
+		"Script": 2,
+		"Water": 1,
+		"Buoyancy": 1
 	},
 	"Entities": [
 		{
@@ -412,6 +414,100 @@
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "2b0000000000000b",
+			"Name": "Sea",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -1, 0],
+					"Rotation": [0, 0.38268343, 0, 0.9238795],
+					"Scale": [2, 1, 2]
+				},
+				"Water": {
+					"Shape": "Rectangle",
+					"Size": [40, 30],
+					"Depth": 6,
+					"Headroom": 4,
+					"Waves": [
+						{
+							"Direction": 30,
+							"Wavelength": 18,
+							"Amplitude": 0.4,
+							"Steepness": 0.7,
+							"Speed": 0,
+							"Phase": 45
+						},
+						{
+							"Direction": -60,
+							"Wavelength": 4,
+							"Amplitude": 0.1,
+							"Steepness": 1,
+							"Speed": 2.5,
+							"Phase": 0
+						}
+					],
+					"WaveScale": 1.5,
+					"Current": [0.5, -0.25],
+					"Density": 1025,
+					"ShallowColor": [0.1, 0.6, 0.5],
+					"DeepColor": [0.02, 0.08, 0.15],
+					"Clarity": 6,
+					"Roughness": 0.08,
+					"RefractionStrength": 0.4,
+					"FoamAmount": 0.6,
+					"ShoreFoamDepth": 0.8,
+					"DetailNormalStrength": 0.4,
+					"DetailScale": 5,
+					"DetailDrift": [1.5, -0.5],
+					"UnderwaterColor": [0.03, 0.12, 0.14],
+					"UnderwaterVisibility": 20,
+					"NormalMap": null,
+					"FoamTexture": null
+				}
+			}
+		},
+		{
+			"ID": "2b0000000000000c",
+			"Name": "Raft",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 200,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"Buoyancy": {
+					"Water": "2b0000000000000b",
+					"BuoyancyScale": 1.2,
+					"LinearDrag": 0.8,
+					"AngularDrag": 0.1
 				}
 			}
 		}
