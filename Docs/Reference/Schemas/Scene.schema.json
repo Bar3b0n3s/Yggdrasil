@@ -3337,7 +3337,7 @@
 					"type": "number"
 				},
 				"SunGlow": {
-					"description": "How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow.",
+					"description": "How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow.",
 					"type": "number",
 					"minimum": 0,
 					"maximum": 100

@@ -10,8 +10,9 @@ namespace Engine {
 	// exponential distance and height fog, unique per scene. A view's fog runs along each pixel's view ray over its view depth
 	// (distance along the camera's forward axis), from StartDistance on, with Density per metre plus height fog of
 	// HeightDensity per metre at BaseHeight, falling off by HeightFalloff per metre above it, up to MaxOpacity. Its colour is
-	// Color (linear) tinted by the environment's ambient light by AmbientTint, plus a glow toward the first directional light
-	// (SunGlow times that light's colour and intensity, gathered by SunGlowExponent). FogSkybox fogs the skybox too.
+	// Color (linear) tinted by the environment's ambient light by AmbientTint, plus a glow toward the first directional light,
+	// or an enabled Sky's Sun (M45), SunGlow times that light's colour and intensity, gathered by SunGlowExponent. FogSkybox
+	// fogs the skybox too.
 	struct FogComponent
 	{
 		glm::vec3 Color = glm::vec3(0.5f, 0.55f, 0.6f);

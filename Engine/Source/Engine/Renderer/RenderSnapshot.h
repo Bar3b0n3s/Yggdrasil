@@ -767,7 +767,9 @@ namespace Engine {
 		float HeightDensity = 0.0f; // per metre at BaseHeight
 		float HeightFalloff = 0.5f; // per metre of height
 		float BaseHeight = 0.0f;    // world metres
-		float SunGlow = 0.0f;       // a multiple of the first directional light's Color * Intensity
+		// A multiple of the glow light's Color * Intensity (GetSkyGlowLight: an enabled Sky's Sun, else the first directional
+		// light).
+		float SunGlow = 0.0f;
 		float SunGlowExponent = 8.0f;
 		bool FogSkybox = true;
 	};
@@ -972,18 +974,22 @@ namespace Engine {
 	// `snapshot.Lights` (RenderSky's comment): SunLight and SunLightColor, MoonLight and MoonLightColor, and, for a Moon that
 	// holds a light, HasMoon and MoonDirection from it (a Moon without one keeps what render extraction set). Nothing without an
 	// enabled Sky. Render extraction calls it once the lights are extracted; a snapshot built by hand calls it after setting
-	// Sun and Moon. Implemented in Renderer/SkyAtmosphere.cpp. Pure, deterministic.
+	// Sun and Moon. Precondition: the lights hold their authored colours, so call it before ApplySkyLightDriving; on a driven
+	// snapshot (an extracted one) it would take the driven colours as authored and the next driving would dim them twice, so
+	// to resolve an extracted snapshot again, first restore Lights[*SunLight].Color = SunLightColor and
+	// Lights[*MoonLight].Color = MoonLightColor (a snapshot whose lights were only turned needs no resolving: driving again
+	// suffices). Implemented in Renderer/SkyAtmosphere.cpp. Pure, deterministic.
 	void ResolveSkyLights(RenderSnapshot& snapshot);
 
 	// M45 (decision 3): with an enabled Sky whose DriveLights is set, the rendered colours of its roles: the Sun light's Color
 	// becomes SunLightColor times the atmosphere's transmittance toward it, and the Moon light's MoonLightColor times the
 	// transmittance toward it times its illuminated fraction (Renderer/SkyAtmosphere.h: ComputeSkyTransmittance from the
-	// camera's altitude, ComputeMoonIlluminatedFraction; 1 without a Sun light); MoonDirection follows the Moon light's Direction. Every consumer of
-	// the light list (shading, culling, fog, mirror views, captures) then sees the driven colours, and the components keep
-	// theirs. Idempotent: it starts from the authored colours RenderSky keeps, so a snapshot whose Sun was turned is driven
-	// again by calling it again. Nothing without an enabled Sky or with DriveLights clear. Implemented in
-	// Renderer/SkyAtmosphere.cpp with Core/DetMath, not <cmath>, so render extraction (on the simulation path's lint scope,
-	// §4.12) may call it and the result is identical in every configuration.
+	// camera's altitude, ComputeMoonIlluminatedFraction; 1 without a Sun light); MoonDirection follows the Moon light's
+	// Direction. Every consumer of the light list (shading, culling, fog, mirror views, captures) then sees the driven
+	// colours, and the components keep theirs. Idempotent: it starts from the authored colours RenderSky keeps, so a snapshot
+	// whose Sun was turned is driven again by calling it again. Nothing without an enabled Sky or with DriveLights clear.
+	// Implemented in Renderer/SkyAtmosphere.cpp with Core/DetMath, not <cmath>, so render extraction (on the simulation
+	// path's lint scope, §4.12) may call it and the result is identical in every configuration.
 	void ApplySkyLightDriving(RenderSnapshot& snapshot);
 
 	struct RenderRayInterval

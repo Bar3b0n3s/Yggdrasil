@@ -56,8 +56,9 @@ namespace Engine {
 	// The GPU's resources (Renderer/SkyLighting.h), sized here so the CPU references match them: the transmittance LUT
 	// (SkyTransmittanceLutWidth x SkyTransmittanceLutHeight over Bruneton's (mu, r) mapping), the multiple-scattering LUT
 	// (SkyMultipleScatteringLutSize square over (cos sun zenith, height)), the sky-view LUT (SkyViewLutWidth x SkyViewLutHeight
-	// over (world azimuth, view elevation): the sun and the moon scatter at their own azimuths) and the image-based light's cube (SkySpecularFaceSize, the environment
-	// asset's EnvironmentData::SpecularFaceSize, so its prefiltered mips keep SpecularMaxLod's meaning).
+	// over (world azimuth, view elevation): the sun and the moon scatter at their own azimuths) and the image-based light's
+	// cube (SkyCubeSize, the environment asset's EnvironmentData::SpecularFaceSize, so its prefiltered mips keep
+	// SpecularMaxLod's meaning).
 	inline constexpr uint32_t SkyTransmittanceLutWidth = 256;
 	inline constexpr uint32_t SkyTransmittanceLutHeight = 64;
 	inline constexpr uint32_t SkyMultipleScatteringLutSize = 32;

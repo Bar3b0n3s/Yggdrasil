@@ -944,7 +944,7 @@ declare extern type Fog with
 	MaxOpacity: number
 	-- The view depth, in metres, where fog begins. [All modes; Runtime|Test; pure/read; setter mutates]
 	StartDistance: number
-	-- How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow. [All modes; Runtime|Test; pure/read; setter mutates]
 	SunGlow: number
 	-- How tightly the sun glow gathers around the light's direction: higher is tighter. [All modes; Runtime|Test; pure/read; setter mutates]
 	SunGlowExponent: number

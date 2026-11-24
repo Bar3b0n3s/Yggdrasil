@@ -3628,7 +3628,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow.
+How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

@@ -1916,7 +1916,7 @@ The scene's distance and height fog, drawn over every surface, terrain, 3D sprit
 | `HeightDensity` | `Float` | `0` | 0 to 10 | 1/m |  | The height fog's density per metre at BaseHeight; 0 has no height fog. |
 | `HeightFalloff` | `Float` | `0.5` | 0.001 to 100 | 1/m |  | How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent. |
 | `BaseHeight` | `Float` | `0` |  | m |  | The world height, in metres, where the height fog has HeightDensity. |
-| `SunGlow` | `Float` | `0` | 0 to 100 |  |  | How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. |
+| `SunGlow` | `Float` | `0` | 0 to 100 |  |  | How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow. |
 | `SunGlowExponent` | `Float` | `8` | 1 to 1000 |  |  | How tightly the sun glow gathers around the light's direction: higher is tighter. |
 | `FogSkybox` | `Bool` | `true` |  |  |  | Whether the skybox is fogged too, as if it lay infinitely far away. |
 
@@ -1933,7 +1933,7 @@ Script members of `Fog`:
 | `HeightFalloff` | proxy field | `number` | read/write | All | How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent. |
 | `MaxOpacity` | proxy field | `number` | read/write | All | The most fog any point receives, from none (0) to fully fogged (1). |
 | `StartDistance` | proxy field | `number` | read/write | All | The view depth, in metres, where fog begins. |
-| `SunGlow` | proxy field | `number` | read/write | All | How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. |
+| `SunGlow` | proxy field | `number` | read/write | All | How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow. |
 | `SunGlowExponent` | proxy field | `number` | read/write | All | How tightly the sun glow gathers around the light's direction: higher is tighter. |
 
 ## Navigation

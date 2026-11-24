@@ -17,6 +17,7 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/SkyComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -309,6 +310,35 @@ namespace Engine {
 			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 			other.SetActive(false);
 			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+		}
+
+		TEST_CASE("RenderSceneValidation: an enabled Sky of positive Intensity illuminates")
+		{
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a Sky lights the scene in the Environment's place,
+			// while its entity is enabled and its Intensity positive.
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Scene& scene = fixture.GetScene();
+			Entity mesh = scene.CreateEntity("Cube");
+			mesh.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			Entity environment = scene.CreateEntity("Environment");
+			environment.AddComponent<EnvironmentComponent>().Intensity = 0;
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			Entity sky = scene.CreateEntity("Sky");
+			sky.AddComponent<SkyComponent>();
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 0.0f;
+			});
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 1.0f;
+			});
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.SetActive(false);
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 		}
 
 		TEST_CASE("RenderSceneValidation: missing maps use fallback and usable maps use SH illumination")

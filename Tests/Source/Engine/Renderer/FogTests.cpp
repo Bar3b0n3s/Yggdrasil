@@ -569,6 +569,70 @@ namespace Engine {
 			}
 		}
 
+		// The review of W45.1 (finding 2): with a Sky, the view's fog glows toward its Sun (GetSkyGlowLight in Prepare), not
+		// toward the light list's first directional light. A Moon light first and the Sun second, toward different sides of the
+		// view: the cleared pixels, fogged as the sky with FogSkybox, match the reference fog glowing toward the Sun, and many
+		// differ from the one glowing toward the Moon.
+		TEST_CASE("Fog: with a Sky, the view's sky glows toward its Sun" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishFogAssets(fixture);
+			const glm::vec3 clearColor(0.2f, 0.05f, 0.4f);
+			RenderSnapshot snapshot = MakeFogSnapshot(fixture, RenderProjection::Perspective, MakeTestFog());
+			snapshot.Camera.ClearColor = clearColor;
+			snapshot.Camera.ClearToSkybox = false;
+			snapshot.Fog.Density = 0.0f;
+			snapshot.Fog.BaseHeight = 0.0f;
+			snapshot.Fog.HeightFalloff = 0.8f;
+			snapshot.Fog.HeightDensity = 0.3f;
+			snapshot.Fog.SunGlow = 2.0f;
+			// MakeFogSnapshot's light (behind the quad, low on the left) is the Moon light; the Sun, up on the right, comes second.
+			snapshot.Lights[0].Entity = UUID(81);
+			snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional,
+				.Color = glm::vec3(1.0f, 0.6f, 0.3f),
+				.Intensity = 3.0f,
+				.Direction = -glm::normalize(glm::vec3(0.45f, 0.35f, -1.0f)),
+				.Entity = UUID(82) });
+			snapshot.Sky.Enabled = true;
+			snapshot.Sky.Sun = UUID(82);
+			snapshot.Sky.Moon = UUID(81);
+			snapshot.Sky.DriveLights = false;
+			ResolveSkyLights(snapshot);
+			REQUIRE(GetSkyGlowLight(snapshot) == std::optional<size_t>(1));
+			fixture.Submit(snapshot);
+			const std::vector<glm::dvec4> fogged = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
+			const FogConstants towardSun = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
+			const FogConstants towardMoon = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, std::optional<size_t>(0), EnvironmentConstants{}, true);
+			size_t compared = 0;
+			size_t mismatched = 0;
+			size_t notTowardMoon = 0;
+			for (uint32_t y = 0; y < snapshot.Camera.ViewportHeight; ++y)
+			{
+				for (uint32_t x = 0; x < snapshot.Camera.ViewportWidth; ++x)
+				{
+					if (HitSquare(snapshot.Camera, x, y, -3.0, 1.1, 0.0))
+						continue;
+					const Result<RenderRay> ray = ComputeViewPixelRay(snapshot.Camera, x, y);
+					REQUIRE(ray.has_value());
+					const auto expected = [&clearColor, &ray, &snapshot](const FogConstants& fog)
+					{
+						const glm::dvec4 reference = Test::EvaluateSkyFog(fog, glm::dvec3(ray->Direction), glm::dvec3(snapshot.Camera.Position));
+						return glm::dvec3(clearColor) * (1.0 - reference.a) + glm::dvec3(reference) * reference.a;
+					};
+					const double tolerance = std::abs(static_cast<double>(ray->Direction.y)) < 0.05 ? 3e-2 : 5e-3;
+					const glm::dvec3 texel(fogged[static_cast<size_t>(y) * snapshot.Camera.ViewportWidth + x]);
+					++compared;
+					mismatched += IsNear(texel, expected(towardSun), tolerance) ? 0U : 1U;
+					notTowardMoon += IsNear(texel, expected(towardMoon), 5e-2) ? 0U : 1U;
+				}
+			}
+			CHECK(compared > 1000);
+			CHECK(mismatched == 0);
+			CHECK(notTowardMoon > 200);
+		}
+
 		TEST_CASE("Fog: the debug views and the wireframe are never fogged" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;

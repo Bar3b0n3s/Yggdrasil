@@ -20,8 +20,8 @@ namespace Engine {
 	class Scene;
 
 	// Warning, not fixable: an effectively enabled Sky whose Sun names an entity without a DirectionalLight, or a disabled one
-	// (the sky then has no sun: a dark sky, no glow, no driven light), whose Sun is null in a scene without an enabled
-	// DirectionalLight, or whose Moon is its Sun's entity (no moon is drawn). A Sun or Moon that names no entity is
+	// (the sky then has no sun: a dark sky, nothing driven, and the glow and the cascades go to the other directional lights),
+	// whose Sun is null in a scene without an enabled DirectionalLight, or whose Moon is its Sun's entity (no moon is drawn). A Sun or Moon that names no entity is
 	// ENTITY_DANGLING_REFERENCE's, never this code's.
 	inline constexpr std::string_view SkyLightInvalidCode = "SKY_LIGHT_INVALID";
 	// Warning, not fixable: an effectively enabled Environment beside an effectively enabled Sky: the Sky lights the scene and

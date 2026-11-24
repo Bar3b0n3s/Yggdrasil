@@ -597,6 +597,16 @@
 			]
 		},
 		{
+			"File": "GoldenSky.jsonl",
+			"IdSeed": 4203,
+			"Renderer": "vulkan",
+			"GoldenDirectories": [
+				"Assets/Lighting/Scenes/GoldenSky",
+				"Assets/Materials/GoldenSky",
+				"Assets/Scenes/GoldenSky"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

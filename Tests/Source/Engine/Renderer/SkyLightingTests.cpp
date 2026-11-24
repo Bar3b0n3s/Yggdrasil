@@ -4,13 +4,17 @@
 
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/IEnvironmentBaker.h"
+#include "Engine/Asset/MaterialData.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/PlanarReflections.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/ProbeCapture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneRenderer.h"
@@ -20,9 +24,11 @@
 #include "Shared/ProbeConstants.h"
 #include "Shared/SkyConstants.h"
 #include "Support/BufferReadback.h"
+#include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/RenderReference.h"
 #include "Support/SkyCopyProgram.h"
+#include "Support/TextureCreationFails.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -708,6 +714,276 @@ namespace Engine {
 			fixture.Submit(snapshot);
 			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "SkyLuts") == nullptr);
 			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Sky") == nullptr);
+		}
+
+		// The review of W45.1 (finding 2): the renderer gives the cascades to a Sky's Sun while it is above the horizon and to its
+		// Moon light below it (OrderShadowCandidates in Prepare), whatever the lights' order. A wall facing the camera, an
+		// occluder 1 m before it, and two shadow-casting directional lights of equal light, the Moon first in the list: the
+		// light that owns the cascades darkens the wall behind the occluder along its direction, the other lights it unshadowed.
+		TEST_CASE("SceneRenderer: with a Sky, the cascades' shadow follows its Sun by day and its Moon by night" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			constexpr uint32_t Size = 64;
+			Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+			snapshot.Meshes[0].World = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -4.0f)), glm::vec3(10.0f));
+			MeshDrawItem occluder = snapshot.Meshes[0];
+			occluder.World = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)), glm::vec3(0.4f));
+			occluder.Entity = UUID(901);
+			occluder.PickId = 0;
+			snapshot.Meshes.push_back(occluder);
+			const auto makeLight = [](const glm::vec3& toLight, uint64_t entity)
+			{
+				return LightData{ .Type = RenderLightType::Directional,
+					.Color = glm::vec3(1.0f),
+					.Intensity = 1.0f,
+					.Direction = -glm::normalize(toLight),
+					.LightAngle = 0.5f,
+					.CastShadows = true,
+					.Entity = UUID(entity),
+					.ShadowDistance = 20.0f,
+					.CascadeCount = 4,
+					.DepthBias = 0.5f,
+					.NormalBias = 0.5f };
+			};
+			// The Moon light first, then the Sun: snapshot order would give the cascades to the Moon.
+			snapshot.Lights = { makeLight(glm::vec3(-1.0f, 0.5f, 1.0f), 81), makeLight(glm::vec3(1.0f, 0.5f, 1.0f), 82) };
+			snapshot.Sky.Enabled = true;
+			snapshot.Sky.Sun = UUID(82);
+			snapshot.Sky.Moon = UUID(81);
+			snapshot.Sky.DriveLights = false;
+			snapshot.Sky.Intensity = 0.0f; // the lights alone light the wall
+			ResolveSkyLights(snapshot);
+			REQUIRE(snapshot.Sky.SunLight == std::optional<uint32_t>(1));
+			REQUIRE(snapshot.Sky.MoonLight == std::optional<uint32_t>(0));
+
+			// The mean luminance of the 3 x 3 pixels about the wall's point `world` (at z = -4).
+			const auto luminance = [&snapshot](const std::vector<glm::dvec4>& texels, const glm::vec3& world)
+			{
+				const glm::vec4 clip = snapshot.Camera.Projection * snapshot.Camera.View * glm::vec4(world, 1.0f);
+				const int x = static_cast<int>((clip.x / clip.w + 1.0f) * 0.5f * static_cast<float>(Size));
+				const int y = static_cast<int>((1.0f - clip.y / clip.w) * 0.5f * static_cast<float>(Size));
+				double sum = 0.0;
+				for (int dy = -1; dy <= 1; ++dy)
+					for (int dx = -1; dx <= 1; ++dx)
+						sum += glm::dot(glm::dvec3(texels[static_cast<size_t>(y + dy) * Size + static_cast<size_t>(x + dx)]), glm::dvec3(0.2126, 0.7152, 0.0722));
+				return sum / 9.0;
+			};
+			const auto render = [&gpu, &fixture](const RenderSnapshot& rendered)
+			{
+				fixture.Submit(rendered);
+				return ReadHalfTexels(gpu.GetDevice(), *fixture.Renderer().GetSceneColorTexture());
+			};
+			// The occluder's shadow along each light: the occluder's centre (0, 0, -3) moved back to the wall along it.
+			const glm::vec3 behindForSun(-1.0f, -0.5f, -4.0f);
+			const glm::vec3 behindForMoon(1.0f, -0.5f, -4.0f);
+
+			// By day the Sun casts the shadow: behind the occluder along the Sun only the Moon lights the wall.
+			std::vector<glm::dvec4> texels = render(snapshot);
+			const double daySun = luminance(texels, behindForSun);
+			const double dayMoon = luminance(texels, behindForMoon);
+			INFO("day: behind along the Sun " << daySun << ", along the Moon " << dayMoon);
+			CHECK(daySun > 0.0);
+			CHECK(daySun < 0.75 * dayMoon);
+
+			// By night (the Sun below the horizon, still lighting the wall) the Moon casts it.
+			snapshot.Lights[1].Direction = -glm::normalize(glm::vec3(1.0f, -0.5f, 1.0f));
+			texels = render(snapshot);
+			const double nightMoon = luminance(texels, behindForMoon);
+			const double nightOpen = luminance(texels, behindForSun + glm::vec3(0.0f, 1.0f, 0.0f));
+			INFO("night: behind along the Moon " << nightMoon << ", open wall " << nightOpen);
+			CHECK(nightMoon > 0.0);
+			CHECK(nightMoon < 0.75 * nightOpen);
+		}
+
+		// A mirror (M42's planar reflection) and a probe capture draw the Sky as a view does: the glass shows the sky behind the
+		// camera, what the camera mirrored in the glass's plane renders (the mirror view draws the Sky in the skybox's place,
+		// sampling the main view's sky-view LUT by world direction), and a capture's upward face holds the day's blue sky.
+		TEST_CASE("SkyPass: a mirror view and a probe capture draw the sky" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			constexpr uint32_t Size = 64;
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				constexpr AssetHandle MirrorMaterial{ 0x9f45 };
+				auto mirror = CreateRef<MaterialData>();
+				mirror->BaseColor = glm::vec4(1.0f);
+				mirror->Metallic = 1.0f;
+				mirror->Roughness = 0.0f;
+				fixture.Assets().Publish(MirrorMaterial, mirror);
+				// The sun 30 degrees up ahead of the camera; the glass faces the camera, so it shows the sky behind it.
+				RenderSnapshot snapshot = MakeSkyViewSnapshot(fixture, 30.0f);
+				snapshot.Post.SsrEnabled = false;
+				snapshot.Meshes[0].Materials = { MirrorMaterial };
+				snapshot.Meshes[0].CastShadows = false;
+				snapshot.PlanarReflections.push_back(
+					PlanarReflectionItem{ .World = snapshot.Meshes[0].World, .Normal = glm::vec3(0.0f, 0.0f, 1.0f), .ResolutionScale = 1.0f, .Entity = snapshot.Meshes[0].Entity });
+				fixture.Submit(snapshot);
+				const std::vector<glm::dvec4> view = ReadHalfTexels(device, *fixture.Renderer().GetSceneColorTexture());
+				const RenderStats skyStats = fixture.Renderer().GetRenderStats();
+				REQUIRE(skyStats.PlanarReflections == 1);
+				const RenderPassStats* row = Test::SceneRendererIntegrationFixture::FindPass(skyStats, "PlanarReflection0");
+				REQUIRE(row != nullptr);
+				const uint32_t skyDrawCalls = row->DrawCalls;
+
+				// The mirror camera's own view of the sky (no glass, no reflection): the glass's pixel (x, y) is its (Size - 1 - x, y).
+				RenderSnapshot mirrored = snapshot;
+				mirrored.Camera = MakePlanarReflectionCamera(snapshot.Camera, PlanarReflectionPlane{ .Normal = glm::vec3(0.0f, 0.0f, 1.0f), .Distance = 3.0f }, Size, Size);
+				mirrored.Meshes.clear();
+				mirrored.PlanarReflections.clear();
+				fixture.Submit(mirrored);
+				const std::vector<glm::dvec4> mirrorView = ReadHalfTexels(device, *fixture.Renderer().GetSceneColorTexture());
+				uint32_t mismatched = 0;
+				for (uint32_t y = 18; y < 46; ++y)
+				{
+					for (uint32_t x = 18; x < 46; ++x)
+					{
+						const glm::dvec3 glass(view[static_cast<size_t>(y) * Size + x]);
+						const glm::dvec3 sky(mirrorView[static_cast<size_t>(y) * Size + (Size - 1 - x)]);
+						const glm::dvec3 difference = glm::abs(glass - sky);
+						if (std::max({ difference.r, difference.g, difference.b }) > 2e-2 * std::max({ sky.r, sky.g, sky.b }) + 1e-3)
+							++mismatched;
+					}
+				}
+				CHECK(mismatched <= 8);
+				// Above the glass's centre it shows the blue sky a few degrees above the horizon behind the camera.
+				const glm::dvec3 above(view[static_cast<size_t>(Size / 2 - 8) * Size + Size / 2]);
+				CHECK(above.b > above.r);
+				CHECK(above.r > 0.0);
+
+				// Without the Sky the mirror view draws nothing over its cleared pixels: one draw fewer.
+				RenderSnapshot plain = snapshot;
+				plain.Sky.Enabled = false;
+				fixture.Submit(plain);
+				const RenderStats plainStats = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* plainRow = Test::SceneRendererIntegrationFixture::FindPass(plainStats, "PlanarReflection0");
+				REQUIRE(plainRow != nullptr);
+				CHECK(skyDrawCalls == plainRow->DrawCalls + 1);
+
+				// A probe capture of the sky scene (no mirror), the sun low ahead so that no face above sees its halo: its +Y face
+				// sees the blue sky, its sky drawn from the probe's position; without the Sky the clear colour, black.
+				Result<Scope<ProbeCapture>> capture = ProbeCapture::Create(device, fixture.Pipelines(), fixture.Cache(), fixture.Assets());
+				REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+				RenderSnapshot probe = MakeSkyViewSnapshot(fixture, 10.0f);
+				const Result<ProbeCubeCapture> captured = (*capture)->Capture(probe, glm::vec3(0.0f, 1.0f, 0.0f), 16);
+				REQUIRE_MESSAGE(captured.has_value(), captured.error().ToString());
+				for (const glm::vec4& texel : captured->Faces[2])
+				{
+					CHECK(texel.r > 0.0f);
+					CHECK(texel.b > texel.r);
+				}
+				probe.Sky.Enabled = false;
+				const Result<ProbeCubeCapture> unlit = (*capture)->Capture(probe, glm::vec3(0.0f, 1.0f, 0.0f), 16);
+				REQUIRE_MESSAGE(unlit.has_value(), unlit.error().ToString());
+				for (const glm::vec4& texel : unlit->Faces[2])
+					CHECK(glm::vec3(texel) == glm::vec3(0.0f));
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The view's sky resources live in the renderer's state (place 2): a device loss drops them with it, and the next
+		// render creates them again and regenerates the LUTs and the image-based light (their keys are empty), so the image is
+		// the same, byte for byte.
+		TEST_CASE("SkyLighting: a sky scene renders the same bytes after a device loss" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+			RenderSnapshot snapshot = MakeSkyViewSnapshot(fixture, 20.0f);
+			snapshot.Sky.Clouds = 0.5f;
+			GraphicsDevice& device = gpu.GetDevice();
+			uint64_t frame = 90;
+			Test::DeviceLossTest test;
+			test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "SceneRenderer" };
+			test.Use = [&device, &fixture, &snapshot, &frame]() -> Result<std::vector<std::byte>>
+			{
+				std::vector<std::byte> pixels;
+				for (uint32_t slot = 0; slot < device.GetFramesInFlight(); ++slot)
+				{
+					snapshot.FrameIndex = ++frame;
+					ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, device.CreateCommandList());
+					list->open();
+					const Status rendered = fixture.Renderer().Render(*list, snapshot);
+					list->close();
+					fixture.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(*list));
+					ENGINE_TRY(rendered);
+					nvrhi::ITexture* image = fixture.Renderer().GetFinalTexture();
+					if (image == nullptr)
+						return MakeError(ErrorCode::InvalidState, "the renderer has no final texture");
+					Readback readback(device);
+					ENGINE_TRY_ASSIGN(Image read, readback.ReadTexture(*image));
+					pixels = std::move(read.Pixels);
+				}
+				return pixels;
+			};
+			// The view's targets reach their steady state in the pool first, as the other renderer loss cases do.
+			for (uint32_t warmUp = 0; warmUp <= RenderTargetPool::DefaultKeepFrames; ++warmUp)
+			{
+				const Result<std::vector<std::byte>> steady = test.Use();
+				REQUIRE_MESSAGE(steady.has_value(), steady.error().ToString());
+			}
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			// The recovered renderer regenerated the sky's light in its first frame after the loss.
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Sky") != nullptr);
+		}
+
+		// Decision 3, "Device loss, trim and out of memory": a view whose sky resources cannot be created (its cubes out of
+		// memory) lights with its Environment exactly as a view without a Sky does, records none of the sky's rows, and its
+		// render returns the error (for which the host trims and renders again); the next render creates them and draws the sky.
+		TEST_CASE("SkyLighting: a sky whose cubes cannot be created lights with the Environment and the render returns its error"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			const auto makeSnapshot = [](Test::SceneRendererIntegrationFixture& fixture)
+			{
+				RenderSnapshot snapshot = MakeSkyViewSnapshot(fixture, 30.0f);
+				snapshot.Environment = RenderEnvironment{ .Environment = {}, .Intensity = 1.0f, .ShowSkybox = true, .FallbackColor = glm::vec3(0.2f, 0.3f, 0.4f) };
+				return snapshot;
+			};
+			std::vector<std::byte> reference;
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+				RenderSnapshot withoutSky = makeSnapshot(fixture);
+				withoutSky.Sky.Enabled = false;
+				reference = fixture.Render(withoutSky).Pixels;
+			}
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+				RenderSnapshot snapshot = makeSnapshot(fixture);
+				{
+					const Test::TextureCreationFails failing(device, [](const nvrhi::TextureDesc& desc)
+					{
+						return desc.dimension == nvrhi::TextureDimension::TextureCube && desc.isUAV;
+					});
+					Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+					REQUIRE_MESSAGE(list.has_value(), list.error().ToString());
+					(*list)->open();
+					const Status rendered = fixture.Renderer().Render(**list, snapshot);
+					(*list)->close();
+					fixture.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(**list));
+					REQUIRE_FALSE(rendered.has_value());
+					CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+					CHECK(failing.GetFailedCount() == 1);
+					CHECK(fixture.Read().Pixels == reference);
+					const RenderStats& stats = fixture.Renderer().GetRenderStats();
+					CHECK(stats.SkyUpdates == 0U);
+					CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "SkyLuts") == nullptr);
+					CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "Sky") == nullptr);
+				}
+				++snapshot.FrameIndex;
+				CHECK(fixture.Render(snapshot).Pixels != reference);
+				CHECK(fixture.Renderer().GetRenderStats().SkyUpdates == 1U);
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Sky") != nullptr);
+				CHECK_FALSE(device.IsLost());
+			}
+			device.RunGarbageCollection();
 		}
 	}
 

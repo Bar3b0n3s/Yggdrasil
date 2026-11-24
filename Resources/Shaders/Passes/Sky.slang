@@ -369,6 +369,22 @@ float3 GetSkyCubeTexelDirection(uint face, uint column, uint row, uint size)
 	return normalize(direction);
 }
 
+// The atmosphere's ground, below the horizon: GroundAlbedo / pi times the light reaching it (the Sun's and the Moon light's
+// through the transmittance at the ground, and the sky's zenith radiance, from the bound sky-view LUT at radius `r`, times
+// pi), before Intensity. The image-based light's cube and the Sky pass add it to the sky-view LUT's in-scattering along a
+// ray that meets the ground, so neither shows a black ground; seen without extinction on its way up (the camera stands low
+// against the scale heights, and distance haze is the Fog's, decision 3).
+float3 EvaluateSkyGround(float r)
+{
+	float3 irradiance = Sky.SunIlluminance * SampleTransmittance(TransmittanceLut, LinearClamp, Sky.BottomRadius, Sky.SunDirection.y)
+		* saturate(Sky.SunDirection.y);
+	if (Sky.HasMoon != 0)
+		irradiance += Sky.MoonIlluminance * Sky.MoonFraction * SampleTransmittance(TransmittanceLut, LinearClamp, Sky.BottomRadius, Sky.MoonDirection.y)
+			* saturate(Sky.MoonDirection.y);
+	irradiance += SampleSkyView(float3(0.0, 1.0, 0.0), r) * AtmospherePi;
+	return Sky.GroundAlbedo * irradiance / AtmospherePi;
+}
+
 // The image-based light's cube, level 0 (SkyCubeSize², six faces in z): the sea-level sky-view LUT and the clouds at
 // Dispatch.CloudOffset above the horizon; below it, the atmosphere's ground: GroundAlbedo / pi times the light reaching it
 // (the Sun and the Moon light through the transmittance, and the sky's zenith radiance times pi). No discs, no stars (the
@@ -387,15 +403,7 @@ void CSSkyCube(uint3 id : SV_DispatchThreadID)
 	const float r = Sky.BottomRadius + max(Dispatch.Altitude, 0.0);
 	float3 radiance = SampleSkyView(direction, r);
 	if (direction.y < 0.0)
-	{
-		float3 irradiance = Sky.SunIlluminance * SampleTransmittance(TransmittanceLut, LinearClamp, Sky.BottomRadius, Sky.SunDirection.y)
-			* saturate(Sky.SunDirection.y);
-		if (Sky.HasMoon != 0)
-			irradiance += Sky.MoonIlluminance * Sky.MoonFraction * SampleTransmittance(TransmittanceLut, LinearClamp, Sky.BottomRadius, Sky.MoonDirection.y)
-				* saturate(Sky.MoonDirection.y);
-		irradiance += SampleSkyView(float3(0.0, 1.0, 0.0), r) * AtmospherePi;
-		radiance += Sky.GroundAlbedo * irradiance / AtmospherePi;
-	}
+		radiance += EvaluateSkyGround(r);
 	const float4 clouds = EvaluateClouds(direction, float3(0.0, max(Dispatch.Altitude, 0.0) * 1000.0, 0.0), Dispatch.CloudOffset, r);
 	radiance = radiance * (1.0 - clouds.a) + clouds.rgb;
 	CubeDestination[id] = float4(ClampHalf(radiance), 1.0);
@@ -452,7 +460,7 @@ SkyVaryings VSMain(uint vertexID : SV_VulkanVertexID)
 }
 
 // Each pixel at the cleared depth: the camera's sky-view LUT, the clouds at their live offset, the stars, the moon and the
-// sun's disc, times Intensity, fogged with FogSkybox as the skybox is (Common/Fog.slang; a mirror view from its glass on).
+// sun's disc above the horizon and the atmosphere's ground below it, times Intensity, fogged with FogSkybox as the skybox is (Common/Fog.slang; a mirror view from its glass on).
 [shader("fragment")]
 float4 PSMain(SkyVaryings input) : SV_Target0
 {
@@ -467,6 +475,8 @@ float4 PSMain(SkyVaryings input) : SV_Target0
 	const float skyLuminance = dot(radiance, float3(0.2126, 0.7152, 0.0722));
 	if (direction.y > 0.0)
 		radiance += EvaluateStars(direction, skyLuminance) + EvaluateMoon(direction, r) + EvaluateSunDisc(direction, r);
+	else
+		radiance += EvaluateSkyGround(r);
 	const float4 clouds = EvaluateClouds(direction, Fog.CameraPosition, Sky.CloudOffset, r);
 	radiance = (radiance * (1.0 - clouds.a) + clouds.rgb) * Sky.Intensity;
 	radiance = min(radiance, float3(SkyMaxHalf, SkyMaxHalf, SkyMaxHalf));
@@ -487,10 +497,6 @@ float4 PSMain(SkyVaryings input) : SV_Target0
 }
 
 // The copy's GPU proof (W45.1).
-
-// The number of float4 elements CSTestCopyRead writes: EnvironmentConstants' twelve, FogConstants' first two, and each
-// reflection probe's AxisScale and Lookup.
-static const uint SkyTestReadbackCount = 14 + 2 * MaxViewReflectionProbes;
 
 // Element i of SkyResults, component c, is Sky.Intensity + 4 i + c: distinct values that follow the frame's constants.
 [shader("compute")]

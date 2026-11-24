@@ -46,7 +46,10 @@
 //      Common/Probes.slang; not with RenderQualitySettings::Probes false, as in a bake's captures) an irradiance volume's SH9
 //      replaces the diffuse term and a reflection probe's box-projected cube the prefiltered specular; emissive added.
 //      Then M26's TerrainForward (TerrainPass.h): the terrains' chunks shaded the same way, with their splatted layers.
-//   8. Skybox (SkyboxPass.h): when the camera clears to the skybox and the environment has a map and ShowSkybox.
+//   8. Skybox (SkyboxPass.h): when the camera clears to the skybox and the environment has a map and ShowSkybox. M45
+//      (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): in a view an enabled Sky lights, the Sky pass in its place
+//      (SkyPass.h), after the Ambient stage's SkyLighting rows made the sky's LUTs and its image-based light, which lights
+//      the view in the Environment's place (SkyLighting.h: its specular cube at t3, its SH9 copied into b2).
 //      Then M26's SSR (SsrPass.h): with PostProcessSettings::SsrEnabled in a Lit view outside the wireframe, glossy
 //      reflections traced over the opaque image with the depth pyramid (recorded for it without GTAO too) and composited into
 //      SceneColor in place of the probes' or environment's specular, which stays where a ray misses.
@@ -191,7 +194,8 @@ namespace Engine {
 		// HdrLit and Normals and M22's LdrDepth; M26's HdrAdditive was removed at M33's merge), UpscalePass (2), M21's
 		// Lights2DPass (1), M26's ExposurePass (2), M26's TaaPass (1), SsrPass (3: M26's trace and composite and M32's tile
 		// classification), TerrainPass (3: TerrainDepthNormal's prepass and picking prepass, TerrainForward's forward pass) and
-		// M33's ParticlePass (3) and M42's PlanarReflectionPass (1, the planar reflections' mip chain): 77, the declarations'
+		// M33's ParticlePass (3) and M42's PlanarReflectionPass (1, the planar reflections' mip chain), and M45's
+		// SkyLightingPass (9: the Sky program's five computes and EnvironmentBake's four) and SkyPass (1): 87, the declarations'
 		// sum (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's
 		// PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();

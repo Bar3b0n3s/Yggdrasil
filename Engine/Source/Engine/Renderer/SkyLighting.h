@@ -39,10 +39,9 @@
 // binds it. Since writeBuffer and copyBuffer both write in CopyDest, between which NVRHI places no barrier, the copies first
 // move their destinations to ConstantBuffer (a barrier completing the CPU writes; synchronization validation reports the
 // write-after-write hazard without it). Every Vulkan buffer of the vendored NVRHI is created with TRANSFER_SRC and
-// TRANSFER_DST. copyBuffer, unlike
-// writeBuffer, ends an open render pass only when a barrier is pending, so the copies are recorded outside every render pass:
-// at the end of the Ambient stage, right after the sky's dispatches. No layout changes: the forward, terrain, skybox, SSR,
-// probe and fog shaders read the constants they always read. Proved on the device, under validation and synchronization
+// TRANSFER_DST. copyBuffer, unlike writeBuffer, ends an open render pass only when a barrier is pending, so the copies are
+// recorded outside every render pass: at the end of the Ambient stage, right after the sky's dispatches. No layout changes:
+// the forward, terrain, skybox, SSR, probe and fog shaders read the constants they always read. Proved on the device, under validation and synchronization
 // validation at API 1.4 and 1.3, by "SkyLighting: a buffer copied into a view's constant buffers after their CPU writes
 // reaches the passes that read them".
 

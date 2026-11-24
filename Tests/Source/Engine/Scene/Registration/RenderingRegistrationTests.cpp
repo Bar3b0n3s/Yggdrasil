@@ -56,10 +56,19 @@ namespace Engine {
 			CHECK(sky.GetVersion() == 1);
 			CHECK(sky.HasFlag(ComponentFlags::UniquePerScene));
 			CHECK(sky.HasFlag(ComponentFlags::ScriptVisible));
-			CHECK(sky.FindField("Sun")->GetKind() == FieldType::EntityRef);
-			CHECK(sky.FindField("Moon")->GetKind() == FieldType::EntityRef);
-			CHECK(sky.FindField("GroundAlbedo")->GetKind() == FieldType::Color3);
-			CHECK(sky.FindField("CloudSpeed")->GetKind() == FieldType::Vec2);
+			// Registered right after the Environment (the ledger's position in Rendering).
+			CHECK(sky.GetIndex() == FindRenderingComponent(*registry, "Environment").GetIndex() + 1);
+			const auto kind = [&sky](std::string_view field, FieldType expected)
+			{
+				INFO(std::string(field));
+				const FieldInfo* info = sky.FindField(field);
+				REQUIRE(info != nullptr);
+				CHECK(info->GetKind() == expected);
+			};
+			kind("Sun", FieldType::EntityRef);
+			kind("Moon", FieldType::EntityRef);
+			kind("GroundAlbedo", FieldType::Color3);
+			kind("CloudSpeed", FieldType::Vec2);
 			const auto range = [&sky](std::string_view field, double min, double max)
 			{
 				INFO(std::string(field));
