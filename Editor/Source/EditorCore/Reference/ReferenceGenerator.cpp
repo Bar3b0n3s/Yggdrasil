@@ -106,11 +106,11 @@ namespace Engine {
 		constexpr std::string_view AssetMetaExample = R"({"Format": "AssetMeta", "Version": 1, "Handle": "8c5e9fa7d7637795", "Type": "Texture", "Importer": "Texture",
 "ImporterVersion": 2, "Settings": {"Usage": "Color", "GenerateMips": true, "Compression": "Auto"}, "SubAssets": []})";
 
-		constexpr std::string_view MaterialExample = R"({"Format": "Material", "Version": 2, "BaseColor": [0.9, 0.15, 0.15, 1], "BaseColorMap": null,
+		constexpr std::string_view MaterialExample = R"({"Format": "Material", "Version": 3, "BaseColor": [0.9, 0.15, 0.15, 1], "BaseColorMap": null,
 "BaseColorUVSet": "UV0", "Metallic": 0, "Roughness": 0.45, "MetallicRoughnessMap": null, "MetallicRoughnessUVSet": "UV0", "NormalMap": null,
 "NormalUVSet": "UV0", "NormalScale": 1, "OcclusionMap": null, "OcclusionUVSet": "UV0", "OcclusionStrength": 1, "Emissive": [0, 0, 0],
 "EmissiveStrength": 1, "EmissiveMap": null, "EmissiveUVSet": "UV0", "AlphaMode": "Opaque", "AlphaCutoff": 0.5, "DoubleSided": false,
-"UVScale": [1, 1], "UVOffset": [0, 0]})";
+"UVScale": [1, 1], "UVOffset": [0, 0], "Wind": {"Enabled": false, "Bend": 0.1, "Branch": 0.1, "Flutter": 0.02, "Stiffness": 0.5}})";
 
 		constexpr std::string_view SoundEffectExample = R"({"Format": "SoundEffect", "Version": 1, "Seed": 7, "Volume": 0.7,
 "Layers": [{"Wave": "Square", "DutyCycle": 0.5, "Notes": ["C5:0.06", "E5:0.06", "G5:0.06", "C6:0.18"],

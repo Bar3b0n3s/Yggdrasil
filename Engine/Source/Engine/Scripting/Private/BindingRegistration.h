@@ -150,6 +150,8 @@ namespace Engine {
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the HingeJoint, SliderJoint, DistanceJoint and FixedJoint proxies'
 		// methods.
 		[[nodiscard]] Status RegisterJoints(ScriptApiRegistry& api);
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the Wind proxy's Sample method.
+		[[nodiscard]] Status RegisterWind(ScriptApiRegistry& api);
 
 	}
 

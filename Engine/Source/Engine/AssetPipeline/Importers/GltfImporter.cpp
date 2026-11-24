@@ -9,10 +9,12 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/SkeletonData.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
+#include "Engine/AssetPipeline/Private/MeshSimplifier.h"
 #include "Engine/AssetPipeline/Private/TangentGenerator.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Random.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Reflection/ComponentInfo.h"
@@ -63,6 +65,13 @@
 // ImportSkeletons and ImportAnimations cook the Skeletons and AnimationClips, and BuildPrefab writes the entities in
 // canonical order with their Animators and SkinnedMeshes. MergeMeshes, which merges every mesh into one static mesh, skips
 // skins, animations and morph targets as version 2 did.
+//
+// Version 4 (M46; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3B): before the scene's nodes are
+// collected, CollectLevels finds the levels the file authors (Lods FromGltf): MSFT_lod groups, then <name>_LOD<n> sibling
+// groups, each attached to its level 0 node's glTF mesh; their level nodes are never placed. ImportMeshes reads a mesh's
+// authored levels once (ReadAuthoredLevels) and appends them to its variant without a skin (AddAuthoredLevels), or
+// generates levels from each cooked mesh's level 0 (GenerateLevels, Lods Generate). The _WIND attribute is read beside
+// COLOR_0 and follows a vertex wherever its tangents split it.
 
 namespace Engine {
 
@@ -94,6 +103,8 @@ namespace Engine {
 			std::vector<glm::vec4> Tangents{};
 			std::vector<glm::vec2> TexCoords1{};
 			std::vector<glm::vec4> Colors{};
+			// M46 (version 4): _WIND, clamped to [0, 1]; empty when the primitive has none.
+			std::vector<glm::vec4> Wind{};
 			// M23 (version 3): JOINTS_0 (the skin's joint indices as written) and WEIGHTS_0 (renormalized), empty unless the
 			// mesh is read for a skin; and one delta per vertex for each morph target, empty unless its targets import.
 			std::vector<std::array<uint16_t, 4>> Joints{};
@@ -108,6 +119,8 @@ namespace Engine {
 			std::vector<MeshVertex> Vertices{};
 			// One per vertex when the primitive has TEXCOORD_1 or COLOR_0 (the missing one at its default), else empty.
 			std::vector<MeshVertexAttributes> Attributes{};
+			// M46 (version 4): one per vertex when the primitive has _WIND, else empty.
+			std::vector<MeshVertexWind> Wind{};
 			// M23 (version 3): the primitive's JOINTS_0 and renormalized WEIGHTS_0 as read (indices into its glTF skin's
 			// joints), empty unless read for a skin; Skin, the skin of the mesh variant being cooked (indices into the
 			// Skeleton's joints, ApplySkin); one delta per vertex for each imported morph target.
@@ -161,6 +174,21 @@ namespace Engine {
 			std::string Key{};
 			AnimationClipData Clip{};
 			std::vector<size_t> Groups{}; // the SkeletonGroups it animates, ascending
+		};
+
+		// M46 (version 4): one authored level CollectLevels attached to a glTF mesh.
+		struct AuthoredLevel
+		{
+			size_t Node = 0;   // the level node (the diagnostics' subject)
+			size_t Mesh = 0;   // its glTF mesh
+			size_t Number = 0; // its level, 1 to MaxMeshLods - 1
+		};
+
+		// M46 (version 4): an authored level that keeps level 0's layout, read in its mesh's own space with Scale applied.
+		struct KeptLevel
+		{
+			float ScreenSize = 0.0f;
+			std::vector<PrimitiveGeometry> Submeshes{}; // one per submesh of level 0, in its order
 		};
 
 	}
@@ -250,6 +278,96 @@ namespace Engine {
 			std::string decoded(text);
 			decoded.resize(cgltf_decode_string(decoded.data()));
 			return decoded;
+		}
+
+		// M46 (version 4): the base name and level number of a node named "<base>_LOD<n>" (a non-empty base, n one to nine
+		// decimal digits), nullopt for any other name.
+		static std::optional<std::pair<std::string, size_t>> ParseLodName(const std::string& name)
+		{
+			constexpr std::string_view Marker = "_LOD";
+			constexpr size_t MaxDigits = 9;
+			const size_t marker = name.rfind(Marker);
+			if (marker == std::string::npos || marker == 0)
+				return std::nullopt;
+			const std::string_view digits = std::string_view(name).substr(marker + Marker.size());
+			if (digits.empty() || digits.size() > MaxDigits || !std::ranges::all_of(digits, [](char character)
+			{
+				return character >= '0' && character <= '9';
+			}))
+				return std::nullopt;
+			size_t number = 0;
+			for (const char digit : digits)
+				number = number * 10 + static_cast<size_t>(digit - '0');
+			return std::pair(name.substr(0, marker), number);
+		}
+
+		// M46 (version 4): whether `sizes` hold valid switch sizes: each finite, in (0, 1] and below the one before.
+		static bool AreScreenSizes(std::span<const float> sizes)
+		{
+			for (size_t index = 0; index < sizes.size(); ++index)
+			{
+				const float size = sizes[index];
+				if (!std::isfinite(size) || !(size > 0.0f) || size > 1.0f || (index > 0 && !(size < sizes[index - 1])))
+					return false;
+			}
+			return true;
+		}
+
+		// M46 (version 4): the "ids" of an MSFT_lod extension's JSON text, nullopt unless it is an object whose "ids" is an
+		// array of unsigned integers.
+		static std::optional<std::vector<size_t>> ReadLodIds(const char* data)
+		{
+			if (data == nullptr)
+				return std::nullopt;
+			const Result<Json> document = JsonReader::Parse(data);
+			if (!document.has_value())
+				return std::nullopt;
+			const Result<JsonReader> list = JsonReader(*document).GetMember("ids");
+			if (!list.has_value())
+				return std::nullopt;
+			const Result<size_t> size = list->GetArraySize();
+			if (!size.has_value())
+				return std::nullopt;
+			std::vector<size_t> ids;
+			for (size_t index = 0; index < *size; ++index)
+			{
+				const Result<JsonReader> element = list->GetElement(index);
+				if (!element.has_value())
+					return std::nullopt;
+				const Result<uint32_t> id = element->ReadUInt32();
+				if (!id.has_value())
+					return std::nullopt;
+				ids.push_back(*id);
+			}
+			return ids;
+		}
+
+		// M46 (version 4): the first `count` values of the MSFT_screencoverage member of a node's extras JSON text: empty when
+		// there is no such member; Validation when it is not an array of at least `count` valid switch sizes (AreScreenSizes).
+		static Result<std::vector<float>> ReadLodCoverage(const char* extras, size_t count)
+		{
+			if (extras == nullptr)
+				return std::vector<float>();
+			const Result<Json> document = JsonReader::Parse(extras);
+			if (!document.has_value())
+				return std::vector<float>();
+			const JsonReader root(*document);
+			const std::optional<JsonReader> coverage = root.FindMember("MSFT_screencoverage");
+			if (!coverage.has_value())
+				return std::vector<float>();
+			ENGINE_TRY_ASSIGN(const size_t size, coverage->GetArraySize());
+			if (size < count)
+				return MakeError(ErrorCode::Validation, "MSFT_screencoverage holds {} values for {} levels", size, count);
+			std::vector<float> values;
+			for (size_t index = 0; index < count; ++index)
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader element, coverage->GetElement(index));
+				ENGINE_TRY_ASSIGN(const float value, element.ReadFloat());
+				values.push_back(value);
+			}
+			if (!AreScreenSizes(values))
+				return MakeError(ErrorCode::Validation, "MSFT_screencoverage's values are not decreasing screen sizes in (0, 1]");
+			return values;
 		}
 
 		// Rule 1 of the URI rule: "data:" in any ASCII case.
@@ -641,6 +759,8 @@ namespace Engine {
 					attributes.TexCoords1.push_back(attributes.TexCoords1[vertex]);
 				if (!attributes.Colors.empty())
 					attributes.Colors.push_back(attributes.Colors[vertex]);
+				if (!attributes.Wind.empty())
+					attributes.Wind.push_back(attributes.Wind[vertex]);
 				if (!attributes.Joints.empty())
 				{
 					attributes.Joints.push_back(attributes.Joints[vertex]);
@@ -842,11 +962,16 @@ namespace Engine {
 			[[nodiscard]] Status ImportMaterials();
 			[[nodiscard]] Result<AssetHandle> ImportTextureSlot(const cgltf_texture_view& view, ImageUse use, size_t material, std::string_view slot);
 			[[nodiscard]] Result<std::vector<glm::vec4>> ReadColors(const cgltf_accessor& accessor, std::string_view subject) const;
+			[[nodiscard]] Result<std::vector<glm::vec4>> ReadWind(const cgltf_accessor& accessor, std::string_view subject) const;
 			[[nodiscard]] Result<AssetHandle> FindStandaloneTexture(size_t image);
 			[[nodiscard]] Result<Buffer> ReadImage(size_t image);
 
 			[[nodiscard]] Result<SceneNode> MakeSceneNode(size_t node, UUID parent, const glm::mat4& parentWorld) const;
 			[[nodiscard]] Status CollectSceneNodes();
+
+			// M46 (version 4): the authored levels (see the file comment).
+			[[nodiscard]] Status CollectLevels();
+			void ReportDroppedLevel(std::string subject, std::string reason);
 
 			// M23 (version 3): the skins' plan (see the file comment).
 			[[nodiscard]] Status PlanSkins();
@@ -872,6 +997,9 @@ namespace Engine {
 			void AppendSubmesh(MeshData& mesh, PrimitiveGeometry geometry, const cgltf_primitive& primitive) const;
 			[[nodiscard]] Result<AssetHandle> CookMeshSubAsset(MeshData mesh, std::string key);
 			[[nodiscard]] Result<std::vector<MeshMorphTarget>> MakeMorphTargets(size_t mesh) const;
+			[[nodiscard]] Result<std::vector<KeptLevel>> ReadAuthoredLevels(size_t mesh, std::span<const std::pair<size_t, PrimitiveGeometry>> levelZero);
+			static void AddAuthoredLevels(MeshData& mesh, std::vector<KeptLevel> levels);
+			void GenerateLevels(MeshData& mesh, std::string_view subject);
 
 			[[nodiscard]] Status ImportSkeletons();
 			[[nodiscard]] Status ImportAnimations();
@@ -921,6 +1049,14 @@ namespace Engine {
 			// morph targets it imported (0: none, or more than MaxMeshMorphTargets, skipped).
 			std::vector<std::map<size_t, AssetHandle>> m_MeshVariants;
 			std::vector<size_t> m_MorphTargetCounts;
+
+			// M46 (version 4; all empty unless Lods is FromGltf). Per glTF node: whether it is a level node (never placed), and
+			// the entity name of a <name>_LOD0 node (<name>). Per glTF mesh: its authored levels in level order, and the
+			// MSFT_screencoverage values that replace LodScreenSizes (empty: none).
+			std::vector<bool> m_IsLevelNode;
+			std::vector<std::optional<std::string>> m_GroupNames;
+			std::vector<std::vector<AuthoredLevel>> m_AuthoredLevels;
+			std::vector<std::vector<float>> m_LevelCoverage;
 		};
 
 		// M23 (version 3): m_ScenePositions' value for a node outside the default scene, and m_MeshVariants' key of the
@@ -1393,6 +1529,9 @@ namespace Engine {
 					break;
 				}
 
+				// M46 (version 4, Material version 3): every imported material takes the settings' wind block.
+				material.Wind = m_Settings.Wind;
+
 				Result<Buffer> cooked = CookMaterial(material, m_Context->GetRegistry(), GltfImporter::Version);
 				if (!cooked)
 					return std::unexpected(std::move(cooked).error().WithContext(std::format("while cooking materials[{}]", index)));
@@ -1470,7 +1609,8 @@ namespace Engine {
 			sceneNode.Node = index;
 			sceneNode.ID = MakeEntityID(std::format("node:{}", index));
 			sceneNode.Parent = parent;
-			sceneNode.Name = Utils::GetName(node.name, std::format("Node {}", index));
+			sceneNode.Name = index < m_GroupNames.size() && m_GroupNames[index].has_value() ? *m_GroupNames[index]
+																							: Utils::GetName(node.name, std::format("Node {}", index));
 			sceneNode.Transform.Translation = translation * m_Settings.Scale;
 			sceneNode.Transform.Rotation = rotation;
 			sceneNode.Transform.Scale = scale;
@@ -1509,6 +1649,9 @@ namespace Engine {
 			{
 				const auto [node, parentPosition] = stack.back();
 				stack.pop_back();
+				// M46 (version 4): a level node and its subtree are never placed.
+				if (node < m_IsLevelNode.size() && m_IsLevelNode[node])
+					continue;
 				if (visited[node])
 					return std::unexpected(Fail(std::format("nodes[{}] appears more than once in the node hierarchy of the scene", node)));
 				visited[node] = true;
@@ -1710,6 +1853,18 @@ namespace Engine {
 				for (size_t vertex = 0; vertex < usedVertices.size(); ++vertex)
 					attributes.Colors[vertex] = colors[usedVertices[vertex]];
 			}
+			// M46 (version 4): the wind stream's weights, the application attribute _WIND.
+			for (cgltf_size attribute = 0; attribute < primitive.attributes_count; ++attribute)
+			{
+				const cgltf_attribute& candidate = primitive.attributes[attribute];
+				if (candidate.type != cgltf_attribute_type_custom || candidate.data == nullptr || Utils::DecodeJsonString(candidate.name) != "_WIND")
+					continue;
+				ENGINE_TRY_ASSIGN(const std::vector<glm::vec4> wind, ReadWind(*candidate.data, subject));
+				attributes.Wind.resize(usedVertices.size());
+				for (size_t vertex = 0; vertex < usedVertices.size(); ++vertex)
+					attributes.Wind[vertex] = wind[usedVertices[vertex]];
+				break;
+			}
 
 			// M23 (version 3): the skin's influences and the morph targets' deltas, per used vertex.
 			if (readSkin)
@@ -1806,6 +1961,19 @@ namespace Engine {
 						geometry.Attributes[vertex].TexCoord1 = attributes.TexCoords1[vertex];
 					if (!attributes.Colors.empty())
 						geometry.Attributes[vertex].Color = attributes.Colors[vertex];
+				}
+			}
+			if (!attributes.Wind.empty())
+			{
+				geometry.Wind.resize(attributes.Positions.size());
+				const auto toUnorm = [](float value)
+				{
+					return static_cast<uint8_t>(std::lround(value * 255.0f));
+				};
+				for (size_t vertex = 0; vertex < attributes.Positions.size(); ++vertex)
+				{
+					const glm::vec4& weights = attributes.Wind[vertex];
+					geometry.Wind[vertex] = MeshVertexWind{ .Branch = toUnorm(weights.x), .Phase = toUnorm(weights.y), .Flutter = toUnorm(weights.z), .BendMask = toUnorm(weights.w) };
 				}
 			}
 			geometry.Joints = std::move(attributes.Joints);
@@ -1945,6 +2113,29 @@ namespace Engine {
 			return colors;
 		}
 
+		// M46 (version 4): a _WIND accessor's weights, one VEC4 per vertex clamped to [0, 1]. Errors: ImportFailed for another
+		// type, or for a component type other than float and normalized unsigned byte or short.
+		Result<std::vector<glm::vec4>> GltfImport::ReadWind(const cgltf_accessor& accessor, std::string_view subject) const
+		{
+			const bool floats = accessor.component_type == cgltf_component_type_r_32f;
+			const bool normalized = accessor.normalized != 0
+				&& (accessor.component_type == cgltf_component_type_r_8u || accessor.component_type == cgltf_component_type_r_16u);
+			if (accessor.type != cgltf_type_vec4 || (!floats && !normalized))
+			{
+				return std::unexpected(Fail(std::format("{} has a _WIND accessor of type {}, expected VEC4 of float, or of normalized unsigned byte or "
+														"short",
+					subject, Utils::GetAccessorTypeName(accessor.type))));
+			}
+			ENGINE_TRY_ASSIGN(const std::vector<float> values, ReadFloats(accessor, cgltf_type_vec4, subject, "_WIND"));
+			std::vector<glm::vec4> weights(accessor.count);
+			for (size_t vertex = 0; vertex < weights.size(); ++vertex)
+			{
+				const float* channels = values.data() + vertex * 4;
+				weights[vertex] = glm::clamp(glm::vec4(channels[0], channels[1], channels[2], channels[3]), 0.0f, 1.0f);
+			}
+			return weights;
+		}
+
 		// Turns `geometry`'s JOINTS_0 and WEIGHTS_0 into the skin of a mesh variant drawn with `skin` (Skin, whose indices are
 		// the Skeleton's joints, SkinPlan::JointMap) and moves each vertex from the skin's bind space into its Skeleton's by
 		// the correction of its heaviest joint (the first of equal weights; SkinPlan::Corrections), so the variant deforms as
@@ -1997,6 +2188,15 @@ namespace Engine {
 					mesh.Attributes.resize(mesh.Vertices.size() + geometry.Vertices.size());
 				else
 					mesh.Attributes.insert(mesh.Attributes.end(), geometry.Attributes.begin(), geometry.Attributes.end());
+			}
+			// M46 (version 4): the wind stream likewise, the others' vertices taking (0, 0, 0, 0).
+			if (!geometry.Wind.empty() || !mesh.Wind.empty())
+			{
+				mesh.Wind.resize(mesh.Vertices.size());
+				if (geometry.Wind.empty())
+					mesh.Wind.resize(mesh.Vertices.size() + geometry.Vertices.size());
+				else
+					mesh.Wind.insert(mesh.Wind.end(), geometry.Wind.begin(), geometry.Wind.end());
 			}
 			// M23 (version 3): a skinned variant's primitives all have a skin (PlanSkins), and every primitive of a mesh has
 			// the same morph targets (cgltf_validate), whose MeshMorphTarget the caller made.
@@ -2072,6 +2272,329 @@ namespace Engine {
 			return targets;
 		}
 
+		void GltfImport::ReportDroppedLevel(std::string subject, std::string reason)
+		{
+			std::string message = std::format("{} {}, so the level is dropped", subject, reason);
+			AddWarning(AssetLodInvalidCode, std::move(subject), std::move(message),
+				"author every level with level 0's submeshes and materials, at most four levels after level 0 numbered without gaps, or generate them");
+		}
+
+		// M46 (version 4): the MSFT_lod groups (in node order), then the <name>_LOD<n> groups among the nodes no MSFT_lod
+		// group holds (in order of their level 0 node), each attached to its level 0 node's glTF mesh (GltfImporter.h).
+		Status GltfImport::CollectLevels()
+		{
+			const size_t nodeCount = m_Data->nodes_count;
+			m_IsLevelNode.assign(nodeCount, false);
+			m_GroupNames.assign(nodeCount, std::nullopt);
+			m_AuthoredLevels.assign(m_Data->meshes_count, {});
+			m_LevelCoverage.assign(m_Data->meshes_count, {});
+			if (m_Settings.Lods != GltfLodSource::FromGltf)
+				return {};
+
+			// One group: its level 0 node, its level nodes with their level numbers (as written), and the coverage values.
+			struct LevelGroup
+			{
+				size_t Base = 0;
+				std::vector<std::pair<size_t, size_t>> Levels{};
+				std::vector<float> Coverage{};
+				std::vector<std::pair<size_t, std::string>> Dropped{}; // level nodes dropped while the group was read
+			};
+			std::vector<LevelGroup> groups;
+			std::vector<bool> grouped(nodeCount, false);
+
+			// MSFT_lod: the extension's "ids" name the level nodes in level order.
+			for (size_t node = 0; node < nodeCount; ++node)
+			{
+				const cgltf_node& source = m_Data->nodes[node];
+				for (cgltf_size extension = 0; extension < source.extensions_count; ++extension)
+				{
+					if (Utils::DecodeJsonString(source.extensions[extension].name) != "MSFT_lod")
+						continue;
+					const std::string subject = std::format("nodes[{}].extensions.MSFT_lod", node);
+					const std::optional<std::vector<size_t>> read = Utils::ReadLodIds(source.extensions[extension].data);
+					if (!read.has_value())
+					{
+						ReportDroppedLevel(subject, "is not an object with an \"ids\" array of node indices");
+						break;
+					}
+					const std::vector<size_t>& ids = *read;
+					LevelGroup group;
+					group.Base = node;
+					grouped[node] = true;
+					for (size_t index = 0; index < ids.size(); ++index)
+					{
+						const size_t id = ids[index];
+						if (id >= nodeCount || id == node || grouped[id])
+						{
+							ReportDroppedLevel(std::format("{}.ids[{}]", subject, index), "names no node that can be a level (out of range, the node itself, or "
+																						  "a node of another group)");
+							continue;
+						}
+						grouped[id] = true;
+						group.Levels.emplace_back(id, index + 1);
+					}
+					// The extras' MSFT_screencoverage: level L takes over at its value L - 1.
+					Result<std::vector<float>> coverage = Utils::ReadLodCoverage(source.extras.data, ids.size());
+					if (coverage.has_value())
+						group.Coverage = std::move(*coverage);
+					else
+					{
+						AddWarning(AssetLodInvalidCode, std::format("nodes[{}].extras.MSFT_screencoverage", node),
+							std::format("nodes[{}].extras.MSFT_screencoverage is not a list of at least {} screen sizes in (0, 1], each below the one before, "
+										"so the LodScreenSizes setting is used instead",
+								node, ids.size()),
+							"give one decreasing screen coverage per level");
+					}
+					groups.push_back(std::move(group));
+					break;
+				}
+			}
+
+			// <name>_LOD<n>: siblings (one parent, or the root nodes) sharing <name>, ordered by n and then node index.
+			constexpr size_t NoParent = std::numeric_limits<size_t>::max();
+			std::map<std::pair<size_t, std::string>, std::vector<std::pair<size_t, size_t>>> named;
+			for (size_t node = 0; node < nodeCount; ++node)
+			{
+				if (grouped[node])
+					continue;
+				const std::optional<std::pair<std::string, size_t>> parsed = Utils::ParseLodName(Utils::GetName(m_Data->nodes[node].name, {}));
+				if (!parsed.has_value())
+					continue;
+				const cgltf_node* parent = m_Data->nodes[node].parent;
+				const size_t parentIndex = parent != nullptr ? cgltf_node_index(m_Data.get(), parent) : NoParent;
+				named[{ parentIndex, parsed->first }].emplace_back(parsed->second, node);
+			}
+			std::vector<LevelGroup> namedGroups;
+			for (auto& [key, members] : named)
+			{
+				std::ranges::sort(members);
+				if (members.front().first != 0)
+					continue; // without a _LOD0 node the names form no group
+				LevelGroup group;
+				group.Base = members.front().second;
+				m_GroupNames[group.Base] = key.second;
+				size_t expected = 1;
+				for (size_t index = 1; index < members.size(); ++index)
+				{
+					const auto [number, node] = members[index];
+					if (number == expected)
+					{
+						group.Levels.emplace_back(node, number);
+						++expected;
+					}
+					else if (number < expected)
+						group.Dropped.emplace_back(node, std::format("names level {} of '{}' again", number, key.second));
+					else
+						group.Dropped.emplace_back(node, std::format("leaves a gap in the levels of '{}': {}_LOD{} is missing", key.second, key.second, expected));
+				}
+				namedGroups.push_back(std::move(group));
+			}
+			std::ranges::sort(namedGroups, {}, &LevelGroup::Base);
+			for (LevelGroup& group : namedGroups)
+				groups.push_back(std::move(group));
+
+			// Each group's levels go to its level 0 node's mesh; every level node is never placed, kept or dropped.
+			for (const LevelGroup& group : groups)
+			{
+				for (const auto& [node, reason] : group.Dropped)
+				{
+					m_IsLevelNode[node] = true;
+					ReportDroppedLevel(std::format("nodes[{}]", node), reason);
+				}
+				const cgltf_mesh* baseMesh = m_Data->nodes[group.Base].mesh;
+				const size_t meshIndex = baseMesh != nullptr ? cgltf_mesh_index(m_Data.get(), baseMesh) : 0;
+				const bool taken = baseMesh != nullptr && !m_AuthoredLevels[meshIndex].empty();
+				for (const auto& [node, number] : group.Levels)
+				{
+					m_IsLevelNode[node] = true;
+					const std::string subject = std::format("nodes[{}]", node);
+					if (m_Settings.MergeMeshes)
+						ReportDroppedLevel(subject, "is an authored level, which MergeMeshes does not keep (Generate works on the merged mesh)");
+					else if (baseMesh == nullptr)
+						ReportDroppedLevel(subject, std::format("is a level of nodes[{}], which has no mesh", group.Base));
+					else if (taken)
+						ReportDroppedLevel(subject, std::format("is a level of meshes[{}], which an earlier group already gave levels", meshIndex));
+					else if (m_Data->nodes[node].mesh == nullptr)
+						ReportDroppedLevel(subject, "has no mesh");
+					else if (number > MaxMeshLods - 1)
+						ReportDroppedLevel(subject, std::format("is level {}, a fifth level or later (a mesh has at most {} levels after level 0)", number, MaxMeshLods - 1));
+					else
+						m_AuthoredLevels[meshIndex].push_back(AuthoredLevel{ .Node = node, .Mesh = cgltf_mesh_index(m_Data.get(), m_Data->nodes[node].mesh), .Number = number });
+				}
+				if (baseMesh != nullptr && !taken && !m_AuthoredLevels[meshIndex].empty())
+					m_LevelCoverage[meshIndex] = group.Coverage;
+			}
+			return {};
+		}
+
+		// M46 (version 4): mesh `meshIndex`'s authored levels (CollectLevels) that keep `levelZero`'s layout (its read
+		// primitives, as ImportMeshes holds them): as many submeshes, each with the material of level 0's, and a switch size
+		// (the group's coverage at the level's number, else LodScreenSizes'); each other one is reported and dropped.
+		Result<std::vector<KeptLevel>> GltfImport::ReadAuthoredLevels(size_t meshIndex, std::span<const std::pair<size_t, PrimitiveGeometry>> levelZero)
+		{
+			const cgltf_mesh& source = m_Data->meshes[meshIndex];
+			const std::vector<float>& coverage = m_LevelCoverage[meshIndex];
+			std::vector<KeptLevel> kept;
+			for (const AuthoredLevel& level : m_AuthoredLevels[meshIndex])
+			{
+				const std::string subject = std::format("nodes[{}]", level.Node);
+				const cgltf_mesh& levelMesh = m_Data->meshes[level.Mesh];
+				std::vector<std::pair<size_t, PrimitiveGeometry>> read;
+				for (cgltf_size primitiveIndex = 0; primitiveIndex < levelMesh.primitives_count; ++primitiveIndex)
+				{
+					ENGINE_TRY_ASSIGN(PrimitiveGeometry geometry, ReadPrimitive(level.Mesh, primitiveIndex, false, false));
+					if (!geometry.Vertices.empty())
+						read.emplace_back(primitiveIndex, std::move(geometry));
+				}
+				if (read.size() != levelZero.size())
+				{
+					ReportDroppedLevel(subject, std::format("has {} submeshes, where level 0 (meshes[{}]) has {}", read.size(), meshIndex, levelZero.size()));
+					continue;
+				}
+				std::optional<size_t> differing;
+				for (size_t submesh = 0; submesh < read.size() && !differing.has_value(); ++submesh)
+				{
+					if (levelMesh.primitives[read[submesh].first].material != source.primitives[levelZero[submesh].first].material)
+						differing = submesh;
+				}
+				if (differing.has_value())
+				{
+					ReportDroppedLevel(subject, std::format("draws its submesh {} with another material than level 0's (meshes[{}])", *differing, meshIndex));
+					continue;
+				}
+				const size_t position = level.Number - 1;
+				if (coverage.empty() && position >= m_Settings.LodScreenSizes.size())
+				{
+					ReportDroppedLevel(subject, std::format("is level {}, for which the LodScreenSizes setting gives no switch size", level.Number));
+					continue;
+				}
+				KeptLevel keptLevel;
+				keptLevel.ScreenSize = coverage.empty() ? m_Settings.LodScreenSizes[position] : coverage[position];
+				for (auto& [primitiveIndex, geometry] : read)
+				{
+					for (MeshVertex& vertex : geometry.Vertices)
+						vertex.Position *= m_Settings.Scale;
+					keptLevel.Submeshes.push_back(std::move(geometry));
+				}
+				kept.push_back(std::move(keptLevel));
+			}
+			return kept;
+		}
+
+		// M46 (version 4): appends `levels` to `mesh` (level 0 complete) as its further levels with their own vertices. The
+		// attribute and wind streams cover level 0 and every level once one of them has the stream, the others' vertices
+		// taking the stream's defaults.
+		void GltfImport::AddAuthoredLevels(MeshData& mesh, std::vector<KeptLevel> levels)
+		{
+			const auto any = [&levels](auto member)
+			{
+				return std::ranges::any_of(levels, [member](const KeptLevel& level)
+				{
+					return std::ranges::any_of(level.Submeshes, [member](const PrimitiveGeometry& geometry)
+					{
+						return !(geometry.*member).empty();
+					});
+				});
+			};
+			const bool attributes = !mesh.Attributes.empty() || any(&PrimitiveGeometry::Attributes);
+			const bool wind = !mesh.Wind.empty() || any(&PrimitiveGeometry::Wind);
+			if (attributes)
+				mesh.Attributes.resize(mesh.Vertices.size());
+			if (wind)
+				mesh.Wind.resize(mesh.Vertices.size());
+			for (KeptLevel& level : levels)
+			{
+				MeshLod lod;
+				lod.ScreenSize = level.ScreenSize;
+				for (PrimitiveGeometry& geometry : level.Submeshes)
+				{
+					const uint32_t base = static_cast<uint32_t>(mesh.Vertices.size() + mesh.LodVertices.size());
+					lod.Submeshes.push_back(MeshLodRange{ .IndexOffset = static_cast<uint32_t>(mesh.LodIndices.size()),
+						.IndexCount = static_cast<uint32_t>(geometry.Indices.size()) });
+					for (const uint32_t index : geometry.Indices)
+						mesh.LodIndices.push_back(base + index);
+					if (attributes)
+					{
+						if (geometry.Attributes.empty())
+							mesh.LodAttributes.resize(mesh.LodAttributes.size() + geometry.Vertices.size());
+						else
+							mesh.LodAttributes.insert(mesh.LodAttributes.end(), geometry.Attributes.begin(), geometry.Attributes.end());
+					}
+					if (wind)
+					{
+						if (geometry.Wind.empty())
+							mesh.LodWind.resize(mesh.LodWind.size() + geometry.Vertices.size());
+						else
+							mesh.LodWind.insert(mesh.LodWind.end(), geometry.Wind.begin(), geometry.Wind.end());
+					}
+					mesh.LodVertices.insert(mesh.LodVertices.end(), geometry.Vertices.begin(), geometry.Vertices.end());
+				}
+				mesh.Lods.push_back(std::move(lod));
+			}
+		}
+
+		// M46 (version 4): with Lods Generate, `mesh`'s further levels simplified from its level 0 (MeshSimplifier.h), each
+		// submesh on its own towards its share LodTriangleRatios[k - 1] of level 0's triangles within LodMaxError, index-only.
+		// A level that keeps more than 90 % of the triangles of the level before it (the last kept one), or none, or has no
+		// switch size, is reported (subject "<subject>.lods[<k>]") and dropped.
+		void GltfImport::GenerateLevels(MeshData& mesh, std::string_view subject)
+		{
+			if (m_Settings.Lods != GltfLodSource::Generate)
+				return;
+			std::vector<glm::vec3> positions;
+			positions.reserve(mesh.Vertices.size());
+			for (const MeshVertex& vertex : mesh.Vertices)
+				positions.push_back(vertex.Position);
+
+			size_t previousTriangles = mesh.Indices.size() / 3;
+			const size_t count = std::min<size_t>(m_Settings.LodTriangleRatios.size(), MaxMeshLods - 1);
+			for (size_t number = 1; number <= count; ++number)
+			{
+				const std::string levelSubject = std::format("{}.lods[{}]", subject, number);
+				if (number > m_Settings.LodScreenSizes.size())
+				{
+					ReportDroppedLevel(levelSubject, std::format("is level {}, for which the LodScreenSizes setting gives no switch size", number));
+					continue;
+				}
+				const double ratio = m_Settings.LodTriangleRatios[number - 1];
+				MeshLod lod;
+				lod.ScreenSize = m_Settings.LodScreenSizes[number - 1];
+				std::vector<uint32_t> indices;
+				for (const MeshSubmesh& submesh : mesh.Submeshes)
+				{
+					const std::span<const uint32_t> source = std::span(mesh.Indices).subspan(submesh.IndexOffset, submesh.IndexCount);
+					const size_t triangles = source.size() / 3;
+					// At least one triangle a submesh (meshoptimizer stops where its error bound would be passed anyway).
+					const size_t target = std::max<size_t>(static_cast<size_t>(static_cast<double>(triangles) * ratio), 1) * 3;
+					const std::vector<uint32_t> simplified = triangles == 0 ? std::vector<uint32_t>()
+																			: Utils::SimplifyTriangles({ .Positions = positions, .Indices = source },
+																				  std::min(target, source.size()), m_Settings.LodMaxError);
+					lod.Submeshes.push_back(MeshLodRange{ .IndexOffset = static_cast<uint32_t>(indices.size()),
+						.IndexCount = static_cast<uint32_t>(simplified.size()) });
+					indices.insert(indices.end(), simplified.begin(), simplified.end());
+				}
+				const size_t triangles = indices.size() / 3;
+				if (triangles == 0)
+				{
+					ReportDroppedLevel(levelSubject, "simplifies to no triangle");
+					continue;
+				}
+				if (triangles * 10 > previousTriangles * 9)
+				{
+					ReportDroppedLevel(levelSubject, std::format("keeps {} of the {} triangles of the level before it, more than 90 % (the mesh "
+																 "cannot be simplified further within LodMaxError)",
+														 triangles, previousTriangles));
+					continue;
+				}
+				const uint32_t offset = static_cast<uint32_t>(mesh.LodIndices.size());
+				for (MeshLodRange& range : lod.Submeshes)
+					range.IndexOffset += offset;
+				mesh.LodIndices.insert(mesh.LodIndices.end(), indices.begin(), indices.end());
+				mesh.Lods.push_back(std::move(lod));
+				previousTriangles = triangles;
+			}
+		}
+
 		Status GltfImport::ImportMeshes()
 		{
 			m_MeshVariants.assign(m_Data->meshes_count, {});
@@ -2129,6 +2652,24 @@ namespace Engine {
 						m_MorphTargetCounts[meshIndex] = targetCount;
 					}
 
+					// M46 (version 4): the authored levels, for the variant without a skin of a mesh without morph targets.
+					std::vector<KeptLevel> levels;
+					if (!m_AuthoredLevels[meshIndex].empty())
+					{
+						if (readSkin || readMorphs)
+						{
+							for (const AuthoredLevel& level : m_AuthoredLevels[meshIndex])
+							{
+								ReportDroppedLevel(std::format("nodes[{}]", level.Node),
+									std::format("is an authored level of meshes[{}], which is skinned or morphed (its levels can only be generated)", meshIndex));
+							}
+						}
+						else
+						{
+							ENGINE_TRY_ASSIGN(levels, ReadAuthoredLevels(meshIndex, geometries));
+						}
+					}
+
 					const std::string key = Utils::MakeKey("mesh", meshIndex, source.name);
 					for (const size_t variant : list)
 					{
@@ -2155,6 +2696,9 @@ namespace Engine {
 						}
 						if (variant != NoSkin)
 							mesh.SkinJointCount = static_cast<uint32_t>(m_Groups[m_Skins[variant].Group].Nodes.size());
+						if (variant == NoSkin && !levels.empty())
+							AddAuthoredLevels(mesh, std::move(levels));
+						GenerateLevels(mesh, std::format("meshes[{}]", meshIndex));
 						// One variant keeps the mesh's key; with several, each skinned variant names its skin.
 						std::string variantKey = list.size() > 1 && variant != NoSkin ? std::format("{}:skin:{}", key, variant) : key;
 						ENGINE_TRY_ASSIGN(const AssetHandle handle, CookMeshSubAsset(std::move(mesh), std::move(variantKey)));
@@ -2200,6 +2744,7 @@ namespace Engine {
 			}
 			if (!merged.Submeshes.empty())
 			{
+				GenerateLevels(merged, "mesh:merged");
 				ENGINE_TRY_ASSIGN(m_MergedMesh, CookMeshSubAsset(std::move(merged), "mesh:merged"));
 			}
 			return {};
@@ -3182,6 +3727,7 @@ namespace Engine {
 
 			ReportSkippedContent();
 			ENGINE_TRY(ImportMaterials());
+			ENGINE_TRY(CollectLevels());
 			ENGINE_TRY(CollectSceneNodes());
 			ENGINE_TRY(PlanSkins());
 			ENGINE_TRY(ImportMeshes());
@@ -3207,6 +3753,44 @@ namespace Engine {
 	}
 
 	namespace Utils {
+
+		// M46 (version 4): the "GltfImportSettings" Validate rule for the level settings (GltfImportSettings).
+		static void ValidateGltfImportSettings(const GltfImportSettings& settings, ValidationContext& context)
+		{
+			if (settings.LodScreenSizes.size() > MaxGltfLodSettings)
+				context.Error("LodScreenSizes", std::format("must hold at most {} sizes, not {}", MaxGltfLodSettings, settings.LodScreenSizes.size()));
+			else if (!AreScreenSizes(settings.LodScreenSizes))
+				context.Error("LodScreenSizes", "must hold sizes in (0, 1], each below the one before");
+			if (settings.LodTriangleRatios.size() > MaxGltfLodSettings)
+				context.Error("LodTriangleRatios", std::format("must hold at most {} ratios, not {}", MaxGltfLodSettings, settings.LodTriangleRatios.size()));
+			for (size_t index = 0; index < settings.LodTriangleRatios.size() && index < MaxGltfLodSettings; ++index)
+			{
+				const float ratio = settings.LodTriangleRatios[index];
+				if (!std::isfinite(ratio) || !(ratio > 0.0f) || !(ratio < 1.0f))
+				{
+					context.Error("LodTriangleRatios", std::format("ratio {} must be in (0, 1)", index));
+					break;
+				}
+			}
+		}
+
+		// M46 (version 4): the "GltfImportSettings" Generate hook: random level settings made valid (at most
+		// MaxGltfLodSettings sizes, halving from a random first one; ratios likewise in (0, 1)).
+		static void GenerateGltfImportSettings(GltfImportSettings& settings, Random& random)
+		{
+			const auto halving = [](std::vector<float>& values, float first)
+			{
+				values.resize(std::min(values.size(), MaxGltfLodSettings));
+				float value = first;
+				for (float& entry : values)
+				{
+					entry = value;
+					value *= 0.5f;
+				}
+			};
+			halving(settings.LodScreenSizes, 0.25f + 0.75f * random.NextFloat());
+			halving(settings.LodTriangleRatios, 0.125f + 0.75f * random.NextFloat());
+		}
 
 		static Result<GltfImportSettings> ReadSettings(const ImportContext& context)
 		{
@@ -3280,6 +3864,17 @@ namespace Engine {
 
 	void GltfImporter::RegisterTypes(TypeRegistry& registry)
 	{
+		// M46: the Wind setting's struct, unless the material types registered it first.
+		RegisterMaterialWindType(registry);
+		registry.Enum<GltfLodSource>("GltfLodSource", "Where an imported glTF mesh's further levels of detail come from.")
+			.Entry(GltfLodSource::None, "None", "No further level: every mesh draws its full detail at every distance.")
+			.Entry(GltfLodSource::FromGltf, "FromGltf",
+				"The levels the file authors: a node's MSFT_lod extension, else sibling nodes named <name>_LOD0, <name>_LOD1, ... (as Blender exports "
+				"them).")
+			.Entry(GltfLodSource::Generate, "Generate",
+				"Levels simplified from each mesh at import (meshoptimizer) at LodTriangleRatios, sharing its vertices; leaf cards simplify poorly, so "
+				"author a tree's far levels instead.");
+
 		registry.Struct<GltfAnimationEvent>("GltfAnimationEvent", "A named event at a point of an imported animation clip's time (glTF has no animation events).")
 			.Field("Animation", &GltfAnimationEvent::Animation, "The clip's sub-asset key, as the glTF's meta lists it (\"animation:0:Walk\").")
 			.Field("Name", &GltfAnimationEvent::Name, "The event's name, which OnAnimationEvent receives.")
@@ -3298,7 +3893,20 @@ namespace Engine {
 				"Merges every mesh of the scene, placed by its node, into the one mesh sub-asset 'mesh:merged' drawn by the prefab root.")
 			.Field("AnimationEvents", &GltfImportSettings::AnimationEvents,
 				"Named events added to the imported animation clips, each to the clip it names; an event naming no clip of the file, or past its clip's end, "
-				"fails the import.");
+				"fails the import.")
+			.Field("Lods", &GltfImportSettings::Lods, "Where the meshes' further levels of detail come from.")
+			.Field("LodScreenSizes", &GltfImportSettings::LodScreenSizes,
+				std::format("Per further level (at most {}), the screen size (its bounding sphere's projected diameter over the view's height) below which it takes over "
+							"from the level before; each in (0, 1] and below the one before. An MSFT_lod node's MSFT_screencoverage replaces them.",
+					MaxGltfLodSettings))
+			.Field("LodTriangleRatios", &GltfImportSettings::LodTriangleRatios,
+				std::format("Lods Generate: per generated level (at most {}), its share of level 0's triangles, each in (0, 1).", MaxGltfLodSettings))
+			.Field("LodMaxError", &GltfImportSettings::LodMaxError,
+				"Lods Generate: how far a generated level may move the surface, relative to the mesh's extent; simplification stops there.",
+				{ .Min = 0.0, .Max = 1.0 })
+			.Field("Wind", &GltfImportSettings::Wind, "The wind block every imported material takes (Material version 3; disabled by default).")
+			.Validate(&Utils::ValidateGltfImportSettings)
+			.Generate(&Utils::GenerateGltfImportSettings);
 	}
 
 }

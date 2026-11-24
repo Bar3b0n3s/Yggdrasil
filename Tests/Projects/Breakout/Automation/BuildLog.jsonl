@@ -522,3 +522,7 @@
 {"type":"response","time":"2026-11-17T16:12:35.415Z","client":"cli","id":1,"requestLine":521,"ok":true,"summary":"ok"}
 {"type":"request","time":"2026-11-17T16:12:35.416Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
 {"type":"response","time":"2026-11-17T16:12:35.446Z","client":"cli","id":2,"requestLine":523,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-24T15:19:22.134Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-11-24T15:19:26.448Z","client":"cli","id":1,"requestLine":525,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-24T15:19:26.450Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-11-24T15:19:27.671Z","client":"cli","id":2,"requestLine":527,"ok":true,"summary":"ok"}

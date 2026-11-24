@@ -108,11 +108,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Ball.material",
-			"XXH64": "5c082ac4d0683e5d",
+			"XXH64": "c5c985c305779ff2",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/Ball.material.meta",
@@ -124,11 +124,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickBlue.material",
-			"XXH64": "83e327ec41c404f4",
+			"XXH64": "d7a9f4b1caa754e8",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/BrickBlue.material.meta",
@@ -140,11 +140,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickGreen.material",
-			"XXH64": "f68e6fc79f393991",
+			"XXH64": "1f62cfd137f27d54",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/BrickGreen.material.meta",
@@ -156,11 +156,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickOrange.material",
-			"XXH64": "4f164c3a44f08b93",
+			"XXH64": "3d817e88c02d3f6a",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/BrickOrange.material.meta",
@@ -172,11 +172,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickRed.material",
-			"XXH64": "03e2b9e6fdfc5501",
+			"XXH64": "1c684076f724f3ff",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/BrickRed.material.meta",
@@ -188,11 +188,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickYellow.material",
-			"XXH64": "a134e0e20ce52286",
+			"XXH64": "1749d74386c84d25",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/BrickYellow.material.meta",
@@ -204,11 +204,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Paddle.material",
-			"XXH64": "d16864ac14ce8d55",
+			"XXH64": "8c5b50ae67bf75db",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/Paddle.material.meta",
@@ -220,11 +220,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Wall.material",
-			"XXH64": "f78d65ea842304aa",
+			"XXH64": "9cb098b7abe88342",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 445
+			"TranscriptLine": 527
 		},
 		{
 			"Path": "Assets/Materials/Wall.material.meta",

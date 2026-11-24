@@ -120,6 +120,9 @@
 		],
 		"Detour": [
 			"Vendor/Detour/Include"
+		],
+		"meshoptimizer": [
+			"Vendor/meshoptimizer/src"
 		]
 	},
 	"GlobalThirdParty": {
@@ -448,7 +451,7 @@
 			"Layer": 5,
 			"Includes": [],
 			"MaxLayer": 4,
-			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), stb_truetype.h (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C; Docs/Decisions/0030-m19-contract.md decision 23) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md); HarfBuzz for the font importer's shaping glyphs and its shaping subset (M22, C22.3, Docs/Decisions/0033-m22-contract.md decision 44). M23 (Docs/Decisions/0034-m23-contract.md decision 14): tinyexr, which only the environment importer includes (OpenEXR; its ZIP and PXR24 inflate is stb_image's zlib, Graphics' implementation). M26 (Docs/Decisions/0037-m26-contract.md decision 20): stb_image's 16-bit PNG path in HeightfieldImporter, whose ConvertHeightmap decodes a 16-bit heightmap (stbi_info_from_memory, stbi_is_16_bit_from_memory, stbi_load_16_from_memory).",
+			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), stb_truetype.h (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C; Docs/Decisions/0030-m19-contract.md decision 23) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md); HarfBuzz for the font importer's shaping glyphs and its shaping subset (M22, C22.3, Docs/Decisions/0033-m22-contract.md decision 44). M23 (Docs/Decisions/0034-m23-contract.md decision 14): tinyexr, which only the environment importer includes (OpenEXR; its ZIP and PXR24 inflate is stb_image's zlib, Graphics' implementation). M26 (Docs/Decisions/0037-m26-contract.md decision 20): stb_image's 16-bit PNG path in HeightfieldImporter, whose ConvertHeightmap decodes a 16-bit heightmap (stbi_info_from_memory, stbi_is_16_bit_from_memory, stbi_load_16_from_memory). M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 5): meshoptimizer, which only the glTF importer's mesh simplifier includes (generated mesh levels).",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
@@ -456,7 +459,8 @@
 					"stb",
 					"MikkTSpace",
 					"HarfBuzz",
-					"tinyexr"
+					"tinyexr",
+					"meshoptimizer"
 				]
 			},
 			"RestrictedThirdParty": {
@@ -465,6 +469,9 @@
 				],
 				"tinyexr": [
 					"Engine/Source/Engine/AssetPipeline/Importers/EnvironmentImporter.cpp"
+				],
+				"meshoptimizer": [
+					"Engine/Source/Engine/AssetPipeline/Private/MeshSimplifier.cpp"
 				]
 			}
 		},

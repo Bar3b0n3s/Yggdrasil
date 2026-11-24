@@ -222,6 +222,9 @@ namespace Engine {
 			// landing order (its ledger: after M41's ANIMATION_ATTACHMENT_INVALID), an array of its own
 			// (PlanarReflectionDiagnosticCodes).
 			RenderReflectionInvalidCode,
+			// M46 (Asset/AssetDiagnostic.h, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I), appended in
+			// train order after M45's codes (ADR 0060's phase-8 ledger), an import diagnostic beside the other ASSET_* codes.
+			AssetLodInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -235,7 +238,7 @@ namespace Engine {
 				"Several cameras of one scene are Primary, but a scene renders through exactly one.",
 				"Clear Primary on all but one camera; the fix keeps the first Primary camera in scene order." },
 			ValidationCodeInfo{ SceneDuplicateUniqueComponentCode, "Error", false,
-				"A scene file holds more than one component that is unique per scene (Environment, PostProcess).",
+				"A scene file holds more than one component that is unique per scene (Environment, PostProcess, Fog, Navigation, Wind).",
 				"Open the scene with scene.open {repair: true}, which keeps the first in canonical order, then scene.save." },
 			ValidationCodeInfo{ SceneNonCanonicalOrderCode, "Warning", false,
 				"A scene file lists a child entity before its parent, which is not the canonical order.",
@@ -497,6 +500,15 @@ namespace Engine {
 				"Put the PlanarReflection on the entity whose MeshRenderer draws a flat glass, and set its Normal to the glass's facing axis and "
 				"Offset to its surface (the finding names the axis along which the mesh is thinnest and that face's Offset; the built-in Quad "
 				"faces +Z, the Plane +Y)." },
+			ValidationCodeInfo{ AssetLodInvalidCode, "Warning", false,
+				"The glTF importer dropped a level of detail, the import still succeeding: an authored level whose submesh count or materials differ "
+				"from level 0's, a fifth level or later (or one the LodScreenSizes setting gives no switch size), a gap in the <name>_LOD<n> names, an "
+				"authored level of a skinned or morphed mesh, a generated level that keeps more than 90 % of the triangles before it, or authored "
+				"levels under MergeMeshes. An MSFT_screencoverage that is not decreasing screen sizes is ignored under it too. The subject names the "
+				"level node or the generated level.",
+				"Author each level with level 0's primitives and materials, number <name>_LOD0, _LOD1, ... without gaps, at most four after level 0; "
+				"author a skinned mesh's or a leaf card tree's far levels instead of generating them (or Generate with a larger LodMaxError), then "
+				"reimport." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -525,6 +537,8 @@ namespace Engine {
 			AssetUnsupportedUvSetCode,
 			AssetVertexColorsIgnoredCode,
 			AssetContentSkippedCode,
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I).
+			AssetLodInvalidCode,
 		};
 
 		constexpr std::string_view FixLabel = "Fix Validation Issues";

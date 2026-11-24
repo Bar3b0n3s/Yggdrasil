@@ -57,6 +57,9 @@ namespace Engine {
 		void RunNavigationBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joint proxies' methods (Bindings/JointsTests.cpp).
 		void RunJointsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the Wind proxy's Sample method
+		// (ScriptWindTests.cpp).
+		void RunWindBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 	}
 
@@ -182,7 +185,8 @@ namespace Engine {
 				&Test::RunTerrainBindingsCoverage,
 				&Test::RunSaveDataBindingsCoverage,
 				&Test::RunNavigationBindingsCoverage,
-				&Test::RunJointsBindingsCoverage
+				&Test::RunJointsBindingsCoverage,
+				&Test::RunWindBindingsCoverage
 			};
 			Test::ScriptTestFixture catalog;
 			REQUIRE(catalog.Start());

@@ -3,6 +3,7 @@
 #include "Engine/Scene/PhysicsComposition.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/MeshData.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
@@ -10,8 +11,10 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/PhysicsTestScene.h"
 
+#include <array>
 #include <set>
 
 // The physics composition rules (Architecture §5.3 "Physics composition rules", §9.2; Docs/Decisions/0014-m11-decisions.md
@@ -432,6 +435,45 @@ namespace Engine {
 			Result<BodyShapeDescription> missing = DescribePhysicsBodyShape(scene, *meshPlan, nullptr);
 			REQUIRE_FALSE(missing.has_value());
 			CHECK(GetPhysicsDiagnosticCode(missing.error()) == PhysicsInvalidShapeCode);
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3A): colliders read level 0 (the mesh's
+		// Vertices and Indices), never the further levels or their own vertices.
+		TEST_CASE("PhysicsComposition: a mesh collider of a mesh with levels holds level 0's triangles only")
+		{
+			auto mesh = CreateRef<MeshData>();
+			const std::array<glm::vec3, 4> positions = { glm::vec3(-1.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.0f, 1.0f),
+				glm::vec3(-1.0f, 0.0f, 1.0f) };
+			for (const glm::vec3& position : positions)
+			{
+				mesh->Vertices.push_back({ .Position = position });
+				mesh->Bounds.Extend(position);
+			}
+			mesh->Indices = { 0, 2, 1, 0, 3, 2 };
+			mesh->Submeshes = { { .IndexOffset = 0, .IndexCount = 6, .MaterialSlot = 0, .Bounds = mesh->Bounds } };
+			mesh->Slots = { {} };
+			// An authored level of one triangle of its own (vertices 4 to 6), then an index-only level of level 0's first.
+			mesh->LodVertices = { { .Position = { -1.0f, 0.5f, -1.0f } }, { .Position = { 1.0f, 0.5f, 1.0f } }, { .Position = { 1.0f, 0.5f, -1.0f } } };
+			mesh->LodIndices = { 4, 5, 6, 0, 2, 1 };
+			mesh->Lods = { { .ScreenSize = 0.5f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 3 } } },
+				{ .ScreenSize = 0.25f, .Submeshes = { { .IndexOffset = 3, .IndexCount = 3 } } } };
+			REQUIRE_MESSAGE(ValidateMeshData(*mesh).has_value(), ValidateMeshData(*mesh).error().ToString());
+			Test::InMemoryAssetManager assets;
+			assets.Publish(UUID(0x10d5), mesh);
+
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity ground = scene.CreateEntity("Ground");
+			ground.AddComponent<MeshColliderComponent>(MeshColliderComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(AssetHandle(0x10d5)) });
+			const PhysicsComposition composition = ComposePhysicsBodies(scene, PhysicsLayerTable());
+			REQUIRE(composition.Bodies.size() == 1);
+			Result<BodyShapeDescription> description = DescribePhysicsBodyShape(scene, composition.Bodies[0], &assets);
+			REQUIRE_MESSAGE(description.has_value(), description.error().ToString());
+			REQUIRE(description->Colliders.size() == 1);
+			const MeshShapeGeometry* geometry = std::get_if<MeshShapeGeometry>(&description->Colliders[0].Geometry);
+			REQUIRE(geometry != nullptr);
+			CHECK(geometry->Indices == mesh->Indices);
+			CHECK(geometry->Vertices == std::vector<glm::vec3>(positions.begin(), positions.end()));
 		}
 
 		TEST_CASE("PhysicsMeshShapeCache: mesh colliders share one shape per mesh, version, convexity and scale")

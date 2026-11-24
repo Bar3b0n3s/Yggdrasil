@@ -16,7 +16,8 @@ namespace Engine {
 
 	namespace Utils {
 
-		// The oldest readable .material version: version 1 lacks only version 2's UV sets, whose absent keys keep UV0.
+		// The oldest readable .material version: version 1 lacks only version 2's UV sets, whose absent keys keep UV0, and
+		// versions 1 and 2 lack only version 3's Wind block, whose absent key keeps it disabled.
 		static constexpr uint32_t MinimumMaterialVersion = 1;
 
 		// A linear colour channel or a factor in [0, 1].
@@ -71,6 +72,26 @@ namespace Engine {
 
 	}
 
+	void RegisterMaterialWindType(TypeRegistry& registry)
+	{
+		if (registry.FindStruct<MaterialWind>() != nullptr)
+			return;
+		registry.Struct<MaterialWind>("MaterialWind",
+					"How a material's surface moves in the scene's Wind: its vertices lean, sway and flutter alike in every pass (Material version 3).")
+			.Field("Enabled", &MaterialWind::Enabled, "Whether meshes drawn with the material move in the wind; off, they stand still.")
+			.Field("Bend", &MaterialWind::Bend,
+				"How far the whole plant leans along the wind: about Bend metres at 1 m of height in a 10 m/s wind, growing with the square of the "
+				"height above its entity's origin. A vertex's _WIND bend mask (w) holds it still.",
+				Utils::UnitRange())
+			.Field("Branch", &MaterialWind::Branch, "How far branches sway with the gusts, times the mesh's _WIND branch weight (x).",
+				{ .Min = 0.0, .Max = 1.0, .Unit = "m" })
+			.Field("Flutter", &MaterialWind::Flutter, "How far leaves flutter along their normals, times the mesh's _WIND flutter weight (z).",
+				{ .Min = 0.0, .Max = 0.25, .Unit = "m" })
+			.Field("Stiffness", &MaterialWind::Stiffness,
+				"How much of the wind the plant resists: its response is speed / (speed + Stiffness x 10 m/s), so 0 follows every breeze fully.",
+				Utils::UnitRange());
+	}
+
 	void RegisterMaterialTypes(TypeRegistry& registry)
 	{
 		registry.Enum<AlphaMode>("AlphaMode", "How a material's base colour alpha is used (the glTF 2.0 alpha modes).")
@@ -81,6 +102,8 @@ namespace Engine {
 		registry.Enum<TextureCoordinateSet>("TextureCoordinateSet", "The texture coordinates a material map samples (glTF textureInfo.texCoord).")
 			.Entry(TextureCoordinateSet::UV0, "UV0", "The mesh's first texture coordinates.")
 			.Entry(TextureCoordinateSet::UV1, "UV1", "The mesh's second texture coordinates (glTF TEXCOORD_1); (0, 0) on a mesh without them.");
+
+		RegisterMaterialWindType(registry);
 
 		registry.Struct<MaterialData>("Material", "A PBR metallic-roughness material: a .material file, a glTF material or a built-in material.")
 			.ColorField("BaseColor", &MaterialData::BaseColor, "The linear base colour and alpha, multiplied with BaseColorMap.", Utils::UnitRange())
@@ -110,7 +133,8 @@ namespace Engine {
 			.Field("AlphaCutoff", &MaterialData::AlphaCutoff, "The alpha below which Mask discards a pixel.", Utils::UnitRange())
 			.Field("DoubleSided", &MaterialData::DoubleSided, "Whether back faces are drawn (and lit with flipped normals).")
 			.Field("UVScale", &MaterialData::UVScale, "The scale applied to texture coordinates before UVOffset (KHR_texture_transform).")
-			.Field("UVOffset", &MaterialData::UVOffset, "The offset added to scaled texture coordinates (KHR_texture_transform).");
+			.Field("UVOffset", &MaterialData::UVOffset, "The offset added to scaled texture coordinates (KHR_texture_transform).")
+			.Field("Wind", &MaterialData::Wind, "How meshes drawn with the material move in the scene's Wind (Material version 3; disabled by default).");
 	}
 
 	std::vector<AssetHandle> GetMaterialTextureHandles(const MaterialData& material)

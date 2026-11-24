@@ -87,6 +87,7 @@ IncludeDir["CMP_Core"] = RepositoryRoot .. "/Vendor/CMP_Core/cmp_core/source"
 IncludeDir["tinyexr"] = RepositoryRoot .. "/Vendor/tinyexr"
 IncludeDir["Recast"] = RepositoryRoot .. "/Vendor/Recast/Include"
 IncludeDir["Detour"] = RepositoryRoot .. "/Vendor/Detour/Include"
+IncludeDir["meshoptimizer"] = RepositoryRoot .. "/Vendor/meshoptimizer/src"
 
 -- Project kinds that produce a linked binary and therefore link libraries.
 local LinkingKinds = "kind:ConsoleApp or WindowedApp or SharedLib"
@@ -523,6 +524,20 @@ function UseDetour()
 
 	filter { LinkingKinds }
 		links { "Detour" }
+
+	filter {}
+end
+
+-- meshoptimizer (Vendor/meshoptimizer/VENDOR.md): the glTF importer's generated mesh levels (M46,
+-- Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 5). No defines: the MESHOPTIMIZER_ family stays
+-- empty for the library and every consumer. Engine takes the include directory (its
+-- AssetPipeline/Private/MeshSimplifier.cpp alone includes meshoptimizer.h, Scripts/ModuleRules.json). AssetPipeline is
+-- editor-only: EditorCore, Editor and Tests call this function, the Runtime's projects never do (UseRuntimeDependencies).
+function UseMeshOptimizer()
+	externalincludedirs { IncludeDir.meshoptimizer }
+
+	filter { LinkingKinds }
+		links { "meshoptimizer" }
 
 	filter {}
 end

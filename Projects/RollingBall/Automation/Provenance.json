@@ -76,11 +76,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Ball.material",
-			"XXH64": "d39fe5c6548684bd",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "77a7a182449212c1",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Ball.material.meta",
@@ -92,11 +92,11 @@
 		},
 		{
 			"Path": "Assets/Materials/CheckpointActive.material",
-			"XXH64": "99a4b66fed9db5ef",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "a1c5dfaf46421c5e",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/CheckpointActive.material.meta",
@@ -108,11 +108,11 @@
 		},
 		{
 			"Path": "Assets/Materials/CheckpointIdle.material",
-			"XXH64": "b640fa2299dcf234",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "e383689369213ad9",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/CheckpointIdle.material.meta",
@@ -124,11 +124,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Goal.material",
-			"XXH64": "ee468edbfdf4e137",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "52b50af4c4ac0954",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Goal.material.meta",
@@ -140,11 +140,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Kicker.material",
-			"XXH64": "72aa6430f349edde",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "d86de7760e4f839a",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Kicker.material.meta",
@@ -156,11 +156,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Narrow.material",
-			"XXH64": "522ad4f3de8d5972",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "b79040cdeb013f48",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Narrow.material.meta",
@@ -172,11 +172,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Platform.material",
-			"XXH64": "1787258594cc5e32",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "3754bfac7bae412f",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Platform.material.meta",
@@ -188,11 +188,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Post.material",
-			"XXH64": "1f7a073ac9217eaa",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "d9bdb40973eada6c",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Post.material.meta",
@@ -204,11 +204,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Rail.material",
-			"XXH64": "0596f37229d9cd77",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "67d7784fed96acec",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Rail.material.meta",
@@ -220,11 +220,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Ramp.material",
-			"XXH64": "8d09484f606bda0d",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "62715d69ef0fcfe9",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Ramp.material.meta",
@@ -236,11 +236,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Track.material",
-			"XXH64": "ac0770104865c1ac",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 21
+			"XXH64": "da6155a0252b4244",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1231
 		},
 		{
 			"Path": "Assets/Materials/Track.material.meta",

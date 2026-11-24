@@ -256,6 +256,9 @@ return true
 				{ "Terrain.SampleNormal", "assert(holders.Terrain.Terrain:SampleNormal(vector.zero) == nil)" },
 				// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): the fixture has no game UI, so no presentation text.
 				{ "UiText.GetPresentationText", "assert(holders.UiText.UiText:GetPresentationText() == nil)" },
+				// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the default Wind's velocity at the
+				// origin at time 0, its steady Strength along +X.
+				{ "Wind.Sample", "assert(holders.Wind.Wind:Sample(vector.zero, 0) == vector.create(5, 0, 0))" },
 			};
 			const std::set<std::string_view> identityReads = { "Entity.ID", "Entity.IsValid", "Entity.__eq" };
 			// Reads of a system's state of the entity, which is leaving with it (decision 4, "Unchanged").

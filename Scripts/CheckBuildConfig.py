@@ -27,8 +27,8 @@ and configuration:
 3. a Jolt consumer is compiled for another instruction set than JoltPhysics. Jolt/Core/Core.h derives JPH_USE_AVX2,
    JPH_USE_AVX, JPH_USE_F16C, JPH_USE_LZCNT, JPH_USE_TZCNT and more from the compiler's predefined __AVX2__,
    __AVX__, ... macros, and those are not part of JPH_VERSION_ID, so VerifyJoltVersionID() cannot catch a mismatch;
-4. a first-party project, JoltPhysics, MikkTSpace, Luau, HarfBuzz, SheenBidi, CMP_Core, tinyexr, Recast or Detour uses
-   a non-precise floating-point model: MSVC FloatingPointModel=Fast, /fp:fast, /fp:contract or
+4. a first-party project, JoltPhysics, MikkTSpace, Luau, HarfBuzz, SheenBidi, CMP_Core, tinyexr, Recast, Detour or
+   meshoptimizer uses a non-precise floating-point model: MSVC FloatingPointModel=Fast, /fp:fast, /fp:contract or
    /Qfast_transcendentals; GCC/Clang (and clang-cl's /clang: options) -ffast-math, -Ofast, -ffp-model=fast or any
    component of -ffast-math in effect (unsafe, associative or reciprocal math, finite math only, no NaNs or infinities,
    no signed zeros, no trapping math, limited complex range, approximate functions, fast excess precision), or an
@@ -172,6 +172,10 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     # every consumer leave both families empty (Vendor/Recast/VENDOR.md, Vendor/Detour/VENDOR.md).
     "Recast": DefineFamily(prefixes=("RC_",)),
     "Detour": DefineFamily(prefixes=("DT_",)),
+    # M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 5): meshoptimizer is built without
+    # configuration macros, and no consumer defines one (MESHOPTIMIZER_API, MESHOPTIMIZER_NO_SIMD, ...;
+    # Vendor/meshoptimizer/VENDOR.md).
+    "meshoptimizer": DefineFamily(prefixes=("MESHOPTIMIZER_",)),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 
@@ -207,9 +211,11 @@ JOLT_PROJECT = "JoltPhysics"
 # texels, its half-float conversion among them, are baked into a cooked environment under the same
 # configuration-independent key (decision 14). Recast and Detour (M30, Docs/Decisions/0045-m30-navigation.md): a
 # bake's NavMesh file must be byte-identical from the Debug and Release editors, and Detour's path queries run on the
-# simulation path (§9.1).
+# simulation path (§9.1). meshoptimizer (M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision
+# 5): generated mesh levels are cooked into meshes under the same configuration-independent key.
 PRECISE_VENDOR_PROJECTS = (
-    JOLT_PROJECT, "MikkTSpace", "Luau", "HarfBuzz", "SheenBidi", "CMP_Core", "tinyexr", "Recast", "Detour"
+    JOLT_PROJECT, "MikkTSpace", "Luau", "HarfBuzz", "SheenBidi", "CMP_Core", "tinyexr", "Recast", "Detour",
+    "meshoptimizer",
 )
 DETERMINISM_DEFINE = "JPH_CROSS_PLATFORM_DETERMINISTIC"
 NOT_IN_DIST = ("EditorCore", "Editor", "Tests")
@@ -1133,8 +1139,8 @@ def check_floating_point(workspace: GeneratedWorkspace, first_party: set[str], f
                     findings.append(
                         f"[{target.name}] {config}: {unit_location(name, unit)} uses a non-precise floating-point "
                         f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace, Luau, HarfBuzz, SheenBidi, "
-                        "CMP_Core, tinyexr, Recast and Detour must use the precise model, Docs/Architecture.md section "
-                        "2.2)"
+                        "CMP_Core, tinyexr, Recast, Detour and meshoptimizer must use the precise model, "
+                        "Docs/Architecture.md section 2.2)"
                     )
 
 

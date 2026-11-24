@@ -106,10 +106,11 @@ namespace Engine {
 			CHECK(again->Dependencies == textured->Dependencies);
 		}
 
-		// M23 (Material version 2; Docs/Decisions/0034-m23-contract.md decision 10): importer version 2 cooks Material version 2
-		// from a version 1 file (every UV set UV0) and from a version 2 file (its UV sets), and lists the textures of both as
-		// its dependencies (the importer-dependency rule).
-		TEST_CASE("MaterialImporter: version 2 cooks Material version 2 with each map's UV set from version 1 and 2 files")
+		// M23 (Material version 2; Docs/Decisions/0034-m23-contract.md decision 10): importer version 2 cooks the current
+		// Material version (3 since M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3H; the importer
+		// stays at 2) from a version 1 file (every UV set UV0) and from a version 2 file (its UV sets), and lists the textures
+		// of both as its dependencies (the importer-dependency rule).
+		TEST_CASE("MaterialImporter: version 2 cooks the current Material version with each map's UV set from version 1 and 2 files")
 		{
 			CHECK(MaterialImporter::Version == 2);
 			Test::AssetTestFixture fixture;
@@ -123,9 +124,9 @@ namespace Engine {
 			REQUIRE_MESSAGE(fromLegacy.has_value(), fromLegacy.error().ToString());
 			const Result<CookedArtifactView> legacyView = ReadCookedArtifact(fromLegacy->Artifacts.front().Cooked);
 			REQUIRE(legacyView.has_value());
-			CHECK(legacyView->Header.FormatVersion == 2);
+			CHECK(legacyView->Header.FormatVersion == 3);
 			CHECK(legacyView->Header.ImporterVersion == 2);
-			CHECK(AsStringView(legacyView->Payload).find(R"("Version":2)") != std::string_view::npos);
+			CHECK(AsStringView(legacyView->Payload).find(R"("Version":3)") != std::string_view::npos);
 			Result<AssetRef<MaterialData>> legacyMaterial = LoadCookedMaterial(fromLegacy->Artifacts.front().Cooked, fixture.GetRegistry());
 			REQUIRE(legacyMaterial.has_value());
 			CHECK((*legacyMaterial)->OcclusionUVSet == TextureCoordinateSet::UV0);

@@ -348,7 +348,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Attributes.gltf.meta",
-			"XXH64": "f0b22ec43e9b83b0",
+			"XXH64": "9df3cd28ced91780",
 			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",
@@ -364,7 +364,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Box.glb.meta",
-			"XXH64": "8dcfb007e7618cec",
+			"XXH64": "924ae439f993b42f",
 			"Method": "asset.import",
 			"RequestId": 13,
 			"Client": "batch",
@@ -380,7 +380,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Box.gltf.meta",
-			"XXH64": "f4be688428b9add3",
+			"XXH64": "9aa7a836d4736a19",
 			"Method": "asset.import",
 			"RequestId": 14,
 			"Client": "batch",
@@ -396,7 +396,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/DataUri.gltf.meta",
-			"XXH64": "a7ae9a601dd17d57",
+			"XXH64": "39780cd2d85a704c",
 			"Method": "asset.import",
 			"RequestId": 15,
 			"Client": "batch",
@@ -428,7 +428,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Textured.gltf.meta",
-			"XXH64": "c6ddf15823e2e21f",
+			"XXH64": "860741e98c87431e",
 			"Method": "asset.import",
 			"RequestId": 16,
 			"Client": "batch",
@@ -452,7 +452,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Materials/Matte.material",
-			"XXH64": "6b10a5c0acbee8f9",
+			"XXH64": "dad04917d24af4ae",
 			"Method": "asset.create",
 			"RequestId": 19,
 			"Client": "batch",
@@ -468,7 +468,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Materials/SecondUV.material",
-			"XXH64": "fd50c4a524ae374a",
+			"XXH64": "2682dd5d358c0c71",
 			"Method": "asset.create",
 			"RequestId": 5,
 			"Client": "batch",
@@ -772,7 +772,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Animation/Floor.material",
-			"XXH64": "9d352d9771821a73",
+			"XXH64": "2f07ff3a0ff324e2",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -788,7 +788,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Fog/Ground.material",
-			"XXH64": "5f4622a5b41bcb4b",
+			"XXH64": "248d4cd55038d44b",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -804,7 +804,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Fog/Stone.material",
-			"XXH64": "ab0dfe8e2e4618b1",
+			"XXH64": "3abbdda9df49285d",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -820,11 +820,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendBlue.material",
-			"XXH64": "82239d48e78fb55c",
+			"XXH64": "601e9f260f836a39",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendBlue.material.meta",
@@ -836,11 +836,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendGreen.material",
-			"XXH64": "8cfbcb994529d0f7",
+			"XXH64": "df4b23bd80a62efe",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendGreen.material.meta",
@@ -852,11 +852,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendRed.material",
-			"XXH64": "cd4982da5115294d",
+			"XXH64": "4f89812f290e74ba",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendRed.material.meta",
@@ -868,11 +868,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/GlassDoubleSided.material",
-			"XXH64": "f0279a63a6eb540f",
+			"XXH64": "cc617285b0a12720",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/GlassDoubleSided.material.meta",
@@ -884,11 +884,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Ground.material",
-			"XXH64": "20a9bfab12b29ec8",
+			"XXH64": "db2a96481b58b57b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Ground.material.meta",
@@ -900,11 +900,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskDoubleSided.material",
-			"XXH64": "a14f3f5f5fb67ece",
+			"XXH64": "3cfc1d0d07dae409",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskDoubleSided.material.meta",
@@ -916,11 +916,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskSingleSided.material",
-			"XXH64": "7176712b69c9f59c",
+			"XXH64": "244c39e900bb180e",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskSingleSided.material.meta",
@@ -932,11 +932,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Opaque.material",
-			"XXH64": "1d3031e67c6d69a6",
+			"XXH64": "9e6811df3716aa22",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Opaque.material.meta",
@@ -948,11 +948,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/CyanOrb.material",
-			"XXH64": "4794e86a27bbdbf2",
+			"XXH64": "d4d46339f59cff7b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/CyanOrb.material.meta",
@@ -964,11 +964,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/GreenBar.material",
-			"XXH64": "30e0ce104efcaeaf",
+			"XXH64": "44ad298f4147d1b1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/GreenBar.material.meta",
@@ -980,11 +980,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/Ground.material",
-			"XXH64": "7128c1b8b169724c",
+			"XXH64": "89ef6bc623b696a1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/Ground.material.meta",
@@ -996,11 +996,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/RedOrb.material",
-			"XXH64": "c1096db142186f18",
+			"XXH64": "f83c1d1529b79d7b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/RedOrb.material.meta",
@@ -1012,11 +1012,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/WhiteSpark.material",
-			"XXH64": "12186836dd476c94",
+			"XXH64": "ccb4503870074cb0",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/WhiteSpark.material.meta",
@@ -1028,11 +1028,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Ground.material",
-			"XXH64": "68fab6d779e7260d",
+			"XXH64": "a53aabe0fa3657d9",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Ground.material.meta",
@@ -1044,11 +1044,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Occluder.material",
-			"XXH64": "1bf271460fd3110c",
+			"XXH64": "c4d2897752e3cf6c",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Occluder.material.meta",
@@ -1060,11 +1060,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/GltfFixture/Ground.material",
-			"XXH64": "9dad288f94de77fa",
+			"XXH64": "8f81fa324c1a4628",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/GltfFixture/Ground.material.meta",
@@ -1076,11 +1076,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chalk.material",
-			"XXH64": "547086c70fb2e874",
+			"XXH64": "208f308ad15cabfb",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chalk.material.meta",
@@ -1092,11 +1092,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chrome.material",
-			"XXH64": "cdbd2180034eb116",
+			"XXH64": "098a02331ba8c39f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chrome.material.meta",
@@ -1108,11 +1108,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Gold.material",
-			"XXH64": "9b443fb857070352",
+			"XXH64": "41bc585f05951941",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Gold.material.meta",
@@ -1124,11 +1124,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Ground.material",
-			"XXH64": "9dad288f94de77fa",
+			"XXH64": "8f81fa324c1a4628",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Ground.material.meta",
@@ -1140,11 +1140,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Plastic.material",
-			"XXH64": "fa76f7f9af6a19de",
+			"XXH64": "bed61ca38b35c7ff",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Plastic.material.meta",
@@ -1156,11 +1156,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness0.material",
-			"XXH64": "b1ec1ebad034fae5",
+			"XXH64": "cbe8cfde5a7ccd83",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness0.material.meta",
@@ -1172,11 +1172,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness100.material",
-			"XXH64": "4362500d23a9979e",
+			"XXH64": "5bc77808238c6203",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness100.material.meta",
@@ -1188,11 +1188,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness20.material",
-			"XXH64": "03e1b1f81fb9076b",
+			"XXH64": "78b41bb0f9102fc1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness20.material.meta",
@@ -1204,11 +1204,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness40.material",
-			"XXH64": "bda7e99895153e3f",
+			"XXH64": "a7f53767c4d8b4fb",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness40.material.meta",
@@ -1220,11 +1220,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness60.material",
-			"XXH64": "ad64b1366264a6bd",
+			"XXH64": "6f37b3461cd52726",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness60.material.meta",
@@ -1236,11 +1236,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness80.material",
-			"XXH64": "d30418cfbe658b53",
+			"XXH64": "5d8c3d862ab7b457",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness80.material.meta",
@@ -1252,11 +1252,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness0.material",
-			"XXH64": "f3ed35f94be2a03f",
+			"XXH64": "bd651db869b6fe8c",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness0.material.meta",
@@ -1268,11 +1268,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness100.material",
-			"XXH64": "808bcb069ef0a86b",
+			"XXH64": "a4439fbf4d27c4c7",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness100.material.meta",
@@ -1284,11 +1284,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness20.material",
-			"XXH64": "c1957f6fff96c6a5",
+			"XXH64": "b34a025b20a148cc",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness20.material.meta",
@@ -1300,11 +1300,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness40.material",
-			"XXH64": "29c55277fc29ae60",
+			"XXH64": "cd4aa8e7dc2a7f5f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness40.material.meta",
@@ -1316,11 +1316,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness60.material",
-			"XXH64": "be2088aa54f333e9",
+			"XXH64": "ad00eccfca3fc72b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness60.material.meta",
@@ -1332,11 +1332,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness80.material",
-			"XXH64": "eae09ba0140fdcda",
+			"XXH64": "e66f07f35ddc0a6f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness80.material.meta",
@@ -1348,11 +1348,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness0.material",
-			"XXH64": "d749e45bd82f03f7",
+			"XXH64": "2c6c06f9ed1f3eaa",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness0.material.meta",
@@ -1364,11 +1364,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness100.material",
-			"XXH64": "2c92588645cab66a",
+			"XXH64": "fa6298d43730a4af",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness100.material.meta",
@@ -1380,11 +1380,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness20.material",
-			"XXH64": "46ef857aa0922b0f",
+			"XXH64": "101925dee750af66",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness20.material.meta",
@@ -1396,11 +1396,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness40.material",
-			"XXH64": "146f5ee74e51eb46",
+			"XXH64": "8783ac2ac9987262",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness40.material.meta",
@@ -1412,11 +1412,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness60.material",
-			"XXH64": "939f975063d54657",
+			"XXH64": "f7e85111cebd789f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness60.material.meta",
@@ -1428,11 +1428,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness80.material",
-			"XXH64": "73145438c8cd9503",
+			"XXH64": "97e3cb9a5ff022f3",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness80.material.meta",
@@ -1444,11 +1444,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Ground.material",
-			"XXH64": "9dad288f94de77fa",
+			"XXH64": "8f81fa324c1a4628",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Ground.material.meta",
@@ -1460,11 +1460,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Occluder.material",
-			"XXH64": "cfae76cd99bf70a3",
+			"XXH64": "efc792d4bfcf749b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Occluder.material.meta",
@@ -1476,11 +1476,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Blue.material",
-			"XXH64": "66a56f20fac8a34e",
+			"XXH64": "80a1a7a7ae6bbbed",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Blue.material.meta",
@@ -1492,11 +1492,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive0_5.material",
-			"XXH64": "00bf1682deb50da6",
+			"XXH64": "3f1f26205018c318",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive0_5.material.meta",
@@ -1508,11 +1508,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive128.material",
-			"XXH64": "3687ce948bc01777",
+			"XXH64": "6a9c2fe1018ccdf1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive128.material.meta",
@@ -1524,11 +1524,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive2.material",
-			"XXH64": "a2ad75c70eddd91d",
+			"XXH64": "580b2a5b07f75a81",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive2.material.meta",
@@ -1540,11 +1540,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive32.material",
-			"XXH64": "911d2c2a39886775",
+			"XXH64": "4320f005ce4d54e2",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive32.material.meta",
@@ -1556,11 +1556,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive8.material",
-			"XXH64": "52caedc151aecba3",
+			"XXH64": "6b03c4599175c1f3",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive8.material.meta",
@@ -1572,11 +1572,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Green.material",
-			"XXH64": "50222bc7a1aff7fa",
+			"XXH64": "75448e72214c62fd",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Green.material.meta",
@@ -1588,11 +1588,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Ground.material",
-			"XXH64": "2bd4edc9e58b6aa3",
+			"XXH64": "3ed82f8b33a24f8b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Ground.material.meta",
@@ -1604,11 +1604,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Orange.material",
-			"XXH64": "a0e2828c3ee21585",
+			"XXH64": "4899c8b0b33379a4",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Orange.material.meta",
@@ -1620,11 +1620,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Red.material",
-			"XXH64": "abb9e7e64e25db22",
+			"XXH64": "552cf494358f1e3c",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Red.material.meta",
@@ -1636,11 +1636,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/White.material",
-			"XXH64": "f94d6fa4092630f3",
+			"XXH64": "2d91f059800b1455",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/White.material.meta",
@@ -1652,7 +1652,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenAutoExposure/Ground.material",
-			"XXH64": "ccfa4b5bfb3effc0",
+			"XXH64": "70ce5c09c152596f",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -1668,7 +1668,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenAutoExposure/Lamp.material",
-			"XXH64": "f1082bd5e02096d4",
+			"XXH64": "f8505999785ec094",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -1684,7 +1684,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenAutoExposure/Pillar.material",
-			"XXH64": "70fa799eb4d98b2f",
+			"XXH64": "d365c71aff92a369",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -1700,7 +1700,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenClusteredLights/Block.material",
-			"XXH64": "a87c0b4bdd5031f2",
+			"XXH64": "2c42f565577bcb67",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -1716,7 +1716,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenClusteredLights/Floor.material",
-			"XXH64": "050efbc58bd69b8b",
+			"XXH64": "bd12da4ab3565cf7",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -1732,7 +1732,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenClusteredLights/Orb.material",
-			"XXH64": "6b53e71b5d639fdf",
+			"XXH64": "04bfe5d49fc83347",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -1748,7 +1748,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenFog/Ember.material",
-			"XXH64": "bf688fe4818e3012",
+			"XXH64": "224b2aceed878f39",
 			"Method": "asset.create",
 			"RequestId": 4,
 			"Client": "batch",
@@ -1764,7 +1764,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenFog/Glass.material",
-			"XXH64": "5e97e3c0d087718d",
+			"XXH64": "1a7a2974546fd2bd",
 			"Method": "asset.create",
 			"RequestId": 5,
 			"Client": "batch",
@@ -1780,7 +1780,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenFog/Ground.material",
-			"XXH64": "f62c22fce552ccb9",
+			"XXH64": "290f710e70b2b872",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -1796,7 +1796,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenFog/Moss.material",
-			"XXH64": "92baef412e46251d",
+			"XXH64": "798b05f476a83ab0",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -1812,7 +1812,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenFog/Stone.material",
-			"XXH64": "a26a8276818f10d5",
+			"XXH64": "8c7e8a4a0a3f5d6a",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -1828,7 +1828,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenLut/Blue.material",
-			"XXH64": "f09ed141b7b85d9d",
+			"XXH64": "63a1c3b8f21094bb",
 			"Method": "asset.create",
 			"RequestId": 5,
 			"Client": "batch",
@@ -1844,7 +1844,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenLut/Green.material",
-			"XXH64": "80153dd0f7e69f79",
+			"XXH64": "55520d07204b78b2",
 			"Method": "asset.create",
 			"RequestId": 4,
 			"Client": "batch",
@@ -1860,7 +1860,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenLut/Ground.material",
-			"XXH64": "8154b73ef150c3ea",
+			"XXH64": "eb9e3547c0eda78f",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -1876,7 +1876,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenLut/Red.material",
-			"XXH64": "6d76fcdf5844ac01",
+			"XXH64": "5cc588aeba823b2d",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -1892,7 +1892,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenManyLights/Block.material",
-			"XXH64": "1a8db528b3f50f40",
+			"XXH64": "ab3099c716ac4eaa",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -1908,7 +1908,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenManyLights/Floor.material",
-			"XXH64": "04f047b68ff78afe",
+			"XXH64": "3a32140eb0484fc5",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -1924,7 +1924,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenMaterialParameters/Checker.material",
-			"XXH64": "2c65a807442ff3d2",
+			"XXH64": "1234f744393516d2",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -1940,7 +1940,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/Box.material",
-			"XXH64": "097d55e348c2c4f1",
+			"XXH64": "8d01f4c49c959d9d",
 			"Method": "asset.create",
 			"RequestId": 8,
 			"Client": "batch",
@@ -1956,7 +1956,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/Cloak.material",
-			"XXH64": "2ca757794b648d61",
+			"XXH64": "30fafde77e69aac9",
 			"Method": "asset.create",
 			"RequestId": 5,
 			"Client": "batch",
@@ -1972,7 +1972,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/Gold.material",
-			"XXH64": "ec42e9799a67ac3f",
+			"XXH64": "4ad44050b863bd5a",
 			"Method": "asset.create",
 			"RequestId": 6,
 			"Client": "batch",
@@ -1988,7 +1988,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/Ground.material",
-			"XXH64": "1e99d43f514e254f",
+			"XXH64": "d794df07cc0a9ace",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2004,7 +2004,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/Marker.material",
-			"XXH64": "0848b2b44ead6555",
+			"XXH64": "ce25ad883b8a41d5",
 			"Method": "asset.create",
 			"RequestId": 7,
 			"Client": "batch",
@@ -2020,7 +2020,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/RoughMirror.material",
-			"XXH64": "6acc59b67d76df0c",
+			"XXH64": "720f0d10a06e2042",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2036,7 +2036,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/SharpMirror.material",
-			"XXH64": "0e7a643f91e3ecef",
+			"XXH64": "77e1ffd76bb0c049",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2052,7 +2052,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPlanarReflections/Stone.material",
-			"XXH64": "a26a8276818f10d5",
+			"XXH64": "8c7e8a4a0a3f5d6a",
 			"Method": "asset.create",
 			"RequestId": 4,
 			"Client": "batch",
@@ -2068,7 +2068,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPointShadows/Floor.material",
-			"XXH64": "a755c8cf4216b86e",
+			"XXH64": "e32bd1676b7af789",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2084,7 +2084,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPointShadows/Green.material",
-			"XXH64": "9fa9d7dde3b40a21",
+			"XXH64": "5ab7a22cbc618f60",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2100,7 +2100,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenPointShadows/Orange.material",
-			"XXH64": "7fcafdafd0d8cc8b",
+			"XXH64": "2420e6298333ac62",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2116,7 +2116,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenProbes/Chrome.material",
-			"XXH64": "4ed32a94dc7b5a85",
+			"XXH64": "f8e884744fda2542",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2132,7 +2132,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenProbes/Red.material",
-			"XXH64": "0d8c8d064eb162b0",
+			"XXH64": "3e8a0d30083dc571",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2148,7 +2148,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenProbes/White.material",
-			"XXH64": "68ad6f20d2c84e7e",
+			"XXH64": "53dde851fc3ec8cf",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2164,7 +2164,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenRendererII/Blue.material",
-			"XXH64": "24a7692c03eb5980",
+			"XXH64": "58747c3884dedf9e",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2180,7 +2180,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenRendererII/Grey.material",
-			"XXH64": "8b60a7a4aac04695",
+			"XXH64": "5f70cc184bc7417b",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2196,7 +2196,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenRendererII/Red.material",
-			"XXH64": "fa7130798a39a3cc",
+			"XXH64": "b2b357c0cbf96285",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2212,7 +2212,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenSsr/Blue.material",
-			"XXH64": "374b29aa19efcb3d",
+			"XXH64": "7ea0f5e0a46fd9d5",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2228,7 +2228,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenSsr/Floor.material",
-			"XXH64": "52d3e3f54e2dcb59",
+			"XXH64": "051ccd11907b7216",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2244,7 +2244,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenSsr/Red.material",
-			"XXH64": "b8c41806710a4fec",
+			"XXH64": "0eadea5f09fa4832",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2260,7 +2260,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTaa/Ground.material",
-			"XXH64": "54ad647cb97d409b",
+			"XXH64": "e2133dae31ebd943",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2276,7 +2276,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTaa/Pole.material",
-			"XXH64": "7c47379e4c55865b",
+			"XXH64": "179b348937680112",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2292,7 +2292,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/ColorAuto.material",
-			"XXH64": "4362a21537f7b277",
+			"XXH64": "a29368b286c656ff",
 			"Method": "asset.create",
 			"RequestId": 9,
 			"Client": "batch",
@@ -2308,7 +2308,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/ColorNone.material",
-			"XXH64": "7acc2d0d99c9f66a",
+			"XXH64": "f884153e9aae7ef5",
 			"Method": "asset.create",
 			"RequestId": 10,
 			"Client": "batch",
@@ -2324,7 +2324,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/LinearAuto.material",
-			"XXH64": "ac31a0b93719e94b",
+			"XXH64": "112626330d5e8d9a",
 			"Method": "asset.create",
 			"RequestId": 15,
 			"Client": "batch",
@@ -2340,7 +2340,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/LinearNone.material",
-			"XXH64": "a21fc092cba7f836",
+			"XXH64": "32435b29c4ef6c8b",
 			"Method": "asset.create",
 			"RequestId": 16,
 			"Client": "batch",
@@ -2356,7 +2356,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/MaskAuto.material",
-			"XXH64": "3192b035dd70c2d3",
+			"XXH64": "b68a98f80c714949",
 			"Method": "asset.create",
 			"RequestId": 11,
 			"Client": "batch",
@@ -2372,7 +2372,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/MaskNone.material",
-			"XXH64": "0ec1e33f3f3d3ba5",
+			"XXH64": "5796ff9eea05c38b",
 			"Method": "asset.create",
 			"RequestId": 12,
 			"Client": "batch",
@@ -2388,7 +2388,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/NormalAuto.material",
-			"XXH64": "53f9870365d352d2",
+			"XXH64": "5c700e0db73a6678",
 			"Method": "asset.create",
 			"RequestId": 13,
 			"Client": "batch",
@@ -2404,7 +2404,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenTextured/NormalNone.material",
-			"XXH64": "9d21c22e94384e8f",
+			"XXH64": "501cd19986258828",
 			"Method": "asset.create",
 			"RequestId": 14,
 			"Client": "batch",
@@ -2420,7 +2420,7 @@
 		},
 		{
 			"Path": "Assets/Materials/MaterialParameters/Lava.material",
-			"XXH64": "55c287204791c084",
+			"XXH64": "f5760d0b07df2825",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2436,7 +2436,7 @@
 		},
 		{
 			"Path": "Assets/Materials/MeshPath/Ball.material",
-			"XXH64": "650a383edef3e188",
+			"XXH64": "ea87b8a7632d352b",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2452,7 +2452,7 @@
 		},
 		{
 			"Path": "Assets/Materials/MeshPath/Crate.material",
-			"XXH64": "82a638edea98d4f0",
+			"XXH64": "f4b50fa389cb66f6",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2468,7 +2468,7 @@
 		},
 		{
 			"Path": "Assets/Materials/MeshPath/Floor.material",
-			"XXH64": "030809d0a84f0b49",
+			"XXH64": "b0aa58a75f16d164",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2484,7 +2484,7 @@
 		},
 		{
 			"Path": "Assets/Materials/PlanarReflections/Ground.material",
-			"XXH64": "5f4622a5b41bcb4b",
+			"XXH64": "248d4cd55038d44b",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2500,7 +2500,7 @@
 		},
 		{
 			"Path": "Assets/Materials/PlanarReflections/Marker.material",
-			"XXH64": "b0a56c7bc186b28b",
+			"XXH64": "b416b8667d6f77aa",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2516,7 +2516,7 @@
 		},
 		{
 			"Path": "Assets/Materials/PlanarReflections/Mirror.material",
-			"XXH64": "fe16bcc77082571a",
+			"XXH64": "d679de0181c294d4",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2532,7 +2532,7 @@
 		},
 		{
 			"Path": "Assets/Materials/PostProcessV2/Block.material",
-			"XXH64": "81c691c58dbd5dfd",
+			"XXH64": "f962fddeb2f48122",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2548,7 +2548,7 @@
 		},
 		{
 			"Path": "Assets/Materials/PostProcessV2/Mirror.material",
-			"XXH64": "87fa1f6f9f472575",
+			"XXH64": "b75a717aacaa7c67",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2572,7 +2572,7 @@
 		},
 		{
 			"Path": "Assets/Models/Animation/Skinned.gltf.meta",
-			"XXH64": "a0391b5d4288bb5e",
+			"XXH64": "b6a39071816de4d8",
 			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2588,7 +2588,7 @@
 		},
 		{
 			"Path": "Assets/Models/Animation/SkinnedRigs.gltf.meta",
-			"XXH64": "f92cc52d1de00968",
+			"XXH64": "12910691d2642158",
 			"Method": "asset.import",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2668,7 +2668,7 @@
 		},
 		{
 			"Path": "Assets/Models/GoldenSkinnedPose/Skinned.gltf.meta",
-			"XXH64": "9aa7af9f9a5bf34e",
+			"XXH64": "b73a215aab1be355",
 			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2932,7 +2932,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components/Materials/Crate.material",
-			"XXH64": "9e264ea7c6cc2439",
+			"XXH64": "07d13ed81c045e46",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2948,7 +2948,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components/Materials/Glow.material",
-			"XXH64": "11791964f259314d",
+			"XXH64": "844af1ed228184cc",
 			"Method": "asset.create",
 			"RequestId": 4,
 			"Client": "batch",
@@ -2964,7 +2964,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components/Materials/Ground.material",
-			"XXH64": "5b10d3307b7eb6d7",
+			"XXH64": "3c692c2fd192c0f0",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2980,7 +2980,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components/Materials/Metal.material",
-			"XXH64": "2813d669bac33af5",
+			"XXH64": "68e7caa08cf84c8f",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -7396,7 +7396,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Animation.replay",
-			"XXH64": "681e3df2ef4d77aa",
+			"XXH64": "ba9dfe6a42b18355",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -7412,7 +7412,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/BoneAttachments.replay",
-			"XXH64": "4f4f03deb3fd528d",
+			"XXH64": "e6b2d0c40665efb8",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -7524,7 +7524,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/InputAim.replay",
-			"XXH64": "3fe6f0aab94ba1d2",
+			"XXH64": "0d64719f6b91ceea",
 			"Method": "input.record",
 			"RequestId": 11,
 			"Client": "batch",
@@ -7540,7 +7540,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Joints.replay",
-			"XXH64": "75acf3bd9a8cf072",
+			"XXH64": "a9af5e48042890ed",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -7556,7 +7556,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/MaterialParameters.replay",
-			"XXH64": "ffd2242ba1bb626a",
+			"XXH64": "0940aa3b61eb8a53",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -7636,7 +7636,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/PhysicsSemantics.replay",
-			"XXH64": "d6adf345ecb9c17a",
+			"XXH64": "42cb9559120b1b1a",
 			"Method": "input.record",
 			"RequestId": 12,
 			"Client": "batch",
@@ -7700,7 +7700,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Surfaces.replay",
-			"XXH64": "bae2609ecd107178",
+			"XXH64": "eede65687073efb2",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -7796,7 +7796,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/WorldPause.replay",
-			"XXH64": "cdb020a7d248e832",
+			"XXH64": "48e452a125cdad58",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",

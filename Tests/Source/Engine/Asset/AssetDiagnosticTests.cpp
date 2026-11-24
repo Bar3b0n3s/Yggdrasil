@@ -11,11 +11,13 @@ namespace Engine {
 		TEST_CASE("AssetDiagnostic: the codes follow the §13.7 spelling and are unique")
 		{
 			const std::span<const std::string_view> codes = GetAssetDiagnosticCodes();
-			REQUIRE(codes.size() == 13);
+			REQUIRE(codes.size() == 14);
 			CHECK(codes.front() == "ASSET_MISSING");
-			// The two codes of this process close the list (World Tree brief 14 added the deferred bake's).
-			CHECK(codes[codes.size() - 2] == AssetUploadFailedCode);
-			CHECK(codes.back() == AssetBakeDeferredCode);
+			// The two codes of this process follow (World Tree brief 14 added the deferred bake's), then M46's dropped level of
+			// detail (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I), appended.
+			CHECK(codes[codes.size() - 3] == AssetUploadFailedCode);
+			CHECK(codes[codes.size() - 2] == AssetBakeDeferredCode);
+			CHECK(codes.back() == AssetLodInvalidCode);
 			for (const std::string_view code : codes)
 			{
 				CAPTURE(std::string(code));

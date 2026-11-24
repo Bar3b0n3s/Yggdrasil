@@ -3721,6 +3721,85 @@
 			},
 			"additionalProperties": false
 		},
+		"RenderDistance": {
+			"description": "How far and in which level of detail the MeshRenderer on this entity draws: a cull distance, a bias on its mesh's level switches, the shadow's coarser level and the width of the cross-fades. A MeshRenderer without one takes the defaults.",
+			"type": "object",
+			"properties": {
+				"CullDistance": {
+					"description": "Beyond this distance from a view's camera, in metres, the mesh draws and casts nothing in that view, fading out across the last FadeWidth of it; 0 leaves only the camera's FarClip.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100000
+				},
+				"LodBias": {
+					"description": "Multiplies the mesh's screen size before its levels' switch sizes compare it: 2 keeps each finer level until half its switch size, 0.5 switches to coarser levels twice as early.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 100
+				},
+				"ShadowLodOffset": {
+					"description": "How many levels coarser than its view's level the mesh's shadow draws, clamped to its last level; 0 casts from the drawn level.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4
+				},
+				"FadeWidth": {
+					"description": "The band around each level switch, and before CullDistance, as a share of the switch size or the distance, across which two levels cross-fade by dither (or the last fades out); 0 switches sharply.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 0.5
+				}
+			},
+			"additionalProperties": false
+		},
+		"Wind": {
+			"description": "The scene's wind (one per scene): it bends, sways and flutters the meshes whose material has wind enabled, and scripts read it with Wind:Sample.",
+			"type": "object",
+			"properties": {
+				"Direction": {
+					"description": "Where the wind blows, in world axes; only its horizontal part (X and Z) counts, normalized, and it must not be zero.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Strength": {
+					"description": "The steady wind speed, in metres per second; a gale is about 20.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"GustStrength": {
+					"description": "The speed gusts add to Strength at their peak, in metres per second.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"GustFrequency": {
+					"description": "How many gusts pass a point each second; they travel with the wind, so their wavelength is Strength / GustFrequency. 0 holds the gusts still.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"Turbulence": {
+					"description": "How much the gusts vary across positions and turn the wind sideways: 0 blows straight and in step everywhere, 1 is most unsteady.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -4355,6 +4434,12 @@
 						},
 						"FixedJoint": {
 							"$ref": "#/$defs/FixedJoint"
+						},
+						"RenderDistance": {
+							"$ref": "#/$defs/RenderDistance"
+						},
+						"Wind": {
+							"$ref": "#/$defs/Wind"
 						}
 					},
 					"additionalProperties": true

@@ -193,7 +193,9 @@ class AssetTests(AutomationTestCase):
                                                "values": {"OcclusionUVSet": "UV1"}})
         asset_id = created["asset"]["id"]
         document = read_json(root / "Assets" / "Materials" / "Layered.material")
-        self.assertEqual(document["Version"], 2)
+        # The current Material version: 3 since M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md
+        # decision 3H), its UV sets as version 2's.
+        self.assertEqual(document["Version"], 3)
         self.assertEqual(document["OcclusionUVSet"], "UV1")
         self.assertEqual(document["BaseColorUVSet"], "UV0")
         changed = client.call("asset.setProperties", {"asset": asset_id, "values": {"BaseColorUVSet": "UV1"}})

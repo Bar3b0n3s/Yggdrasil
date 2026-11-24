@@ -4,13 +4,24 @@
 	"Handle": "2a68836c6e412aca",
 	"Type": "Prefab",
 	"Importer": "Gltf",
-	"ImporterVersion": 3,
+	"ImporterVersion": 4,
 	"Settings": {
 		"Scale": 1,
 		"GenerateMissingTangents": true,
 		"ImportMaterials": true,
 		"MergeMeshes": false,
-		"AnimationEvents": []
+		"AnimationEvents": [],
+		"Lods": "None",
+		"LodScreenSizes": [0.5, 0.25, 0.125, 0.0625],
+		"LodTriangleRatios": [0.5, 0.25, 0.125, 0.0625],
+		"LodMaxError": 0.05,
+		"Wind": {
+			"Enabled": false,
+			"Bend": 0.1,
+			"Branch": 0.1,
+			"Flutter": 0.02,
+			"Stiffness": 0.5
+		}
 	},
 	"SubAssets": [
 		{

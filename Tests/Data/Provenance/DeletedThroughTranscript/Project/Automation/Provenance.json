@@ -12,7 +12,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Kept.material",
-			"XXH64": "a38670d5d92e5b8d",
+			"XXH64": "4fc6a760ad000333",
 			"Method": "asset.create",
 			"RequestId": 4,
 			"Client": "engine-mcp",
@@ -20,7 +20,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Old.material",
-			"XXH64": "a38670d5d92e5b8d",
+			"XXH64": "4fc6a760ad000333",
 			"Method": "asset.create",
 			"RequestId": 6,
 			"Client": "engine-mcp",
@@ -36,7 +36,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Red.material",
-			"XXH64": "a38670d5d92e5b8d",
+			"XXH64": "4fc6a760ad000333",
 			"Method": "edit.batch",
 			"RequestId": 4,
 			"Client": "engine-mcp",
@@ -52,7 +52,7 @@
 		},
 		{
 			"Path": "Assets/Old/Temp.material",
-			"XXH64": "a38670d5d92e5b8d",
+			"XXH64": "4fc6a760ad000333",
 			"Method": "asset.create",
 			"RequestId": 8,
 			"Client": "engine-mcp",

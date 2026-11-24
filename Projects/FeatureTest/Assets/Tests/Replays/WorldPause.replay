@@ -196,13 +196,13 @@
 				"Handle": "5a831424c6906c00",
 				"Path": "Assets/Models/Animation/Skinned.gltf#mesh:0:Strip",
 				"Type": "Mesh",
-				"Hash": "f93b6f3e2e93b029"
+				"Hash": "ec006b939151fd15"
 			},
 			{
 				"Handle": "79e581911985caaf",
 				"Path": "Assets/Models/Animation/Skinned.gltf#animation:0:Wave",
 				"Type": "AnimationClip",
-				"Hash": "4eb078fb55869fc8"
+				"Hash": "585b94699016e452"
 			},
 			{
 				"Handle": "8437e42391ce559f",
@@ -214,7 +214,7 @@
 				"Handle": "aa94bd7ed48f6cb8",
 				"Path": "Assets/Models/Animation/Skinned.gltf#skin:0",
 				"Type": "Skeleton",
-				"Hash": "c2a60019d7f58e51"
+				"Hash": "fd2540810fe13bee"
 			},
 			{
 				"Handle": "aad4995e348d4030",
@@ -226,7 +226,7 @@
 				"Handle": "e707c63160b28aa4",
 				"Path": "Assets/Models/Animation/Skinned.gltf",
 				"Type": "Prefab",
-				"Hash": "ffc5b9f6a954d240"
+				"Hash": "35040053b719c83b"
 			}
 		]
 	},

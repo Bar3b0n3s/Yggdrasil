@@ -44,15 +44,35 @@ namespace Engine {
 		UV1
 	};
 
+	// M46 (Material version 3; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3H): registry struct
+	// "MaterialWind", how a material's surface answers the scene's Wind (Scene/Components/WindComponent.h). The renderer
+	// displaces the positions of a mesh drawn with an Enabled block alike in every pipeline (Common/Wind.slang): they lean
+	// along the wind by Bend times their squared height above the entity's origin, sway by Branch times the mesh's _WIND x
+	// weight and flutter along their normals by Flutter times its z weight, each scaled by the response
+	// speed / (speed + Stiffness * 10 m/s). Defaults and bounds:
+	//   Enabled false     Bend 0.1, 0 to 1 (about Bend m of lean at 1 m of height in a 10 m/s wind)
+	//   Branch 0.1 m, 0 to 1          Flutter 0.02 m, 0 to 0.25          Stiffness 0.5, 0 to 1
+	struct MaterialWind
+	{
+		bool Enabled = false;
+		float Bend = 0.1f;
+		float Branch = 0.1f;
+		float Flutter = 0.02f;
+		float Stiffness = 0.5f;
+
+		bool operator==(const MaterialWind&) const = default;
+	};
+
 	// A PBR metallic-roughness material (§6.5, §8.5), registry struct "Material". Every field is serialized under its member
-	// name, in member order, after "Format": "Material" and "Version": 2. Texture slots are null for "no texture" (the
+	// name, in member order, after "Format": "Material" and "Version": 3. Texture slots are null for "no texture" (the
 	// renderer binds White, FlatNormal or Black then, §8.4); each map's UV set follows it (M23, version 2: UV0 by default, and
-	// a version 1 file, which has none, loads with UV0 everywhere). Defaults and bounds (also enforced on every write path,
-	// §5.4):
+	// a version 1 file, which has none, loads with UV0 everywhere); the Wind block follows UVOffset (M46, version 3: a version
+	// 1 or 2 file, which has none, loads with wind disabled). Defaults and bounds (also enforced on every write path, §5.4):
 	//   BaseColor (1, 1, 1, 1), each 0 to 1 (linear; the map is sRGB)   Metallic 0, Roughness 0.5, both 0 to 1
 	//   NormalScale 1, >= 0          OcclusionStrength 1, 0 to 1        Emissive (0, 0, 0), each 0 to 1
 	//   EmissiveStrength 1, >= 0     AlphaMode Opaque                   AlphaCutoff 0.5, 0 to 1
 	//   DoubleSided false            UVScale (1, 1), UVOffset (0, 0), finite
+	//   Wind: MaterialWind's defaults (disabled)
 	// Colours are limited to 0..1 like every colour field (ADR 0006); HDR emission comes from EmissiveStrength. Plain data;
 	// immutable once loaded (AssetRef<MaterialData>).
 	struct MaterialData : Asset
@@ -60,10 +80,12 @@ namespace Engine {
 		static constexpr AssetType StaticType = AssetType::Material;
 		static constexpr std::string_view FormatName = "Material";
 		// M23 (Material version 2; Docs/Decisions/0034-m23-contract.md decision 10): the five <Map>UVSet fields. Version 1
-		// files load with UV0 sets and save as version 2.
-		static constexpr uint32_t CurrentVersion = 2;
-		// The cooked payload layout (CookedHeader::FormatVersion): the minified canonical document, version 2 with the UV sets.
-		static constexpr uint16_t FormatVersion = 2;
+		// files load with UV0 sets. M46 (version 3; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3H):
+		// the Wind block. Versions 1 and 2 load with wind disabled and save as version 3.
+		static constexpr uint32_t CurrentVersion = 3;
+		// The cooked payload layout (CookedHeader::FormatVersion): the minified canonical document, version 3 with the Wind
+		// block. A cached artifact of another version is rebuilt (§7.5).
+		static constexpr uint16_t FormatVersion = 3;
 
 		MaterialData()
 			: Asset(StaticType)
@@ -94,10 +116,16 @@ namespace Engine {
 		bool DoubleSided = false;
 		glm::vec2 UVScale{ 1.0f, 1.0f };
 		glm::vec2 UVOffset{ 0.0f, 0.0f };
+		// M46 (Material version 3): how the surface moves in the scene's wind; disabled by default.
+		MaterialWind Wind{};
 	};
 
-	// Registers the enums "AlphaMode" and "TextureCoordinateSet" and the struct "Material" (MaterialData; colours as
-	// ColorFields, the bounds above, a Generate hook when a Validate rule exists, §5.4).
+	// M46: registers the struct "MaterialWind" unless `registry` has it already, so the Material struct and the glTF import
+	// settings (GltfImporter::RegisterTypes, whose Wind setting is one) may register in either order.
+	void RegisterMaterialWindType(TypeRegistry& registry);
+
+	// Registers the enums "AlphaMode" and "TextureCoordinateSet" and the structs "MaterialWind" (RegisterMaterialWindType) and
+	// "Material" (MaterialData; colours as ColorFields, the bounds above, a Generate hook when a Validate rule exists, §5.4).
 	void RegisterMaterialTypes(TypeRegistry& registry);
 
 	// The texture handles `material` references, without nulls, sorted and unique: its dependencies in the
@@ -122,7 +150,8 @@ namespace Engine {
 
 	// Reads a .material document strictly through the registry (StructInfo::FromJson of "Material": missing keys keep their
 	// defaults, unknown keys warn into `report`, or fail with `strictUnknowns`, every value validated, enum names exact).
-	// Versions 1 and 2 read alike: version 1 has no UV set keys, which keep their default UV0. Errors: Validation (located,
+	// Versions 1 to 3 read alike: version 1 has no UV set keys, which keep their default UV0, and versions 1 and 2 have no
+	// Wind key, which keeps its default (disabled). Errors: Validation (located,
 	// with every bad field as an issue) for a wrong "Format", a version below 1, a wrong JSON type or an out-of-range value;
 	// UnsupportedVersion naming both versions for a newer file.
 	[[nodiscard]] Result<MaterialData> MaterialFromJson(const Json& document, const TypeRegistry& registry, MaterialLoadReport& report,

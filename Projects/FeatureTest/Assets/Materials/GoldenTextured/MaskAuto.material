@@ -1,6 +1,6 @@
 {
 	"Format": "Material",
-	"Version": 2,
+	"Version": 3,
 	"BaseColor": [1, 1, 1, 1],
 	"BaseColorMap": "2365ecdb7a436d0e",
 	"BaseColorUVSet": "UV0",
@@ -22,5 +22,12 @@
 	"AlphaCutoff": 0.5,
 	"DoubleSided": false,
 	"UVScale": [1, 1],
-	"UVOffset": [0, 0]
+	"UVOffset": [0, 0],
+	"Wind": {
+		"Enabled": false,
+		"Bend": 0.1,
+		"Branch": 0.1,
+		"Flutter": 0.02,
+		"Stiffness": 0.5
+	}
 }

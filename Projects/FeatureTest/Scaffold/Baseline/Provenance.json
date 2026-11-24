@@ -4,11 +4,11 @@
 	"Entries": [
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendBlue.material",
-			"XXH64": "82239d48e78fb55c",
+			"XXH64": "601e9f260f836a39",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendBlue.material.meta",
@@ -20,11 +20,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendGreen.material",
-			"XXH64": "8cfbcb994529d0f7",
+			"XXH64": "df4b23bd80a62efe",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendGreen.material.meta",
@@ -36,11 +36,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendRed.material",
-			"XXH64": "cd4982da5115294d",
+			"XXH64": "4f89812f290e74ba",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendRed.material.meta",
@@ -52,11 +52,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/GlassDoubleSided.material",
-			"XXH64": "f0279a63a6eb540f",
+			"XXH64": "cc617285b0a12720",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/GlassDoubleSided.material.meta",
@@ -68,11 +68,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Ground.material",
-			"XXH64": "20a9bfab12b29ec8",
+			"XXH64": "db2a96481b58b57b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Ground.material.meta",
@@ -84,11 +84,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskDoubleSided.material",
-			"XXH64": "a14f3f5f5fb67ece",
+			"XXH64": "3cfc1d0d07dae409",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskDoubleSided.material.meta",
@@ -100,11 +100,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskSingleSided.material",
-			"XXH64": "7176712b69c9f59c",
+			"XXH64": "244c39e900bb180e",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/MaskSingleSided.material.meta",
@@ -116,11 +116,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Opaque.material",
-			"XXH64": "1d3031e67c6d69a6",
+			"XXH64": "9e6811df3716aa22",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/AlphaModes/Opaque.material.meta",
@@ -132,11 +132,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/CyanOrb.material",
-			"XXH64": "4794e86a27bbdbf2",
+			"XXH64": "d4d46339f59cff7b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/CyanOrb.material.meta",
@@ -148,11 +148,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/GreenBar.material",
-			"XXH64": "30e0ce104efcaeaf",
+			"XXH64": "44ad298f4147d1b1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/GreenBar.material.meta",
@@ -164,11 +164,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/Ground.material",
-			"XXH64": "7128c1b8b169724c",
+			"XXH64": "89ef6bc623b696a1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/Ground.material.meta",
@@ -180,11 +180,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/RedOrb.material",
-			"XXH64": "c1096db142186f18",
+			"XXH64": "f83c1d1529b79d7b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/RedOrb.material.meta",
@@ -196,11 +196,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/WhiteSpark.material",
-			"XXH64": "12186836dd476c94",
+			"XXH64": "ccb4503870074cb0",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Bloom/WhiteSpark.material.meta",
@@ -212,11 +212,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Ground.material",
-			"XXH64": "68fab6d779e7260d",
+			"XXH64": "a53aabe0fa3657d9",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Ground.material.meta",
@@ -228,11 +228,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Occluder.material",
-			"XXH64": "1bf271460fd3110c",
+			"XXH64": "c4d2897752e3cf6c",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/DebugDraw/Occluder.material.meta",
@@ -244,11 +244,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/GltfFixture/Ground.material",
-			"XXH64": "9dad288f94de77fa",
+			"XXH64": "8f81fa324c1a4628",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/GltfFixture/Ground.material.meta",
@@ -260,11 +260,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chalk.material",
-			"XXH64": "547086c70fb2e874",
+			"XXH64": "208f308ad15cabfb",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chalk.material.meta",
@@ -276,11 +276,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chrome.material",
-			"XXH64": "cdbd2180034eb116",
+			"XXH64": "098a02331ba8c39f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Chrome.material.meta",
@@ -292,11 +292,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Gold.material",
-			"XXH64": "9b443fb857070352",
+			"XXH64": "41bc585f05951941",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Gold.material.meta",
@@ -308,11 +308,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Ground.material",
-			"XXH64": "9dad288f94de77fa",
+			"XXH64": "8f81fa324c1a4628",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Ground.material.meta",
@@ -324,11 +324,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Plastic.material",
-			"XXH64": "fa76f7f9af6a19de",
+			"XXH64": "bed61ca38b35c7ff",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/IblOnly/Plastic.material.meta",
@@ -340,11 +340,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness0.material",
-			"XXH64": "b1ec1ebad034fae5",
+			"XXH64": "cbe8cfde5a7ccd83",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness0.material.meta",
@@ -356,11 +356,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness100.material",
-			"XXH64": "4362500d23a9979e",
+			"XXH64": "5bc77808238c6203",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness100.material.meta",
@@ -372,11 +372,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness20.material",
-			"XXH64": "03e1b1f81fb9076b",
+			"XXH64": "78b41bb0f9102fc1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness20.material.meta",
@@ -388,11 +388,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness40.material",
-			"XXH64": "bda7e99895153e3f",
+			"XXH64": "a7f53767c4d8b4fb",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness40.material.meta",
@@ -404,11 +404,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness60.material",
-			"XXH64": "ad64b1366264a6bd",
+			"XXH64": "6f37b3461cd52726",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness60.material.meta",
@@ -420,11 +420,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness80.material",
-			"XXH64": "d30418cfbe658b53",
+			"XXH64": "5d8c3d862ab7b457",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness80.material.meta",
@@ -436,11 +436,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness0.material",
-			"XXH64": "f3ed35f94be2a03f",
+			"XXH64": "bd651db869b6fe8c",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness0.material.meta",
@@ -452,11 +452,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness100.material",
-			"XXH64": "808bcb069ef0a86b",
+			"XXH64": "a4439fbf4d27c4c7",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness100.material.meta",
@@ -468,11 +468,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness20.material",
-			"XXH64": "c1957f6fff96c6a5",
+			"XXH64": "b34a025b20a148cc",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness20.material.meta",
@@ -484,11 +484,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness40.material",
-			"XXH64": "29c55277fc29ae60",
+			"XXH64": "cd4aa8e7dc2a7f5f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness40.material.meta",
@@ -500,11 +500,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness60.material",
-			"XXH64": "be2088aa54f333e9",
+			"XXH64": "ad00eccfca3fc72b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness60.material.meta",
@@ -516,11 +516,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness80.material",
-			"XXH64": "eae09ba0140fdcda",
+			"XXH64": "e66f07f35ddc0a6f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness80.material.meta",
@@ -532,11 +532,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness0.material",
-			"XXH64": "d749e45bd82f03f7",
+			"XXH64": "2c6c06f9ed1f3eaa",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness0.material.meta",
@@ -548,11 +548,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness100.material",
-			"XXH64": "2c92588645cab66a",
+			"XXH64": "fa6298d43730a4af",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness100.material.meta",
@@ -564,11 +564,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness20.material",
-			"XXH64": "46ef857aa0922b0f",
+			"XXH64": "101925dee750af66",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness20.material.meta",
@@ -580,11 +580,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness40.material",
-			"XXH64": "146f5ee74e51eb46",
+			"XXH64": "8783ac2ac9987262",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness40.material.meta",
@@ -596,11 +596,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness60.material",
-			"XXH64": "939f975063d54657",
+			"XXH64": "f7e85111cebd789f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness60.material.meta",
@@ -612,11 +612,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness80.material",
-			"XXH64": "73145438c8cd9503",
+			"XXH64": "97e3cb9a5ff022f3",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness80.material.meta",
@@ -628,11 +628,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Ground.material",
-			"XXH64": "9dad288f94de77fa",
+			"XXH64": "8f81fa324c1a4628",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Ground.material.meta",
@@ -644,11 +644,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Occluder.material",
-			"XXH64": "cfae76cd99bf70a3",
+			"XXH64": "efc792d4bfcf749b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Text/Occluder.material.meta",
@@ -660,11 +660,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Blue.material",
-			"XXH64": "66a56f20fac8a34e",
+			"XXH64": "80a1a7a7ae6bbbed",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Blue.material.meta",
@@ -676,11 +676,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive0_5.material",
-			"XXH64": "00bf1682deb50da6",
+			"XXH64": "3f1f26205018c318",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive0_5.material.meta",
@@ -692,11 +692,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive128.material",
-			"XXH64": "3687ce948bc01777",
+			"XXH64": "6a9c2fe1018ccdf1",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive128.material.meta",
@@ -708,11 +708,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive2.material",
-			"XXH64": "a2ad75c70eddd91d",
+			"XXH64": "580b2a5b07f75a81",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive2.material.meta",
@@ -724,11 +724,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive32.material",
-			"XXH64": "911d2c2a39886775",
+			"XXH64": "4320f005ce4d54e2",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive32.material.meta",
@@ -740,11 +740,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive8.material",
-			"XXH64": "52caedc151aecba3",
+			"XXH64": "6b03c4599175c1f3",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Emissive8.material.meta",
@@ -756,11 +756,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Green.material",
-			"XXH64": "50222bc7a1aff7fa",
+			"XXH64": "75448e72214c62fd",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Green.material.meta",
@@ -772,11 +772,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Ground.material",
-			"XXH64": "2bd4edc9e58b6aa3",
+			"XXH64": "3ed82f8b33a24f8b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Ground.material.meta",
@@ -788,11 +788,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Orange.material",
-			"XXH64": "a0e2828c3ee21585",
+			"XXH64": "4899c8b0b33379a4",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Orange.material.meta",
@@ -804,11 +804,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Red.material",
-			"XXH64": "abb9e7e64e25db22",
+			"XXH64": "552cf494358f1e3c",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/Red.material.meta",
@@ -820,11 +820,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/White.material",
-			"XXH64": "f94d6fa4092630f3",
+			"XXH64": "2d91f059800b1455",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 11
 		},
 		{
 			"Path": "Assets/Materials/Golden/Tonemappers/White.material.meta",

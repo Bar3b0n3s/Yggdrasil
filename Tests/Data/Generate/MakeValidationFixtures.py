@@ -33,6 +33,10 @@ Special cases (also in Tests/Data/Validation/README.md, which this generator wri
 - ANIMATION_NO_ANIMATOR, ANIMATION_SKELETON_MISMATCH and ANIMATION_ATTACHMENT_INVALID reference the meshes and
   skeletons of generated skinned glTF files (GltfImporter version 3) by their sub-asset handles, Hash64(the .meta's
   handle, the sub-asset key), so their .meta files fix the handles.
+- ASSET_LOD_INVALID imports Tests/Data/Assets/Gltf/LodMismatch.gltf (MakeGltfFixtures.py) with its .meta's Lods
+  FromGltf: of its Crate_LOD<n> levels, Crate_LOD2's submeshes differ from level 0's, Crate_LOD3's material differs and
+  Crate_LOD5 leaves a gap, so those three are dropped (M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md
+  decision 3I).
 - GRAPH_INVALID and GRAPH_UNREACHABLE_NODE hold a .graph source (a Script asset whose importer is Graph,
   Docs/Decisions/0035-m24-contract.md decision 5), which the validator reads itself; a graph reported GRAPH_INVALID is
   never also ASSET_IMPORT_FAILED for the same cause.
@@ -81,7 +85,8 @@ COMPONENT_ORDER = [
     "Animator", "SkinnedMesh", "BoneAttachment", "ParticleEmitter", "ParticleLook", "IrradianceVolume",
     "ReflectionProbe", "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation",
     "NavModifier",
-    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
+    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "RenderDistance", "Wind", "ValidatorTarget",
+    "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -636,6 +641,13 @@ def validation_fixtures() -> list[Fixture]:
         item = fixture(code)
         item.copy_asset(f"Gltf/{source}", f"Project/Assets/Models/{source}")
 
+    # M46: a glTF whose authored levels FromGltf drops (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md
+    # decision 3I); the .meta sets Lods, which a .meta without it reads as None.
+    item = fixture("ASSET_LOD_INVALID")
+    item.copy_asset("Gltf/LodMismatch.gltf", "Project/Assets/Models/LodMismatch.gltf")
+    item.add_json("Project/Assets/Models/LodMismatch.gltf.meta",
+                  meta("3a7e000000000016", "Prefab", "Gltf", {**GLTF_SETTINGS, "Lods": "FromGltf"}))
+
     item = fixture("PATH_CASE_MISMATCH")
     item.copy_asset("Textures/Grey.png", "Project/Assets/Textures/Grey.png")
     item.add_json("Project/Assets/Textures/grey.png.meta",
@@ -1089,6 +1101,9 @@ reports: `ASSET_VERTEX_COLORS_IGNORED` since GltfImporter version 2 imports `COL
   placeholder, so the asset manager logs nothing for them and only the validator reports them.
 - `ANIMATION_NO_ANIMATOR`, `ANIMATION_SKELETON_MISMATCH` and `ANIMATION_ATTACHMENT_INVALID` reference the meshes and
   skeletons of generated skinned glTF files by their sub-asset handles, so their `.meta` files fix the source handles.
+- `ASSET_LOD_INVALID` imports the generated `LodMismatch.gltf` with `Lods` `FromGltf` in its `.meta`: one level has
+  other submeshes than level 0, one draws another material and one leaves a gap in the `_LOD<n>` names, so those three
+  are dropped.
 - `GRAPH_INVALID` and `GRAPH_UNREACHABLE_NODE` hold a `.graph` source (a Script asset whose importer is Graph),
   which the validator reads itself; a graph reported `GRAPH_INVALID` is never also `ASSET_IMPORT_FAILED` for the same
   cause.

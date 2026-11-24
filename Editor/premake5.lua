@@ -51,6 +51,7 @@ project "EditorCore"
 	UseTinyExr()
 	UseRecast()
 	UseDetour()
+	UseMeshOptimizer()
 
 project "Editor"
 	kind "ConsoleApp"
@@ -105,3 +106,4 @@ project "Editor"
 	UseTinyExr()
 	UseRecast()
 	UseDetour()
+	UseMeshOptimizer()

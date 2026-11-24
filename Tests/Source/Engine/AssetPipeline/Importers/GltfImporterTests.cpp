@@ -48,8 +48,9 @@
 // TexCoord1Occlusion.gltf, TexCoord2Occlusion.gltf, VertexColors.gltf, Attributes.gltf (M23: TEXCOORD_1 and COLOR_0 in
 // their normalized forms), DracoRequired.gltf (extensionsRequired KHR_draco_mesh_compression),
 // StandaloneTexture.gltf with Textures/Shared.png, Hierarchy.gltf, PrimitiveModes.gltf, SkippedContent.gltf,
-// Materials.gltf, NoNormalsNoUvs.gltf, and (M23, GltfImporter version 3) Skinned.gltf, SkinnedRigs.gltf and
-// SharedSkins.gltf (the generator's docstring describes each).
+// Materials.gltf, NoNormalsNoUvs.gltf, (M23, GltfImporter version 3) Skinned.gltf, SkinnedRigs.gltf and
+// SharedSkins.gltf, and (M46, version 4) LodTree.gltf, LodRock.gltf, LodSphere.gltf and LodMismatch.gltf (the generator's
+// docstring describes each).
 
 static_assert(std::endian::native == std::endian::little, "the hand-built glTF buffers below are little-endian");
 
@@ -58,10 +59,11 @@ namespace Engine {
 	namespace {
 
 		// Every fixture that imports.
-		constexpr std::array<std::string_view, 21> ImportableFixtures = { "Box.gltf", "Box.glb", "Textured.gltf", "NormalMapped.gltf",
+		constexpr std::array<std::string_view, 25> ImportableFixtures = { "Box.gltf", "Box.glb", "Textured.gltf", "NormalMapped.gltf",
 			"NormalMappedNoTangents.gltf", "AlphaModes.gltf", "DataUri.gltf", "TexCoord1Occlusion.gltf", "TexCoord2Occlusion.gltf", "VertexColors.gltf",
 			"Attributes.gltf", "LateAttributes.gltf", "StandaloneTexture.gltf", "Hierarchy.gltf", "PrimitiveModes.gltf", "SkippedContent.gltf",
-			"Materials.gltf", "NoNormalsNoUvs.gltf", "Skinned.gltf", "SkinnedRigs.gltf", "SharedSkins.gltf" };
+			"Materials.gltf", "NoNormalsNoUvs.gltf", "Skinned.gltf", "SkinnedRigs.gltf", "SharedSkins.gltf", "LodTree.gltf", "LodRock.gltf",
+			"LodSphere.gltf", "LodMismatch.gltf" };
 
 		// Copies Tests/Data/Assets/Gltf into project://Assets/Models.
 		void CopyGltfFixtures(Test::AssetTestFixture& fixture)
@@ -107,6 +109,45 @@ namespace Engine {
 			settings[std::string(setting)] = value;
 			metadata.Settings = VariantValue(std::move(settings));
 			return metadata;
+		}
+
+		// M46: the fixtures that version 3 imported, each mesh sub-asset's payload checksum (XXH64 of SerializeMeshPayload)
+		// as version 3 cooked it at the base (main f244e1e7): an import without levels and _WIND gives level 0 byte for byte.
+		struct BaseMeshChecksum
+		{
+			std::string_view Fixture;
+			std::string_view Key;
+			uint64_t Checksum = 0;
+		};
+
+		// M46: an import of `relative` with the level settings `lods` (and every other setting at MakeDefaultSettings').
+		AssetMetadata MakeLodMetadata(AssetHandle handle, std::string_view lods, std::initializer_list<std::pair<std::string_view, Json>> more = {})
+		{
+			AssetMetadata metadata = MakeGltfMetadata(handle);
+			Json settings = MakeDefaultSettings();
+			settings["Lods"] = std::string(lods);
+			for (const auto& [name, value] : more)
+				settings[std::string(name)] = value;
+			metadata.Settings = VariantValue(std::move(settings));
+			return metadata;
+		}
+
+		// M46: the names of a prefab document's entities, in document order.
+		std::vector<std::string> GetEntityNames(const Json& document)
+		{
+			std::vector<std::string> names;
+			for (const Json& entity : document["Entities"])
+				names.push_back(JsonReader(entity["Name"]).ReadString().value_or(std::string()));
+			return names;
+		}
+
+		// M46: the switch sizes of a mesh's further levels.
+		std::vector<float> GetScreenSizes(const MeshData& mesh)
+		{
+			std::vector<float> sizes;
+			for (const MeshLod& lod : mesh.Lods)
+				sizes.push_back(lod.ScreenSize);
+			return sizes;
 		}
 
 		// One import with what its context recorded.
@@ -473,6 +514,10 @@ namespace Engine {
 				settings["GenerateMissingTangents"] = random.NextBool();
 				settings["ImportMaterials"] = random.NextBool();
 				settings["MergeMeshes"] = random.NextBool();
+				// M46 (version 4): every level source, so the mutated MSFT_lod, _LOD<n>, _WIND and simplified meshes are read
+				// (the seeds include the LodTree, LodRock, LodSphere and LodMismatch fixtures).
+				constexpr std::array<std::string_view, 3> LodSources = { "None", "FromGltf", "Generate" };
+				settings["Lods"] = std::string(LodSources[static_cast<size_t>(random.RangeInt(0, 2))]);
 				AssetMetadata metadata = MakeGltfMetadata(AssetHandle(0x617f000000000001ull));
 				metadata.Settings = VariantValue(settings);
 				ImportContext context({
@@ -1468,7 +1513,7 @@ namespace Engine {
 		{
 			const GltfImporter importer;
 			CHECK(importer.GetId() == "Gltf");
-			CHECK(importer.GetVersion() == 3);
+			CHECK(importer.GetVersion() == 4);
 			CHECK(importer.GetMainType() == AssetType::Prefab);
 			CHECK(importer.GetSettingsTypeName() == "GltfImportSettings");
 			CHECK_FALSE(importer.RequiresMainThread());
@@ -1476,13 +1521,19 @@ namespace Engine {
 			CHECK(std::vector<std::string_view>(extensions.begin(), extensions.end()) == std::vector<std::string_view>{ ".gltf", ".glb" });
 
 			TypeRegistry registry;
+			// M46: the Wind setting is a MaterialWind (Material version 3), which RegisterTypes registers when the material types
+			// have not.
 			GltfImporter::RegisterTypes(registry);
 			registry.Freeze();
+			CHECK(registry.FindStruct("MaterialWind") != nullptr);
 			const StructInfo* settings = registry.FindStruct("GltfImportSettings");
 			REQUIRE(settings != nullptr);
 			// The documented defaults, every field in declaration order (§6.4).
 			const Json defaults = settings->MakeDefaultJson();
-			CHECK(defaults.dump() == R"({"Scale":1.0,"GenerateMissingTangents":true,"ImportMaterials":true,"MergeMeshes":false,"AnimationEvents":[]})");
+			CHECK(defaults.dump() == R"({"Scale":1.0,"GenerateMissingTangents":true,"ImportMaterials":true,"MergeMeshes":false,"AnimationEvents":[],)"
+									 R"("Lods":"None","LodScreenSizes":[0.5,0.25,0.125,0.0625],"LodTriangleRatios":[0.5,0.25,0.125,0.0625],)"
+									 R"("LodMaxError":0.05000000074505806,"Wind":{"Enabled":false,"Bend":0.10000000149011612,"Branch":0.10000000149011612,)"
+									 R"("Flutter":0.019999999552965164,"Stiffness":0.5}})");
 			// Scale must be positive.
 			for (const double scale : { 0.0, -1.0 })
 			{
@@ -1515,6 +1566,43 @@ namespace Engine {
 			CHECK(withEvents.AnimationEvents[0].Time == 0.25f);
 			events["AnimationEvents"][0]["Time"] = -1.0;
 			CHECK_FALSE(settings->FromJson(&withEvents, JsonReader(events), ReadContext{}).has_value());
+
+			// M46 (version 4): the level settings and Wind, after AnimationEvents; a version 3 settings object reads their
+			// defaults. Screen sizes must decrease within (0, 1], ratios lie in (0, 1), and each list holds at most four.
+			Json version3 = defaults;
+			for (const std::string_view key : { "Lods", "LodScreenSizes", "LodTriangleRatios", "LodMaxError", "Wind" })
+				version3.erase(std::string(key));
+			GltfImportSettings fromVersion3;
+			REQUIRE(settings->FromJson(&fromVersion3, JsonReader(version3), ReadContext{ .Schemas = nullptr, .Strict = true, .Diagnostics = nullptr }).has_value());
+			CHECK(fromVersion3.Lods == GltfLodSource::None);
+			CHECK(fromVersion3.LodScreenSizes == std::vector<float>{ 0.5f, 0.25f, 0.125f, 0.0625f });
+			CHECK(fromVersion3.Wind == MaterialWind());
+			const std::array<std::pair<std::string_view, Json>, 7> refused = { {
+				{ "LodScreenSizes", Json::array({ 0.5, 0.5 }) },
+				{ "LodScreenSizes", Json::array({ 1.5 }) },
+				{ "LodScreenSizes", Json::array({ 0.5, 0.25, 0.125, 0.0625, 0.03 }) },
+				{ "LodScreenSizes", Json::array({ 0.0 }) },
+				{ "LodTriangleRatios", Json::array({ 1.0 }) },
+				{ "LodTriangleRatios", Json::array({ 0.5, 0.4, 0.3, 0.2, 0.1 }) },
+				{ "LodMaxError", 2.0 },
+			} };
+			for (const auto& [key, setting] : refused)
+			{
+				CAPTURE(std::string(key));
+				CAPTURE(setting.dump());
+				Json bad = defaults;
+				bad[std::string(key)] = setting;
+				GltfImportSettings rejected;
+				CHECK_FALSE(settings->FromJson(&rejected, JsonReader(bad), ReadContext{}).has_value());
+			}
+			Json levels = defaults;
+			levels["Lods"] = "Generate";
+			levels["LodScreenSizes"] = Json::array({ 0.3 });
+			levels["LodTriangleRatios"] = Json::array({ 0.2, 0.1 });
+			GltfImportSettings generate;
+			REQUIRE(settings->FromJson(&generate, JsonReader(levels), ReadContext{}).has_value());
+			CHECK(generate.Lods == GltfLodSource::Generate);
+			CHECK(generate.LodTriangleRatios == std::vector<float>{ 0.2f, 0.1f });
 		}
 
 		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 25, stream A): version 3 imports the
@@ -1523,7 +1611,8 @@ namespace Engine {
 		// Skeleton, an AnimationClip and the mesh's skin and morph sections.
 		TEST_CASE("GltfImporter: skins, animations and morph targets import as a Skeleton, AnimationClips and the mesh's skin and morph sections")
 		{
-			CHECK(GltfImporter::Version == 3);
+			// Version 4 (M46) keeps version 3's skins, animations and morph targets.
+			CHECK(GltfImporter::Version == 4);
 			Test::AssetTestFixture fixture;
 			CopyGltfFixtures(fixture);
 			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/Skinned.gltf", MakeGltfMetadata(AssetHandle(0x5c1)));
@@ -2400,6 +2489,278 @@ namespace Engine {
 				events.push_back(event("Step"));
 				CheckImportFails(importEvents(events), ErrorCode::ImportFailed, { "AnimationEvents[4096]", "4096 events" });
 			}
+		}
+
+		// M46 (GltfImporter version 4; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3B): LodTree.gltf's
+		// "Tree" names its levels "TreeMid" and "TreeFar" by MSFT_lod, with MSFT_screencoverage [0.4, 0.15, 0.05].
+		TEST_CASE("GltfImporter: MSFT_lod nodes become their mesh's levels with their screen coverage")
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/LodTree.gltf", MakeLodMetadata(AssetHandle(0x10d0), "FromGltf"));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			CHECK(GetDiagnosticSubjects(*imported, AssetLodInvalidCode).empty());
+			// Every mesh imports under its own key; the tree's carries the levels, the screen coverage's first two values.
+			CHECK(GetKeys(*imported, AssetType::Mesh) == std::vector<std::string>{ "mesh:0:Tree", "mesh:1:TreeMid", "mesh:2:TreeFar" });
+			const AssetRef<MeshData> tree = LoadMesh(FindArtifact(*imported, "mesh:0:Tree"));
+			const AssetRef<MeshData> middle = LoadMesh(FindArtifact(*imported, "mesh:1:TreeMid"));
+			const AssetRef<MeshData> far = LoadMesh(FindArtifact(*imported, "mesh:2:TreeFar"));
+			REQUIRE(tree->Lods.size() == 2);
+			CHECK(GetScreenSizes(*tree) == std::vector<float>{ 0.4f, 0.15f });
+			CHECK(middle->Lods.empty());
+			// The authored levels' own vertices follow level 0's: the levels draw the level meshes' triangles, submesh by
+			// submesh (the trunk, then the crown), each in its level mesh's own space.
+			CHECK(tree->LodVertices.size() == middle->Vertices.size() + far->Vertices.size());
+			CHECK(tree->LodIndices.size() == middle->Indices.size() + far->Indices.size());
+			for (size_t submesh = 0; submesh < 2; ++submesh)
+			{
+				CAPTURE(submesh);
+				CHECK(tree->Lods[0].Submeshes[submesh].IndexCount == middle->Submeshes[submesh].IndexCount);
+				CHECK(tree->Lods[1].Submeshes[submesh].IndexCount == far->Submeshes[submesh].IndexCount);
+			}
+			const uint32_t base = static_cast<uint32_t>(tree->Vertices.size());
+			for (size_t index = 0; index < middle->Indices.size(); ++index)
+				CHECK(tree->LodIndices[index] == base + middle->Indices[index]);
+			CHECK(std::vector<MeshVertex>(tree->LodVertices.begin(), tree->LodVertices.begin() + static_cast<ptrdiff_t>(middle->Vertices.size()))
+				== middle->Vertices);
+			// The level nodes are never placed: the prefab holds the root and the tree.
+			CHECK(GetEntityNames(LoadPrefabDocument(*imported)) == std::vector<std::string>{ "LodTree", "Tree" });
+
+			// Without FromGltf the tree has no levels; an unusable MSFT_screencoverage falls back to LodScreenSizes.
+			Result<ImportResult> none = ImportGltf(fixture, "Assets/Models/LodTree.gltf", MakeGltfMetadata(AssetHandle(0x10d0)));
+			REQUIRE(none.has_value());
+			CHECK(LoadMesh(FindArtifact(*none, "mesh:0:Tree"))->Lods.empty());
+			Result<Json> parsed = JsonReader::Parse(AsStringView(fixture.ReadProjectFile("Assets/Models/LodTree.gltf")));
+			REQUIRE(parsed.has_value());
+			Json document = std::move(*parsed);
+			document["nodes"][0]["extras"]["MSFT_screencoverage"] = Json::array({ 0.15, 0.4, 0.05 });
+			fixture.WriteProjectText("Assets/Models/Rising.gltf", document.dump());
+			Result<ImportResult> rising = ImportGltf(fixture, "Assets/Models/Rising.gltf", MakeLodMetadata(AssetHandle(0x10d1), "FromGltf"));
+			REQUIRE(rising.has_value());
+			CHECK(GetScreenSizes(*LoadMesh(FindArtifact(*rising, "mesh:0:Tree"))) == std::vector<float>{ 0.5f, 0.25f });
+			CHECK(GetDiagnosticSubjects(*rising, AssetLodInvalidCode) == std::vector<std::string>{ "nodes[0].extras.MSFT_screencoverage" });
+		}
+
+		// M46: LodRock.gltf's sibling nodes Rock_LOD0 to Rock_LOD2 (spheres of 128, 32 and 8 triangles).
+		TEST_CASE("GltfImporter: sibling nodes named _LOD<n> become one mesh's levels")
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/LodRock.gltf", MakeLodMetadata(AssetHandle(0x10d2), "FromGltf"));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			CHECK(GetDiagnosticSubjects(*imported, AssetLodInvalidCode).empty());
+			const AssetRef<MeshData> rock = LoadMesh(FindArtifact(*imported, "mesh:0:Rock0"));
+			CHECK(rock->Indices.size() == 128 * 3);
+			REQUIRE(rock->Lods.size() == 2);
+			// LodScreenSizes' first two switch sizes; level 1 and 2 hold the coarser spheres' triangles.
+			CHECK(GetScreenSizes(*rock) == std::vector<float>{ 0.5f, 0.25f });
+			CHECK(rock->Lods[0].Submeshes[0].IndexCount == 32 * 3);
+			CHECK(rock->Lods[1].Submeshes[0].IndexCount == 8 * 3);
+			// The _LOD0 node is placed as "Rock"; its levels' nodes are not.
+			const Json document = LoadPrefabDocument(*imported);
+			CHECK(GetEntityNames(document) == std::vector<std::string>{ "LodRock", "Rock" });
+			CHECK(FindEntity(document, "Rock")["Components"]["MeshRenderer"]["Mesh"] == Json(FindArtifact(*imported, "mesh:0:Rock0")->Handle.ToString()));
+
+			// LodBias' sibling: Lods None keeps the three nodes as entities of their own names and the meshes without levels.
+			Result<ImportResult> none = ImportGltf(fixture, "Assets/Models/LodRock.gltf", MakeGltfMetadata(AssetHandle(0x10d2)));
+			REQUIRE(none.has_value());
+			CHECK(GetEntityNames(LoadPrefabDocument(*none)) == std::vector<std::string>{ "LodRock", "Rock_LOD0", "Rock_LOD1", "Rock_LOD2" });
+			CHECK(LoadMesh(FindArtifact(*none, "mesh:0:Rock0"))->Lods.empty());
+		}
+
+		// M46: LodMismatch.gltf's Crate_LOD1 keeps level 0's layout; Crate_LOD2 has two submeshes, Crate_LOD3 draws another
+		// material and Crate_LOD5 leaves a gap after Crate_LOD3.
+		TEST_CASE("GltfImporter: a level whose submeshes differ from level 0 is dropped with ASSET_LOD_INVALID")
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/LodMismatch.gltf", MakeLodMetadata(AssetHandle(0x10d3), "FromGltf"));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			std::vector<std::string> dropped = GetDiagnosticSubjects(*imported, AssetLodInvalidCode);
+			std::ranges::sort(dropped);
+			CHECK(dropped == std::vector<std::string>{ "nodes[2]", "nodes[3]", "nodes[4]" });
+			for (const AssetDiagnostic& diagnostic : imported->Diagnostics)
+			{
+				if (diagnostic.Code == AssetLodInvalidCode)
+					CHECK(diagnostic.Severity == DiagnosticSeverity::Warning);
+			}
+			const AssetRef<MeshData> crate = LoadMesh(FindArtifact(*imported, "mesh:0:Crate_LOD0"));
+			REQUIRE(crate->Lods.size() == 1);
+			CHECK(crate->Lods[0].Submeshes[0].IndexCount == 36);
+			// No level node is placed, dropped ones included.
+			CHECK(GetEntityNames(LoadPrefabDocument(*imported)) == std::vector<std::string>{ "LodMismatch", "Crate" });
+
+			// MergeMeshes keeps no authored level: every level is reported, and the merged mesh is the base crate alone.
+			Result<ImportResult> merged = ImportGltf(fixture, "Assets/Models/LodMismatch.gltf",
+				MakeLodMetadata(AssetHandle(0x10d4), "FromGltf", { { "MergeMeshes", true } }));
+			REQUIRE_MESSAGE(merged.has_value(), merged.error().ToString());
+			CHECK(GetDiagnosticSubjects(*merged, AssetLodInvalidCode).size() == 4);
+			const AssetRef<MeshData> one = LoadMesh(FindArtifact(*merged, "mesh:merged"));
+			CHECK(one->Lods.empty());
+			CHECK(one->Indices.size() == 36);
+		}
+
+		// M46: LodSphere.gltf's sphere of 512 triangles, simplified at the default LodTriangleRatios within LodMaxError 0.2.
+		// The checksum is committed and checked in the Debug and the Release unit runs (meshoptimizer's precise floating
+		// point, Vendor/meshoptimizer/VENDOR.md).
+		TEST_CASE("GltfImporter: generated levels share level 0's vertices and match their committed checksum")
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			const AssetMetadata metadata = MakeLodMetadata(AssetHandle(0x10d5), "Generate", { { "LodMaxError", 0.2 } });
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/LodSphere.gltf", metadata);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const AssetRef<MeshData> sphere = LoadMesh(FindArtifact(*imported, "mesh:0:Sphere"));
+			CHECK(sphere->Indices.size() == 512 * 3);
+			REQUIRE_FALSE(sphere->Lods.empty());
+			// Index-only: no vertex of their own, every index one of level 0's.
+			CHECK(sphere->LodVertices.empty());
+			CHECK(std::ranges::all_of(sphere->LodIndices, [&sphere](uint32_t index)
+			{
+				return index < sphere->Vertices.size();
+			}));
+			// Each kept level has at most 90 % of the triangles of the level before it.
+			size_t previous = sphere->Indices.size();
+			for (const MeshLod& lod : sphere->Lods)
+			{
+				CHECK(lod.Submeshes[0].IndexCount * 10 <= previous * 9);
+				previous = lod.Submeshes[0].IndexCount;
+			}
+			const uint64_t checksum = XXH64(SerializeMeshPayload(*sphere));
+			CAPTURE(std::format("{:#018x}", checksum));
+			CHECK(checksum == 0xd9b7ba2902b0d787ull);
+			// A second import gives the same bytes; Lods None gives level 0 alone.
+			Result<ImportResult> again = ImportGltf(fixture, "Assets/Models/LodSphere.gltf", metadata);
+			REQUIRE(again.has_value());
+			CHECK(FindArtifact(*again, "mesh:0:Sphere")->Cooked == FindArtifact(*imported, "mesh:0:Sphere")->Cooked);
+			Result<ImportResult> none = ImportGltf(fixture, "Assets/Models/LodSphere.gltf", MakeGltfMetadata(AssetHandle(0x10d5)));
+			REQUIRE(none.has_value());
+			const AssetRef<MeshData> plain = LoadMesh(FindArtifact(*none, "mesh:0:Sphere"));
+			CHECK(plain->Lods.empty());
+			CHECK(plain->Vertices == sphere->Vertices);
+			CHECK(plain->Indices == sphere->Indices);
+
+			// A level that cannot be simplified below 90 % of the one before it is dropped (LodMaxError 0 moves no vertex).
+			Result<ImportResult> stuck = ImportGltf(fixture, "Assets/Models/LodSphere.gltf", MakeLodMetadata(AssetHandle(0x10d5), "Generate", { { "LodMaxError", 0.0 } }));
+			REQUIRE(stuck.has_value());
+			CHECK(LoadMesh(FindArtifact(*stuck, "mesh:0:Sphere"))->Lods.empty());
+			CHECK(GetDiagnosticSubjects(*stuck, AssetLodInvalidCode).size() == 4);
+		}
+
+		// M46: version 4's level 0 of every fixture version 3 imported, without levels and _WIND, is version 3's mesh byte for
+		// byte: the payload layout is unchanged for a mesh without the wind stream and levels (MeshData.h), and the
+		// checksums below are version 3's, computed at the base.
+		TEST_CASE("GltfImporter: an import without levels gives each fixture's mesh as version 3 did")
+		{
+			static constexpr std::array<BaseMeshChecksum, 24> BaseChecksums = { {
+				{ "Box.gltf", "mesh:0:Box", 0x7042d394e30b5656ull },
+				{ "Box.glb", "mesh:0:Box", 0xe0d3033a9d661faeull },
+				{ "Textured.gltf", "mesh:0:TexturedCube", 0x446fbd94e43264e3ull },
+				{ "NormalMapped.gltf", "mesh:0:Panel", 0x49ab0dcee8a65f36ull },
+				{ "NormalMappedNoTangents.gltf", "mesh:0:Panel", 0x1df0543097bb9ddeull },
+				{ "AlphaModes.gltf", "mesh:0:Panels", 0x08d7591a92fcfc1full },
+				{ "DataUri.gltf", "mesh:0:Quad", 0x62be9eb49ed36e3full },
+				{ "TexCoord1Occlusion.gltf", "mesh:0:Occluded", 0x067c2bbdf5eeab4bull },
+				{ "TexCoord2Occlusion.gltf", "mesh:0:Occluded", 0x067c2bbdf5eeab4bull },
+				{ "VertexColors.gltf", "mesh:0:Painted", 0x5e6525ea71f49bdbull },
+				{ "Attributes.gltf", "mesh:0:Painted", 0x26c6a650eafdd9d9ull },
+				{ "LateAttributes.gltf", "mesh:0:Late", 0x6830c366f64fe1bcull },
+				{ "StandaloneTexture.gltf", "mesh:0:Box", 0xc28ebeeb5775e83cull },
+				{ "Hierarchy.gltf", "mesh:0:Cube", 0x4d0da167b02cdbc7ull },
+				{ "PrimitiveModes.gltf", "mesh:0:Modes", 0xa19346afcb6e2146ull },
+				{ "SkippedContent.gltf", "mesh:0:Box", 0x1eab1254feaf3133ull },
+				{ "Materials.gltf", "mesh:0:Quad", 0xcfcf61d1f4543dd0ull },
+				{ "NoNormalsNoUvs.gltf", "mesh:0:Bare", 0x2fa4b05aa255f69dull },
+				{ "Skinned.gltf", "mesh:0:Strip", 0x36ddeb56b7e634e7ull },
+				{ "SkinnedRigs.gltf", "mesh:0:BodyMesh", 0x437cce7033ac5407ull },
+				{ "SkinnedRigs.gltf", "mesh:1:TailMesh", 0xd1815edc881e5f34ull },
+				{ "SharedSkins.gltf", "mesh:0:LowerMesh", 0xac06f0c9e3182187ull },
+				{ "SharedSkins.gltf", "mesh:0:LowerMesh:skin:0", 0x4d06a2adcb6386ccull },
+				{ "SharedSkins.gltf", "mesh:1:TopMesh", 0x0df5e8849d7c6094ull },
+			} };
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			std::vector<std::string> computed;
+			for (const std::string_view name : std::span(ImportableFixtures).first(21))
+			{
+				CAPTURE(std::string(name));
+				Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/" + std::string(name), MakeGltfMetadata(AssetHandle(0x9000 + name.size())));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				for (const ImportedArtifact& artifact : imported->Artifacts)
+				{
+					if (artifact.Type != AssetType::Mesh)
+						continue;
+					const AssetRef<MeshData> mesh = LoadMesh(&artifact);
+					CHECK(mesh->Lods.empty());
+					CHECK(mesh->Wind.empty());
+					computed.push_back(std::format("{}|{}|{:#018x}", name, artifact.SubAssetKey, XXH64(SerializeMeshPayload(*mesh))));
+				}
+			}
+			std::vector<std::string> expected;
+			for (const BaseMeshChecksum& base : BaseChecksums)
+				expected.push_back(std::format("{}|{}|{:#018x}", base.Fixture, base.Key, base.Checksum));
+			CHECK(computed == expected);
+		}
+
+		// M46: LodTree.gltf's crowns carry _WIND (normalized unsigned bytes on level 0, floats on the levels), the trunks none.
+		TEST_CASE("GltfImporter: a _WIND attribute becomes the mesh's wind stream, and the Wind setting reaches every material")
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			const Json wind = { { "Enabled", true }, { "Bend", 0.3 }, { "Branch", 0.25 }, { "Flutter", 0.05 }, { "Stiffness", 0.75 } };
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/LodTree.gltf", MakeLodMetadata(AssetHandle(0x10d6), "FromGltf", { { "Wind", wind } }));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const AssetRef<MeshData> tree = LoadMesh(FindArtifact(*imported, "mesh:0:Tree"));
+			REQUIRE(tree->Wind.size() == tree->Vertices.size());
+			// The trunk (submesh 0) has no _WIND: its vertices take (0, 0, 0, 0). The crown's weights rise with height: its top
+			// vertex (the highest) sways and flutters fully, its bottom one not at all, and none is held still.
+			const MeshSubmesh& trunk = tree->Submeshes[0];
+			const MeshSubmesh& crown = tree->Submeshes[1];
+			for (uint32_t position = trunk.IndexOffset; position < trunk.IndexOffset + trunk.IndexCount; ++position)
+				CHECK(tree->Wind[tree->Indices[position]] == MeshVertexWind());
+			uint32_t top = tree->Indices[crown.IndexOffset];
+			uint32_t bottom = top;
+			for (uint32_t position = crown.IndexOffset; position < crown.IndexOffset + crown.IndexCount; ++position)
+			{
+				const uint32_t vertex = tree->Indices[position];
+				if (tree->Vertices[vertex].Position.y > tree->Vertices[top].Position.y)
+					top = vertex;
+				if (tree->Vertices[vertex].Position.y < tree->Vertices[bottom].Position.y)
+					bottom = vertex;
+				CHECK(tree->Wind[vertex].BendMask == 0);
+			}
+			CHECK(tree->Wind[top] == MeshVertexWind{ .Branch = 255, .Phase = 128, .Flutter = 255, .BendMask = 0 });
+			CHECK(tree->Wind[bottom].Branch == 0);
+			CHECK(tree->Wind[bottom].Flutter == 0);
+			// The levels carry their own crowns' weights (floats in the file), one per level vertex.
+			CHECK(tree->LodWind.size() == tree->LodVertices.size());
+			CHECK(std::ranges::any_of(tree->LodWind, [](const MeshVertexWind& weights)
+			{
+				return weights.Branch == 255;
+			}));
+
+			// Every material takes the Wind setting.
+			const std::vector<std::string> materials = GetKeys(*imported, AssetType::Material);
+			CHECK(materials == std::vector<std::string>{ "material:0:Bark", "material:1:Leaves" });
+			const MaterialWind expected{ .Enabled = true, .Bend = 0.3f, .Branch = 0.25f, .Flutter = 0.05f, .Stiffness = 0.75f };
+			for (const std::string& key : materials)
+			{
+				CAPTURE(key);
+				CHECK(LoadMaterial(fixture, FindArtifact(*imported, key))->Wind == expected);
+			}
+
+			// A _WIND accessor of another type fails the import naming it.
+			Result<Json> parsed = JsonReader::Parse(AsStringView(fixture.ReadProjectFile("Assets/Models/LodTree.gltf")));
+			REQUIRE(parsed.has_value());
+			Json document = std::move(*parsed);
+			const Result<uint32_t> accessor = JsonReader(document["meshes"][0]["primitives"][1]["attributes"]["_WIND"]).ReadUInt32();
+			REQUIRE(accessor.has_value());
+			document["accessors"][*accessor]["type"] = "VEC3";
+			fixture.WriteProjectText("Assets/Models/BadWind.gltf", document.dump());
+			Result<ImportResult> bad = ImportGltf(fixture, "Assets/Models/BadWind.gltf", MakeGltfMetadata(AssetHandle(0x10d7)));
+			REQUIRE_FALSE(bad.has_value());
+			CHECK(bad.error().GetCode() == ErrorCode::ImportFailed);
+			CHECK(bad.error().GetMessageText().find("_WIND") != std::string::npos);
 		}
 	}
 

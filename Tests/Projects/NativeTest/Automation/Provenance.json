@@ -12,11 +12,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Bumper.material",
-			"XXH64": "e9b1a19236a03949",
+			"XXH64": "06c50d8e01395e2b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 179
+			"TranscriptLine": 199
 		},
 		{
 			"Path": "Assets/Materials/Bumper.material.meta",
@@ -28,11 +28,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Ground.material",
-			"XXH64": "a2212177aa6f4bc2",
+			"XXH64": "788ceeb87940849a",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 179
+			"TranscriptLine": 199
 		},
 		{
 			"Path": "Assets/Materials/Ground.material.meta",
@@ -44,11 +44,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Spinner.material",
-			"XXH64": "f7a9930c8253eced",
+			"XXH64": "54b1d3d6e964b1ef",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 179
+			"TranscriptLine": 199
 		},
 		{
 			"Path": "Assets/Materials/Spinner.material.meta",

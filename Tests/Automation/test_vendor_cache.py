@@ -1012,7 +1012,8 @@ class CheckBuildConfigWiringTests(unittest.TestCase):
         linked = {entry.project: entry.entry for entry in use.plan.linked}
         self.assertEqual(set(linked), {"CMP_Core", "Detour", "GLFW", "HarfBuzz", "ImGui", "ImGuizmo", "JoltPhysics",
                                        "Luau", "LuauAnalysis", "MikkTSpace", "NVRHI", "Recast", "SheenBidi",
-                                       "miniaudio", "nfd", "ogg", "opus", "opusfile", "spdlog", "tinyexr"})
+                                       "meshoptimizer", "miniaudio", "nfd", "ogg", "opus", "opusfile", "spdlog",
+                                       "tinyexr"})
 
         code, report = self.check()
         self.assertEqual(code, 0, report["findings"])
@@ -1069,8 +1070,8 @@ class VendorCacheWorkspaceTests(unittest.TestCase):
         outside = self.generate(self.temporary_directory())
         self.assertEqual({name for name, _ in inside},
                          {"CMP_Core", "Detour", "GLFW", "HarfBuzz", "ImGui", "ImGuizmo", "JoltPhysics", "Luau",
-                          "LuauAnalysis", "MikkTSpace", "NVRHI", "Recast", "SheenBidi", "miniaudio", "nfd", "ogg",
-                          "opus", "opusfile", "spdlog", "tinyexr"})
+                          "LuauAnalysis", "MikkTSpace", "NVRHI", "Recast", "SheenBidi", "meshoptimizer", "miniaudio",
+                          "nfd", "ogg", "opus", "opusfile", "spdlog", "tinyexr"})
         self.assertEqual(inside, outside)
         self.assertEqual(len(set(inside.values())), len(inside))
 

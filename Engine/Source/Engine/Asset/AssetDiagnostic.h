@@ -71,6 +71,13 @@ namespace Engine {
 	// nothing anyway), and the hint says to start the editor with a GPU once. A source that cannot be read or decoded is
 	// ASSET_IMPORT_FAILED instead.
 	inline constexpr std::string_view AssetBakeDeferredCode = "ASSET_BAKE_DEFERRED";
+	// Warning, an import diagnostic (M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I): a level of
+	// detail the glTF importer dropped, the import still succeeding (GltfImporter.h's version 4 paragraph): an authored
+	// level whose submeshes or materials differ from level 0's, a fifth level or later, a gap in the _LOD<n> names, an
+	// authored level of a skinned or morphed mesh, a generated level that keeps more than 90 % of the triangles before it,
+	// or FromGltf under MergeMeshes. Subject names the level ("nodes[4]", "meshes[2].lods[1]"). Recorded in
+	// ImportResult::Diagnostics, so a reimport replaces it.
+	inline constexpr std::string_view AssetLodInvalidCode = "ASSET_LOD_INVALID";
 
 	// One asset diagnostic. Plain value; thread-compatible.
 	struct AssetDiagnostic
@@ -90,7 +97,8 @@ namespace Engine {
 	};
 
 	// The asset codes, in §13.7 order (AssetContentSkippedCode after AssetVertexColorsIgnoredCode, ADR 0010 decision 5)
-	// followed by the two that describe this process, AssetUploadFailedCode and AssetBakeDeferredCode.
+	// followed by the two that describe this process, AssetUploadFailedCode and AssetBakeDeferredCode, then M46's
+	// AssetLodInvalidCode, appended.
 	[[nodiscard]] std::span<const std::string_view> GetAssetDiagnosticCodes();
 
 	// One line for logs and the console: "<Code> <Path>: <Message>[ (hint: <Hint>)]".

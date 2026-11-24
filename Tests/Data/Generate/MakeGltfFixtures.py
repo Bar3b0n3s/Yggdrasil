@@ -73,6 +73,20 @@ no TANGENT (the importer generates tangents with MikkTSpace), texture coordinate
   Replace/V2/Textures/Cap.png
   Replace/Broken/Kit.gltf      a third version that parses but does not import (its POSITION accessor claims more
                                elements than its buffer view holds), which a replace refuses before writing anything
+  LodTree.gltf                 M46 (GltfImporter version 4, levels of detail and _WIND): a tree "Tree" (a box trunk,
+                               material "Bark", and a sphere crown, material "Leaves") whose MSFT_lod extension names
+                               two level nodes outside the scene, "TreeMid" and "TreeFar" (coarser crowns, the same
+                               two materials), with MSFT_screencoverage [0.4, 0.15, 0.05] in its extras; the crowns
+                               carry _WIND (normalized unsigned bytes on level 0, floats on the levels: x and z rising
+                               with height, y a phase from the vertex's x, w 0), the trunks none
+  LodRock.gltf                 M46: sibling nodes "Rock_LOD0", "Rock_LOD1" and "Rock_LOD2", spheres of 128, 32 and 8
+                               triangles (material "Stone"), which FromGltf groups into one mesh named "Rock"
+  LodSphere.gltf               M46: one sphere of 512 triangles (material "Ball") sharing its vertices across the whole
+                               surface, which Lods Generate simplifies
+  LodMismatch.gltf             M46: "Crate_LOD0" (a box, material "Wood") with Crate_LOD1 (a smaller box, "Wood": kept),
+                               Crate_LOD2 (two primitives: its submeshes differ), Crate_LOD3 (material "Metal": its
+                               material differs) and Crate_LOD5 (a gap: Crate_LOD4 is missing), each dropped with
+                               ASSET_LOD_INVALID; the validation fixture ASSET_LOD_INVALID imports it
 
 Run from the repository root: `python Tests/Data/Generate/MakeGltfFixtures.py` writes the files (and removes files of
 the output directory it does not generate); `--check` compares a fresh generation with the committed files and writes
@@ -1088,6 +1102,125 @@ def make_replace() -> dict[str, bytes]:
     return files
 
 
+# M46 (GltfImporter version 4): spheres subdivided from an octahedron, every point normalized with sqrt (correctly
+# rounded), so the bytes are the same on every platform; one vertex per point (no seam), so the surface is closed.
+OCTAHEDRON_POINTS: tuple[Vector3, ...] = (
+    (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, -1.0),
+)
+OCTAHEDRON_FACES: tuple[tuple[int, int, int], ...] = (
+    (4, 0, 2), (0, 5, 2), (5, 1, 2), (1, 4, 2), (0, 4, 3), (5, 0, 3), (1, 5, 3), (4, 1, 3),
+)
+
+
+def unit(vector: Sequence[float]) -> Vector3:
+    length = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]) ** 0.5
+    return (vector[0] / length, vector[1] / length, vector[2] / length)
+
+
+def sphere_geometry(subdivisions: int, radius: float, center: Vector3) -> Geometry:
+    """An octahedron subdivided `subdivisions` times (8 x 4^n counter-clockwise triangles), its points on the unit
+    sphere scaled by `radius` about `center`; normals point outward, and u, v project x and y (no seam)."""
+    points: list[Vector3] = list(OCTAHEDRON_POINTS)
+    faces: list[tuple[int, int, int]] = list(OCTAHEDRON_FACES)
+    for _ in range(subdivisions):
+        midpoints: dict[tuple[int, int], int] = {}
+
+        def midpoint(a: int, b: int) -> int:
+            key = (min(a, b), max(a, b))
+            if key not in midpoints:
+                points.append(unit([(points[a][axis] + points[b][axis]) * 0.5 for axis in range(3)]))
+                midpoints[key] = len(points) - 1
+            return midpoints[key]
+
+        subdivided: list[tuple[int, int, int]] = []
+        for a, b, c in faces:
+            ab, bc, ca = midpoint(a, b), midpoint(b, c), midpoint(c, a)
+            subdivided += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
+        faces = subdivided
+    positions = [(center[0] + point[0] * radius, center[1] + point[1] * radius, center[2] + point[2] * radius)
+                 for point in points]
+    texcoords = [(0.5 + 0.5 * point[0], 0.5 - 0.5 * point[1]) for point in points]
+    return Geometry(positions, list(points), texcoords, [index for face in faces for index in face])
+
+
+def box_geometry(size: Vector3, center: Vector3) -> Geometry:
+    """The unit cube scaled by `size` about `center` (its normals unchanged: the scale is along the axes)."""
+    cube = cube_geometry()
+    positions = [(center[0] + x * size[0], center[1] + y * size[1], center[2] + z * size[2])
+                 for x, y, z in cube.positions]
+    return Geometry(positions, cube.normals, cube.texcoords, cube.indices)
+
+
+def tree_wind(geometry: Geometry) -> list[Vector4]:
+    """The crowns' _WIND: x (branch sway) and z (flutter) rising with height above the trunk's top at y = 1.6, y a phase
+    from the vertex's x, w (bend mask) 0."""
+    weights = []
+    for x, y, _ in geometry.positions:
+        height = min(max((y - 1.6) / 2.4, 0.0), 1.0)
+        weights.append((height, min(max(0.5 + 0.4 * x, 0.0), 1.0), height, 0.0))
+    return weights
+
+
+def make_lod_tree() -> dict[str, bytes]:
+    builder = GltfBuilder()
+    bark = builder.add_material(plain_material("Bark", (0.35, 0.22, 0.12, 1.0)))
+    leaves = builder.add_material(plain_material("Leaves", (0.2, 0.55, 0.2, 1.0)))
+    meshes = []
+    for level, (name, subdivisions) in enumerate((("Tree", 2), ("TreeMid", 1), ("TreeFar", 0))):
+        trunk = builder.add_primitive(box_geometry((0.3, 2.0, 0.3), (0.0, 1.0, 0.0)), bark)
+        crown_geometry = sphere_geometry(subdivisions, 1.2, (0.0, 2.8, 0.0))
+        crown = builder.add_primitive(crown_geometry, leaves)
+        wind = tree_wind(crown_geometry)
+        if level == 0:
+            crown["attributes"]["_WIND"] = builder.add_normalized(
+                [tuple(round(value * 255) for value in weights) for weights in wind], "VEC4", UNSIGNED_BYTE)
+        else:
+            crown["attributes"]["_WIND"] = builder.add_floats(wind, "VEC4")
+        meshes.append(builder.add_mesh(name, [trunk, crown]))
+    builder.add_node({"mesh": meshes[0], "name": "Tree", "extensions": {"MSFT_lod": {"ids": [1, 2]}},
+                      "extras": {"MSFT_screencoverage": [0.4, 0.15, 0.05]}})
+    builder.add_node({"mesh": meshes[1], "name": "TreeMid"})
+    builder.add_node({"mesh": meshes[2], "name": "TreeFar"})
+    builder.extra["extensionsUsed"] = ["MSFT_lod"]
+    return {"LodTree.gltf": gltf_text(builder.embedded_document(scene_nodes=[0]))}
+
+
+def make_lod_rock() -> dict[str, bytes]:
+    builder = GltfBuilder()
+    stone = builder.add_material(plain_material("Stone", (0.5, 0.48, 0.45, 1.0)))
+    for level, subdivisions in enumerate((2, 1, 0)):
+        sphere = sphere_geometry(subdivisions, 1.0, (0.0, 0.8, 0.0))
+        mesh = builder.add_mesh(f"Rock{level}", [builder.add_primitive(sphere, stone)])
+        builder.add_node({"mesh": mesh, "name": f"Rock_LOD{level}"})
+    return {"LodRock.gltf": gltf_text(builder.embedded_document())}
+
+
+def make_lod_sphere() -> dict[str, bytes]:
+    builder = GltfBuilder()
+    ball = builder.add_material(plain_material("Ball", (0.8, 0.3, 0.2, 1.0)))
+    mesh = builder.add_mesh("Sphere", [builder.add_primitive(sphere_geometry(3, 1.0, (0.0, 1.0, 0.0)), ball)])
+    builder.add_node({"mesh": mesh, "name": "Sphere"})
+    return {"LodSphere.gltf": gltf_text(builder.embedded_document())}
+
+
+def make_lod_mismatch() -> dict[str, bytes]:
+    builder = GltfBuilder()
+    wood = builder.add_material(plain_material("Wood", (0.6, 0.4, 0.2, 1.0)))
+    metal = builder.add_material(plain_material("Metal", (0.7, 0.7, 0.75, 1.0)))
+    levels = (
+        ("Crate_LOD0", [(wood, 1.0)]),
+        ("Crate_LOD1", [(wood, 0.9)]),
+        ("Crate_LOD2", [(wood, 0.8), (wood, 0.4)]),
+        ("Crate_LOD3", [(metal, 0.7)]),
+        ("Crate_LOD5", [(wood, 0.6)]),
+    )
+    for name, primitives in levels:
+        boxes = [(box_geometry((size, size, size), (0.0, size * 0.5, 0.0)), material) for material, size in primitives]
+        mesh = builder.add_mesh(name, [builder.add_primitive(box, material) for box, material in boxes])
+        builder.add_node({"mesh": mesh, "name": name})
+    return {"LodMismatch.gltf": gltf_text(builder.embedded_document())}
+
+
 def build_fixtures() -> dict[str, bytes]:
     """Every fixture, keyed by its '/'-separated path relative to the output directory."""
     fixtures: dict[str, bytes] = {}
@@ -1115,6 +1248,10 @@ def build_fixtures() -> dict[str, bytes]:
         make_skinned_rigs,
         make_shared_skins,
         make_replace,
+        make_lod_tree,
+        make_lod_rock,
+        make_lod_sphere,
+        make_lod_mismatch,
     ):
         for name, content in make().items():
             if name in fixtures:

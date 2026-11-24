@@ -38,6 +38,7 @@
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
+#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
@@ -66,6 +67,7 @@
 #include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
+#include "Engine/Scene/Components/WindComponent.h"
 
 namespace Engine {
 
@@ -126,7 +128,11 @@ namespace Engine {
 		NavigationComponent, NavModifierComponent,
 		// Joints (Registration/JointsRegistration.cpp; M37, Docs/Decisions/0054-m37-joints.md decision 1). ADR 0052's phase-6
 		// ledger: a sixteenth category after Navigation, in landing order.
-		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent>;
+		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent,
+		// RenderDistance (Registration/RenderDistanceRegistration.cpp) and Wind (Registration/WindRegistration.cpp; M46,
+		// Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F). ADR 0060's phase-8 ledger: each in
+		// a category of its own, appended after M44's Vehicles in train order (M47's Water follows).
+		RenderDistanceComponent, WindComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -156,8 +162,12 @@ namespace Engine {
 	void RegisterNavigationComponents(TypeRegistry& registry);
 	// M37 (Docs/Decisions/0054-m37-joints.md decision 1), after Navigation, in ADR 0052's phase-6 ledger's landing order.
 	void RegisterJointsComponents(TypeRegistry& registry);
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F), after M44's Vehicles, in ADR
+	// 0060's phase-8 ledger's train order.
+	void RegisterRenderDistanceComponents(TypeRegistry& registry);
+	void RegisterWindComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the sixteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the eighteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

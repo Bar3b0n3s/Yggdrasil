@@ -117,6 +117,7 @@ project "Engine"
 	UseCMPCore()
 	UseTinyExr()
 	UseDetour()
+	UseMeshOptimizer()
 
 	if UseShadersProject then
 		dependson { "Shaders" }

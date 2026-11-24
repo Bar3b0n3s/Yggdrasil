@@ -55,6 +55,9 @@ namespace Engine {
 			// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joint proxies' methods, after M30's RegisterNavigation (ADR
 			// 0052's ledger: the only new line).
 			ENGINE_TRY(ScriptBindings::RegisterJoints(api));
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the Wind proxy's method, after M44's
+			// RegisterVehicles (ADR 0060's phase-8 ledger; M47's RegisterWater follows).
+			ENGINE_TRY(ScriptBindings::RegisterWind(api));
 			return {};
 		}
 

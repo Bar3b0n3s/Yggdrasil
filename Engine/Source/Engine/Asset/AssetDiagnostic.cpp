@@ -8,8 +8,9 @@ namespace Engine {
 
 	std::span<const std::string_view> GetAssetDiagnosticCodes()
 	{
-		// §13.7 order (with ASSET_CONTENT_SKIPPED beside the other glTF warnings), then the two codes of this process.
-		static constexpr std::array<std::string_view, 13> Codes = {
+		// §13.7 order (with ASSET_CONTENT_SKIPPED beside the other glTF warnings), then the two codes of this process, then
+		// M46's ASSET_LOD_INVALID.
+		static constexpr std::array<std::string_view, 14> Codes = {
 			AssetMissingCode,
 			AssetTypeMismatchCode,
 			AssetImportFailedCode,
@@ -23,6 +24,7 @@ namespace Engine {
 			PathCaseMismatchCode,
 			AssetUploadFailedCode,
 			AssetBakeDeferredCode,
+			AssetLodInvalidCode,
 		};
 		return Codes;
 	}

@@ -40,8 +40,9 @@ namespace Engine {
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
 			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, M37's four joints (Docs/Decisions/0054-m37-joints.md
 			// decision 1) 62, M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63, and M42's
-			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64.
-			static_assert(BuiltinComponents::Size == 64);
+			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64, and M46's RenderDistance and Wind
+			// (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F) 66.
+			static_assert(BuiltinComponents::Size == 66);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -736,6 +737,8 @@ namespace Engine {
 				"SliderJoint",
 				"DistanceJoint",
 				"FixedJoint",
+				"RenderDistance",
+				"Wind",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -747,7 +750,7 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints", "RenderDistance", "Wind" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,
