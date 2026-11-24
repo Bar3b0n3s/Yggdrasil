@@ -375,6 +375,14 @@ def heightfield(resolution: int) -> bytes:
     return b"EHFD" + struct.pack("<II", 1, resolution) + bytes(2 * resolution * resolution)
 
 
+def irradiance_volume() -> bytes:
+    """A version 1 `.irradiance` source of a 2 x 2 x 2 volume of 1 m whose probes are zero
+    (Asset/IrradianceVolumeData.h): the magic "EIRV", the uint32 version 1, then the payload, three uint32 counts, three
+    f32 sides and eight probes of nine f32x3 coefficients, little-endian; version 1 has no relight block (M45's format 2
+    adds it)."""
+    return b"EIRV" + struct.pack("<IIII3f", 1, 2, 2, 2, 1.0, 1.0, 1.0) + bytes(8 * 9 * 3 * 4)
+
+
 def navmesh(input_hash: int) -> bytes:
     """A `.navmesh` source of one agent type, "Default", baked over nothing (Asset/NavMeshData.h): the magic "ENAV", the
     uint32 version 1, then the payload, `input_hash`, no area costs and the agent's settings and empty arrays."""
@@ -1070,6 +1078,15 @@ return Script.Define("Jumper", Jumper)
     item = fixture("SKY_ENVIRONMENT_IGNORED")
     item.entities.append(entity("e000000000000042", "Sky", {"Transform": transform(), "Sky": {}}))
     item.entities.append(entity("e000000000000043", "Environment", {"Transform": transform(), "Environment": {}}))
+    # W45.3: a Sky beside an irradiance volume baked without one (a version 1 file, no relight block), which it cannot
+    # relight.
+    item = fixture("PROBE_NOT_RELIGHTABLE")
+    item.add("Project/Assets/Lighting/Volume.irradiance", irradiance_volume())
+    item.add_json("Project/Assets/Lighting/Volume.irradiance.meta",
+                  meta("7e45000000000045", "IrradianceVolume", "IrradianceVolume"))
+    item.entities.append(entity("e000000000000042", "Sky", {"Transform": transform(), "Sky": {}}))
+    item.entities.append(entity("e000000000000043", "Volume", {
+        "Transform": transform(), "IrradianceVolume": {"Data": "7e45000000000045"}}))
 
     return fixtures
 

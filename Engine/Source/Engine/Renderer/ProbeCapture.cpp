@@ -5,16 +5,19 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
 #include "Engine/Graphics/CommandListRecording.h"
+#include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/ProbeRelight.h"
 #include "Engine/Renderer/SceneRenderer.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <numbers>
@@ -24,7 +27,8 @@
 // Probe captures (ProbeCapture.h; Docs/Decisions/0037-m26-contract.md decision 8): the GPU capture of a cube of radiance
 // through a SceneRenderer, and the CPU steps that turn it into an irradiance probe's SH9 and a reflection probe's Radiance HDR
 // image. The CPU steps use IEEE-exact operations, sqrt and DetMath only, in double precision and a fixed order, so they give
-// the same bits in every configuration.
+// the same bits in every configuration. M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the relight capture's
+// visibility and sky totals, and the sky transfer's projection.
 
 namespace Engine {
 
@@ -79,14 +83,6 @@ namespace Engine {
 				ShBand2Cross * x * z,
 				ShBand2Sectoral * (x * x - y * y),
 			};
-		}
-
-		// Per band: the clamped cosine's convolution over pi (1, 2/3, 1/4) times the Hanning window (1 + cos(pi l / 4)) / 2 of
-		// EnvironmentData::IrradianceShWindow, whose cosines are 1, sqrt(1/2) and 0, so no transcendental is evaluated.
-		[[nodiscard]] static std::array<double, 3> GetBandFactors()
-		{
-			static_assert(EnvironmentData::IrradianceShWindow == 4.0f, "the window's cosines below assume w = 4");
-			return { 1.0, (2.0 / 3.0) * ((1.0 + std::sqrt(0.5)) * 0.5), 0.25 * 0.5 };
 		}
 
 		// The unit direction of texel (column, row) of `face` of a cube of `size` texels a face (its centre).
@@ -239,6 +235,82 @@ namespace Engine {
 			return texels;
 		}
 
+		// M45: one face's sky visibility, read back from its SceneDepth (D32, reverse-Z: the clear leaves 0, the far plane, where
+		// no geometry is drawn; the sky pass writes no depth) through a staging texture of that format on `commandList`, which
+		// `device` executes and waits for: 1 where the depth is 0, else 0, its columns mirrored back as ReadFaceTexels' are.
+		// Graphics/Readback reads color formats only; a depth copy to a buffer is a depth-aspect vkCmdCopyImageToBuffer, four
+		// bytes a texel.
+		[[nodiscard]] static Result<std::vector<float>> ReadFaceVisibility(GraphicsDevice& device, nvrhi::ICommandList& commandList, nvrhi::ITexture& depth,
+			uint32_t faceSize)
+		{
+			const nvrhi::TextureDesc& source = depth.getDesc();
+			if (source.format != nvrhi::Format::D32 || source.width != faceSize || source.height != faceSize)
+				return MakeError(ErrorCode::Gpu, "a probe capture's depth is {} x {} texels of another format than D32", source.width, source.height);
+			nvrhi::TextureDesc desc;
+			desc.width = faceSize;
+			desc.height = faceSize;
+			desc.format = nvrhi::Format::D32;
+			desc.dimension = nvrhi::TextureDimension::Texture2D;
+			desc.debugName = "ProbeCapture.Visibility";
+			ENGINE_TRY_ASSIGN(const nvrhi::StagingTextureHandle staging, device.CreateStagingTexture(desc, nvrhi::CpuAccessMode::Read));
+			CommandListRecording recording(device, commandList);
+			commandList.copyTexture(staging, nvrhi::TextureSlice(), &depth, nvrhi::TextureSlice());
+			const uint64_t submission = recording.Execute();
+			WaitForSubmission(device, submission, "a probe capture's visibility read-back");
+			if (device.IsLost())
+				return MakeError(ErrorCode::Gpu, "the device was lost while a probe capture's visibility was read back");
+			size_t rowPitch = 0;
+			nvrhi::IDevice* nvrhiDevice = device.GetNvrhiDevice();
+			const void* mapped = nvrhiDevice->mapStagingTexture(staging, nvrhi::TextureSlice(), nvrhi::CpuAccessMode::Read, &rowPitch);
+			if (mapped == nullptr)
+				return MakeError(ErrorCode::Gpu, "cannot map a probe capture's visibility staging texture");
+			if (rowPitch < static_cast<size_t>(faceSize) * sizeof(float))
+			{
+				nvrhiDevice->unmapStagingTexture(staging);
+				return MakeError(ErrorCode::Gpu, "a probe capture's visibility staging texture has a row pitch of {} bytes", rowPitch);
+			}
+			std::vector<float> visibility(static_cast<size_t>(faceSize) * faceSize);
+			const auto* bytes = static_cast<const std::byte*>(mapped);
+			for (uint32_t row = 0; row < faceSize; ++row)
+			{
+				for (uint32_t column = 0; column < faceSize; ++column)
+				{
+					float value = 0.0f;
+					std::memcpy(&value, bytes + static_cast<size_t>(row) * rowPitch + static_cast<size_t>(column) * sizeof(float), sizeof(float));
+					visibility[static_cast<size_t>(row) * faceSize + (faceSize - 1 - column)] = value == 0.0f ? 1.0f : 0.0f;
+				}
+			}
+			nvrhiDevice->unmapStagingTexture(staging);
+			return visibility;
+		}
+
+		// M45: the sky's radiance totals of the capture's renderer (SceneRenderer::GetSkyRadianceTotals), through a CPU-readable
+		// buffer on `commandList`, which `device` executes and waits for.
+		[[nodiscard]] static Result<std::array<glm::vec4, 10>> ReadSkyRadianceTotals(GraphicsDevice& device, nvrhi::ICommandList& commandList, nvrhi::IBuffer& totals)
+		{
+			std::array<glm::vec4, 10> values{};
+			nvrhi::BufferDesc desc;
+			desc.byteSize = sizeof(values);
+			desc.cpuAccess = nvrhi::CpuAccessMode::Read;
+			desc.initialState = nvrhi::ResourceStates::CopyDest;
+			desc.keepInitialState = true;
+			desc.debugName = "ProbeCapture.SkyTotals";
+			ENGINE_TRY_ASSIGN(const nvrhi::BufferHandle staging, device.CreateBuffer(desc));
+			CommandListRecording recording(device, commandList);
+			commandList.copyBuffer(staging, 0, &totals, 0, sizeof(values));
+			const uint64_t submission = recording.Execute();
+			WaitForSubmission(device, submission, "a probe capture's sky read-back");
+			if (device.IsLost())
+				return MakeError(ErrorCode::Gpu, "the device was lost while a probe capture's sky was read back");
+			nvrhi::IDevice* nvrhiDevice = device.GetNvrhiDevice();
+			const void* mapped = nvrhiDevice->mapBuffer(staging, nvrhi::CpuAccessMode::Read);
+			if (mapped == nullptr)
+				return MakeError(ErrorCode::Gpu, "cannot map a probe capture's sky staging buffer");
+			std::memcpy(values.data(), mapped, sizeof(values));
+			nvrhiDevice->unmapBuffer(staging);
+			return values;
+		}
+
 		// The capture's view of face `face` from `position`: a rotation looking along the face's major axis with -Tc up and -Sc
 		// right (a right-handed basis; ReadFaceTexels mirrors the columns back).
 		[[nodiscard]] static glm::mat4 MakeFaceView(uint32_t face, const glm::vec3& position)
@@ -369,11 +441,56 @@ namespace Engine {
 				}
 			}
 		}
-		const std::array<double, 3> factors = Utils::GetBandFactors();
+		const std::array<double, 3> factors = GetIrradianceBandFactors();
 		std::array<glm::vec3, 9> coefficients{};
 		for (size_t index = 0; index < coefficients.size(); ++index)
 			coefficients[index] = glm::vec3(sums[index] * factors[Utils::ShBands[index]]);
 		return coefficients;
+	}
+
+	std::array<float, IrradianceTransferCount> ProjectCubeToSkyTransfer(const ProbeCubeCapture& capture)
+	{
+		const uint32_t size = capture.FaceSize;
+		for ([[maybe_unused]] const std::vector<float>& face : capture.Visibility)
+			ENGINE_CORE_ASSERT(face.size() == static_cast<size_t>(size) * size, "A relight capture's face holds {} visibility values, not {}^2", face.size(), size);
+		std::array<double, IrradianceTransferCount> sums{};
+		for (uint32_t face = 0; face < 6; ++face)
+		{
+			for (uint32_t row = 0; row < size; ++row)
+			{
+				for (uint32_t column = 0; column < size; ++column)
+				{
+					const double visibility = static_cast<double>(capture.Visibility[face][static_cast<size_t>(row) * size + column]);
+					if (visibility == 0.0)
+						continue;
+					const double weight = visibility * Utils::GetTexelSolidAngle(column, row, size);
+					const std::array<double, 9> basis = Utils::EvaluateShBasis(Utils::GetTexelDirection(face, column, row, size));
+					for (size_t i = 0; i < 9; ++i)
+					{
+						for (size_t j = i; j < 9; ++j)
+							sums[GetSkyTransferIndex(i, j)] += basis[i] * basis[j] * weight;
+					}
+				}
+			}
+		}
+		std::array<float, IrradianceTransferCount> transfer{};
+		for (size_t index = 0; index < transfer.size(); ++index)
+			transfer[index] = static_cast<float>(sums[index]);
+		return transfer;
+	}
+
+	RenderSnapshot MakeRelightCaptureSnapshot(const RenderSnapshot& source)
+	{
+		RenderSnapshot snapshot = source;
+		if (!snapshot.Sky.Enabled)
+			return snapshot;
+		snapshot.Sky.Intensity = 0.0f;
+		for (const std::optional<uint32_t>& light : { snapshot.Sky.SunLight, snapshot.Sky.MoonLight })
+		{
+			if (light.has_value() && *light < snapshot.Lights.size())
+				snapshot.Lights[*light].Color = glm::vec3(0.0f);
+		}
+		return snapshot;
 	}
 
 	ProbeEquirectImage ResampleCubeToEquirect(const ProbeCubeCapture& capture)
@@ -487,7 +604,7 @@ namespace Engine {
 		return capture;
 	}
 
-	Result<ProbeCubeCapture> ProbeCapture::Capture(const RenderSnapshot& snapshot, const glm::vec3& position, uint32_t faceSize)
+	Result<ProbeCubeCapture> ProbeCapture::Capture(const RenderSnapshot& snapshot, const glm::vec3& position, uint32_t faceSize, ProbeCaptureMode mode)
 	{
 		if (faceSize < Utils::MinProbeFaceSize || faceSize > Utils::MaxProbeFaceSize || (faceSize & (faceSize - 1)) != 0)
 		{
@@ -496,6 +613,9 @@ namespace Engine {
 		}
 		if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
 			return MakeError(ErrorCode::InvalidArgument, "a probe capture's position ({}, {}, {}) is not finite", position.x, position.y, position.z);
+		const bool relight = mode == ProbeCaptureMode::Relight;
+		if (relight && !snapshot.Sky.Enabled)
+			return MakeError(ErrorCode::InvalidArgument, "a relight capture renders a scene under an enabled Sky, and the snapshot has none");
 		State& state = *m_State;
 		if (state.CommandList == nullptr)
 			return MakeError(ErrorCode::Gpu, "the probe capture's command list was not created again after a device loss");
@@ -513,7 +633,7 @@ namespace Engine {
 		capture.FaceSize = faceSize;
 		const Utils::ProbeCapturingScope capturing(state.IsCapturing);
 		const Status captured = RetryAfterTrim(*state.Device, std::format("a {}-texel probe capture", faceSize),
-			[&state, &face, &capture, &position, faceSize]() -> Status
+			[&state, &face, &capture, &position, faceSize, relight]() -> Status
 		{
 			if (state.Renderer->GetWidth() != faceSize || state.Renderer->GetHeight() != faceSize)
 				state.Renderer->ReleaseTargets();
@@ -534,6 +654,20 @@ namespace Engine {
 					return MakeError(ErrorCode::Gpu, "the probe capture's renderer holds no SceneColor after rendering face {}", index);
 				ENGINE_TRY_ASSIGN(const Image image, state.FaceReadback->ReadTexture(*sceneColor));
 				ENGINE_TRY_ASSIGN(capture.Faces[index], Utils::ReadFaceTexels(image, faceSize));
+				if (!relight)
+					continue;
+				// M45: the face's sky visibility, and after the first face the sky's totals (every face renders the same sky).
+				nvrhi::ITexture* sceneDepth = state.Renderer->GetSceneDepthTexture();
+				if (sceneDepth == nullptr)
+					return MakeError(ErrorCode::Gpu, "the probe capture's renderer holds no SceneDepth after rendering face {}", index);
+				ENGINE_TRY_ASSIGN(capture.Visibility[index], Utils::ReadFaceVisibility(*state.Device, *state.CommandList, *sceneDepth, faceSize));
+				if (index == 0)
+				{
+					nvrhi::IBuffer* totals = state.Renderer->GetSkyRadianceTotals();
+					if (totals == nullptr)
+						return MakeError(ErrorCode::Gpu, "the relight capture's renderer made no sky lighting for its snapshot's Sky");
+					ENGINE_TRY_ASSIGN(capture.SkyRadianceTotals, Utils::ReadSkyRadianceTotals(*state.Device, *state.CommandList, *totals));
+				}
 			}
 			return {};
 		});

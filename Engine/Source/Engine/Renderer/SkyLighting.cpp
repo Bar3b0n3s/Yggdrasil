@@ -37,11 +37,14 @@ namespace Engine {
 		constexpr uint32_t SkyComputeMultipleScatteringSlot = 1;
 		constexpr uint32_t SkyComputeSkyViewSlot = 2;
 		constexpr uint32_t SkyComputeTotalsSlot = 3;
+		constexpr uint32_t SkyComputeRelightProbesSlot = 4;
+		constexpr uint32_t SkyComputeRelightReflectionsSlot = 5;
 		constexpr uint32_t SkyComputeLinearClampSlot = 0;
 		constexpr uint32_t SkyComputeLinearWrapUSlot = 1;
 		constexpr uint32_t SkyComputeLutSlot = 0;
 		constexpr uint32_t SkyComputeCubeSlot = 1;
 		constexpr uint32_t SkyComputeResultsSlot = 2;
+		constexpr uint32_t SkyComputeIrradianceProbesSlot = 3;
 		// The push constants' slot, EnvironmentBake's too (its PushConstantsSlot).
 		constexpr uint32_t SkyComputePushConstantsSlot = 0;
 
@@ -52,6 +55,7 @@ namespace Engine {
 			SkyViewLut,
 			SkyCube,
 			SkyFinalize,
+			ProbeRelight,
 			Count
 		};
 
@@ -96,11 +100,18 @@ namespace Engine {
 						BindingLayoutItem::Sampler(SkyComputeLinearWrapUSlot), BindingLayoutItem::Texture_UAV(SkyComputeCubeSlot) };
 					images.push_back({ .Set = 0, .Register = SkyComputeCubeSlot, .Format = nvrhi::Format::RGBA16_FLOAT });
 					break;
-				default:
+				case SkyEntry::SkyFinalize:
 					name = "SkyFinalize";
 					function = "CSSkyFinalize";
 					layout.bindings = { BindingLayoutItem::ConstantBuffer(SkyComputeConstantsSlot), BindingLayoutItem::StructuredBuffer_SRV(SkyComputeTotalsSlot),
 						BindingLayoutItem::StructuredBuffer_UAV(SkyComputeResultsSlot) };
+					break;
+				default:
+					name = "SkyProbeRelight";
+					function = "CSProbeRelight";
+					layout.bindings = { BindingLayoutItem::ConstantBuffer(SkyComputeConstantsSlot), BindingLayoutItem::StructuredBuffer_SRV(SkyComputeTotalsSlot),
+						BindingLayoutItem::StructuredBuffer_SRV(SkyComputeRelightProbesSlot), BindingLayoutItem::StructuredBuffer_SRV(SkyComputeRelightReflectionsSlot),
+						BindingLayoutItem::StructuredBuffer_UAV(SkyComputeResultsSlot), BindingLayoutItem::StructuredBuffer_UAV(SkyComputeIrradianceProbesSlot) };
 					break;
 			}
 			// Every entry's reflection lists the program's push constants (Passes/Sky.slang's Dispatch), read or not.
@@ -254,6 +265,7 @@ namespace Engine {
 		constants.Intensity = Utils::ClampSkyFloat(sky.Intensity, 0.0f, 65504.0f, 1.0f);
 		// The Sun: its light's direction and authored illuminance, a disc of half its LightAngle.
 		glm::dvec3 toSun(0.0, 1.0, 0.0);
+		bool hasSun = false;
 		constants.SunDirection = glm::vec3(0.0f, 1.0f, 0.0f);
 		if (sky.SunLight.has_value() && *sky.SunLight < lights.size())
 		{
@@ -261,6 +273,7 @@ namespace Engine {
 			if (const std::optional<glm::dvec3> direction = Utils::NormalizeSkyDirection(-glm::dvec3(sun.Direction)))
 			{
 				toSun = *direction;
+				hasSun = true;
 				constants.SunDirection = glm::vec3(toSun);
 				constants.SunIlluminance = Utils::MakeSkyColorUsable(sky.SunLightColor) * Utils::ClampSkyFloat(sun.Intensity, 0.0f, 65504.0f, 0.0f);
 				constants.SunCosRadius = Utils::GetCosineOfHalfAngle(sun.LightAngle);
@@ -278,6 +291,14 @@ namespace Engine {
 			constants.MoonDirection = glm::vec3(toMoon);
 			constants.HasMoon = 1;
 			constants.MoonFraction = static_cast<float>(ComputeMoonIlluminatedFraction(toSun, toMoon));
+			// Without a Sun light (or one without a direction) the moon is full, as ApplySkyLightDriving drives its light (k 1, the
+			// W45.2 review's finding 11): its disc is lit from behind the viewer, where no sun scatters or shines (SunIlluminance
+			// and SunDiscRadiance 0; the stars' frame keeps its own +Y sun).
+			if (!hasSun)
+			{
+				constants.MoonFraction = 1.0f;
+				constants.SunDirection = -constants.MoonDirection;
+			}
 			if (sky.MoonLight.has_value() && *sky.MoonLight < lights.size())
 				constants.MoonIlluminance = Utils::MakeSkyColorUsable(sky.MoonLightColor) * Utils::ClampSkyFloat(lights[*sky.MoonLight].Intensity, 0.0f, 65504.0f, 0.0f);
 		}
@@ -303,10 +324,29 @@ namespace Engine {
 		// The image-based light is taken at sea level and with the stepped clouds: the camera and the live drift are not in it.
 		key.Constants.CameraAltitude = 0.0f;
 		key.Constants.CloudOffset = glm::vec2(0.0f);
-		// The fog's colour is the finalize's, every frame.
+		// The fog's colour and the Intensity are the finalize's, every frame (and the shaders' EnvironmentConstants::Intensity).
 		key.Constants.FogColor = glm::vec3(0.0f);
 		key.Constants.FogAmbientTint = 0.0f;
-		key.CloudOffset = ComputeSkyCloudOffset(sky.CloudSpeed, sky.SimulationTime, SkyCloudLightingStep);
+		key.Constants.Intensity = 0.0f;
+		// The update draws no disc and no star, and the overcast reaches it through the Mie terms alone (the W45.2 review's
+		// finding 2): what only the Sky pass reads is not in the key.
+		key.Constants.SunCosRadius = 0.0f;
+		key.Constants.SunDiscRadiance = 0.0f;
+		key.Constants.MoonCosRadius = 0.0f;
+		key.Constants.StarFrame0 = glm::vec4(0.0f);
+		key.Constants.StarFrame1 = glm::vec4(0.0f);
+		key.Constants.StarFrame2 = glm::vec4(0.0f);
+		key.Constants.Stars = 0.0f;
+		key.Constants.Overcast = 0.0f;
+		// A moon that lights nothing (no Moon light, or a dark one) scatters nothing, wherever it stands.
+		if (key.Constants.MoonIlluminance == glm::vec3(0.0f))
+		{
+			key.Constants.MoonDirection = glm::vec3(0.0f);
+			key.Constants.MoonFraction = 0.0f;
+			key.Constants.HasMoon = 0;
+		}
+		// Without clouds the layer's drift changes nothing.
+		key.CloudOffset = constants.CloudCoverage > 0.0f ? ComputeSkyCloudOffset(sky.CloudSpeed, sky.SimulationTime, SkyCloudLightingStep) : glm::vec2(0.0f);
 		return key;
 	}
 
@@ -337,6 +377,14 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(resources.Partials, device.CreateBuffer(Utils::MakeSkyVectorsDesc(groups * Utils::SkyBakeTerms, "Sky.IrradiancePartials")));
 		ENGINE_TRY_ASSIGN(resources.Totals, device.CreateBuffer(Utils::MakeSkyVectorsDesc(Utils::SkyBakeTerms, "Sky.IrradianceTotals")));
 		ENGINE_TRY_ASSIGN(resources.Results, device.CreateBuffer(Utils::MakeSkyVectorsDesc(SkyResultsCount, "Sky.Results")));
+		// The reflection probes' relight entries: written from the CPU each frame, read by CSProbeRelight.
+		nvrhi::BufferDesc reflections;
+		reflections.byteSize = static_cast<uint64_t>(MaxViewReflectionProbes) * sizeof(glm::vec4);
+		reflections.structStride = sizeof(glm::vec4);
+		reflections.initialState = nvrhi::ResourceStates::ShaderResource;
+		reflections.keepInitialState = true;
+		reflections.debugName = "Sky.ReflectionRelights";
+		ENGINE_TRY_ASSIGN(resources.ReflectionRelights, device.CreateBuffer(reflections));
 		return resources;
 	}
 
@@ -551,6 +599,38 @@ namespace Engine {
 				  BindingSetItem::StructuredBuffer_SRV(Utils::SkyComputeTotalsSlot, resources.Totals),
 				  BindingSetItem::StructuredBuffer_UAV(Utils::SkyComputeResultsSlot, resources.Results) } },
 			nullptr, 0, glm::uvec3(1, 1, 1));
+	}
+
+	Status SkyLightingPass::RecordProbeRelight(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const SkyViewResources& resources, nvrhi::IBuffer& relight,
+		nvrhi::IBuffer& coefficients, uint32_t first, uint32_t probeCount)
+	{
+		using nvrhi::BindingSetItem;
+		const SkyDispatchConstants push{ .CloudOffset = glm::vec2(0.0f), .Face = first, .Count = probeCount, .Mode = SkyRelightModeVolume };
+		return Dispatch(commandList, bindings, m_State->Sky[static_cast<size_t>(Utils::SkyEntry::ProbeRelight)],
+			{ .bindings = { BindingSetItem::ConstantBuffer(Utils::SkyComputeConstantsSlot, resources.Constants),
+				  BindingSetItem::StructuredBuffer_SRV(Utils::SkyComputeTotalsSlot, resources.Totals),
+				  BindingSetItem::StructuredBuffer_SRV(Utils::SkyComputeRelightProbesSlot, &relight),
+				  BindingSetItem::StructuredBuffer_SRV(Utils::SkyComputeRelightReflectionsSlot, resources.ReflectionRelights),
+				  BindingSetItem::StructuredBuffer_UAV(Utils::SkyComputeResultsSlot, resources.Results),
+				  BindingSetItem::StructuredBuffer_UAV(Utils::SkyComputeIrradianceProbesSlot, &coefficients) } },
+			&push, sizeof(push), glm::uvec3((probeCount + SkyRelightGroupSize - 1) / SkyRelightGroupSize, 1, 1));
+	}
+
+	Status SkyLightingPass::RecordReflectionRelight(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const SkyViewResources& resources,
+		nvrhi::IBuffer& coefficients, uint32_t reflectionProbes)
+	{
+		using nvrhi::BindingSetItem;
+		const uint32_t count = std::min(reflectionProbes, MaxViewReflectionProbes);
+		const SkyDispatchConstants push{ .CloudOffset = glm::vec2(0.0f), .Count = count, .Mode = SkyRelightModeReflections };
+		// The volume slot is unread in this mode; it takes the entries' buffer, as a binding set binds every slot.
+		return Dispatch(commandList, bindings, m_State->Sky[static_cast<size_t>(Utils::SkyEntry::ProbeRelight)],
+			{ .bindings = { BindingSetItem::ConstantBuffer(Utils::SkyComputeConstantsSlot, resources.Constants),
+				  BindingSetItem::StructuredBuffer_SRV(Utils::SkyComputeTotalsSlot, resources.Totals),
+				  BindingSetItem::StructuredBuffer_SRV(Utils::SkyComputeRelightProbesSlot, resources.ReflectionRelights),
+				  BindingSetItem::StructuredBuffer_SRV(Utils::SkyComputeRelightReflectionsSlot, resources.ReflectionRelights),
+				  BindingSetItem::StructuredBuffer_UAV(Utils::SkyComputeResultsSlot, resources.Results),
+				  BindingSetItem::StructuredBuffer_UAV(Utils::SkyComputeIrradianceProbesSlot, &coefficients) } },
+			&push, sizeof(push), glm::uvec3(1, 1, 1));
 	}
 
 	void RecordSkyResultCopies(nvrhi::ICommandList& commandList, nvrhi::IBuffer* results, nvrhi::IBuffer* environment, std::span<nvrhi::IBuffer* const> fogs,

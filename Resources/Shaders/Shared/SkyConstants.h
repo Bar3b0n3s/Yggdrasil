@@ -31,6 +31,29 @@ inline constexpr uint32_t SkyResultsReflectionScales = 10;
 inline constexpr uint32_t SkyResultsCount = 18;
 #endif
 
+	// The relit irradiance volumes (W45.3; Renderer/ProbeRelight.h, Passes/Sky.slang's CSProbeRelight):
+	//   - a relightable volume's GPU relight block (GpuResourceCache's GpuIrradianceVolume::Relight) holds SkyRelightProbeVectors
+	//     float4 per probe, in its probes' order: IrradianceProbeRelight::Local's nine coefficients (xyz, w 0), then its
+	//     Transfer's 45 values four by four in twelve float4 (the last three components 0);
+	//   - CSProbeRelight's modes (SkyDispatchConstants::Mode): SkyRelightModeVolume relights Count probes of a volume into the
+	//     view's IrradianceProbes copy from element Face (the volume's first coefficient, ProbeVolumeConstants::Probes.w);
+	//     SkyRelightModeReflections writes the Count reflection probes' relit intensities into SkyResults;
+	//   - SkyViewResources::ReflectionRelights holds MaxViewReflectionProbes float4, one per reflection probe of the view in
+	//     ProbeConstants' order: x the IrradianceProbes element of the relit constant term of the volume probe nearest its
+	//     centre (an exact integer), or -1 outside every relit volume; y that probe's baked constant term's luminance; z the
+	//     reflection probe's Intensity.
+#if defined(ENGINE_SHADER)
+	static const uint SkyRelightProbeVectors = 21;
+	static const uint SkyRelightModeVolume = 0;
+	static const uint SkyRelightModeReflections = 1;
+	static const uint SkyRelightGroupSize = 64;
+#else
+inline constexpr uint32_t SkyRelightProbeVectors = 21;
+inline constexpr uint32_t SkyRelightModeVolume = 0;
+inline constexpr uint32_t SkyRelightModeReflections = 1;
+inline constexpr uint32_t SkyRelightGroupSize = 64;
+#endif
+
 	// The sky of one view (M45, decision 3; Renderer/SkyLighting.h, Passes/Sky.slang, Common/Atmosphere.slang): a constant
 	// buffer the scene renderer writes once per view from the snapshot's RenderSky, read by the Sky pass and the sky's computes.
 	// Directions are unit, world space, toward their source; the atmosphere is in km and per km (Renderer/SkyAtmosphere.h's
@@ -90,9 +113,9 @@ inline constexpr uint32_t SkyResultsCount = 18;
 	{
 		Float2 CloudOffset;    // CSSkyCube: the cloud layer's offset the image-based light draws (at its SkyCloudLightingStep)
 		float Altitude = 0.0f; // CSSkyViewLut: the altitude (km) the LUT is taken from: the camera's, or sea level's for the cube
-		uint32_t Face = 0;     // the cube face (or the first) a dispatch writes
-		uint32_t Count = 0;    // the items a dispatch covers (probes, reflection probes)
-		uint32_t Mode = 0;     // an entry's variant, as its comment names
+		uint32_t Face = 0;     // the cube face, or the first element a dispatch writes (CSProbeRelight's volume: its first coefficient)
+		uint32_t Count = 0;    // the items a dispatch covers (CSProbeRelight: probes, or reflection probes)
+		uint32_t Mode = 0;     // an entry's variant (CSProbeRelight: SkyRelightModeVolume or SkyRelightModeReflections)
 		uint32_t Padding0 = 0;
 		uint32_t Padding1 = 0;
 	};

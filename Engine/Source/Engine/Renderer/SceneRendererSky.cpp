@@ -6,6 +6,8 @@
 #include "Engine/Renderer/SkyLighting.h"
 #include "Engine/Renderer/SkyPass.h"
 
+#include <glm/glm.hpp>
+
 #include <array>
 #include <cstddef>
 #include <optional>
@@ -13,7 +15,8 @@
 
 // The scene renderer's sky (M45, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; Renderer/SkyLighting.h,
 // Renderer/SkyPass.h), as M42's SceneRendererReflections.cpp holds the planar reflections': the Prepare stage's sky inputs
-// (PrepareSky), the Ambient stage's SkyLighting rows (RecordSkyLighting) and the Sky pass of a view (RecordSky).
+// (PrepareSky), the Ambient stage's SkyLighting rows (RecordSkyLighting, its ProbeRelight row in RecordProbeRelight), the Sky
+// pass of a view (RecordSky) and the relight capture's two accessors (GetSceneDepthTexture, GetSkyRadianceTotals).
 
 namespace Engine {
 
@@ -23,6 +26,7 @@ namespace Engine {
 		frame.SkyLutUpdate = false;
 		frame.SkyUpdate = false;
 		frame.SkyUpdates = 0;
+		frame.RelitIrradianceVolumes = 0;
 		if (!lit || !snapshot.Sky.Enabled)
 			return;
 		// Created on the view's first render with a Sky. A creation that fails (out of memory) leaves the view lit by its
@@ -92,7 +96,7 @@ namespace Engine {
 			if (recorded)
 			{
 				++dispatches;
-				// The view's fog and each drawn mirror slot's; the reflection probes' scales join with W45.3's relight.
+				// The view's fog and each drawn mirror slot's; the reflection probes' scales follow in the ProbeRelight row.
 				std::array<nvrhi::IBuffer*, 1 + MaxPlanarReflectionsPerView> fogs{};
 				size_t fogCount = 0;
 				fogs[fogCount++] = FogConstantsBuffer.Get();
@@ -103,6 +107,69 @@ namespace Engine {
 		}
 		recording.EndPass({ .Dispatches = dispatches });
 		frame.KeepFirstError(recorded);
+		if (recorded)
+			RecordProbeRelight(frame);
+	}
+
+	void SceneRenderer::State::RecordProbeRelight(Detail::SceneRendererFrame& frame)
+	{
+		// W45.3 (decision 3, "Relit probes"): the view's relightable volumes, relit when the sky's light was regenerated this
+		// render, its Intensity changed, or the view's copy holds their bakes (copied again, or never relit), then every frame
+		// the reflection probes' relit intensities and their copies over ProbeConstants; nothing without a relightable volume in
+		// the view.
+		const Utils::ProbeShadingInputs& probes = frame.Probes;
+		if (!probes.HasRelight() || ProbeResources.Coefficients == nullptr || ProbeResources.Constants == nullptr)
+			return;
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		SkyViewResources& resources = *SkyResources;
+		SkyLightingPass& pass = *Pipelines->SkyLighting;
+		const bool relight = frame.SkyUpdates != 0 || !ProbeResources.HoldsRelight || ProbeResources.RelitIntensity != frame.SkyView.Intensity;
+		const uint32_t reflections = probes.Constants.Counts.y;
+		if (!relight && reflections == 0)
+			return;
+		frame.Recording->BeginPass("ProbeRelight", &commandList);
+		uint32_t dispatches = 0;
+		Status recorded = {};
+		if (relight)
+		{
+			for (size_t index = 0; index < probes.Relights.size() && recorded; ++index)
+			{
+				if (probes.Relights[index] == nullptr)
+					continue;
+				const glm::uvec4& counts = probes.Constants.Volumes[index].Probes;
+				recorded = pass.RecordProbeRelight(commandList, SkyLightingBindings, resources, *probes.Relights[index], *ProbeResources.Coefficients, counts.w,
+					counts.x * counts.y * counts.z);
+				if (recorded)
+				{
+					++dispatches;
+					++frame.RelitIrradianceVolumes;
+				}
+			}
+			ProbeResources.HoldsRelight = recorded.has_value();
+			ProbeResources.RelitIntensity = frame.SkyView.Intensity;
+		}
+		if (recorded && reflections > 0)
+		{
+			commandList.writeBuffer(resources.ReflectionRelights, probes.ReflectionRelights.data(), static_cast<size_t>(reflections) * sizeof(glm::vec4));
+			recorded = pass.RecordReflectionRelight(commandList, SkyLightingBindings, resources, *ProbeResources.Coefficients, reflections);
+			if (recorded)
+			{
+				++dispatches;
+				RecordSkyResultCopies(commandList, resources.Results, nullptr, {}, ProbeResources.Constants, reflections);
+			}
+		}
+		frame.Recording->EndPass({ .Dispatches = dispatches });
+		frame.KeepFirstError(recorded);
+	}
+
+	nvrhi::ITexture* SceneRenderer::GetSceneDepthTexture() const
+	{
+		return m_State->ImageGeneration != 0 ? m_State->Targets.SceneDepth.Get() : nullptr;
+	}
+
+	nvrhi::IBuffer* SceneRenderer::GetSkyRadianceTotals() const
+	{
+		return m_State->SkyResources.has_value() ? m_State->SkyResources->Totals.Get() : nullptr;
 	}
 
 	Status SceneRenderer::State::RecordSky(nvrhi::ICommandList& commandList, nvrhi::IFramebuffer& framebuffer, nvrhi::IBuffer& viewConstants, nvrhi::IBuffer& fogConstants,

@@ -339,6 +339,21 @@ namespace Engine {
 			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 			sky.SetActive(false);
 			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			// The W45.2 review's finding 3: beside an enabled Sky the Environment lights nothing, so a scene without an Environment
+			// entity, whose default fallback colour lights it without a Sky, is unlit under a Sky of Intensity 0.
+			scene.DestroyEntity(environment);
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.SetActive(true);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 0.0f;
+			});
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 1.0f;
+			});
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 		}
 
 		TEST_CASE("RenderSceneValidation: missing maps use fallback and usable maps use SH illumination")

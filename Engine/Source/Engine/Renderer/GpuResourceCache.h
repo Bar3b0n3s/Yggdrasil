@@ -128,7 +128,11 @@ namespace Engine {
 
 	// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16, stream Q-B): an irradiance volume's GPU mirror
 	// (Asset/IrradianceVolumeData.h): its probes' SH9 coefficients as a structured buffer of CountX * CountY * CountZ * 9
-	// float4 (xyz the coefficient, w 0), probes in the asset's order, which Common/Probes.slang reads trilinearly.
+	// float4 (xyz the coefficient, w 0), probes in the asset's order, which Common/Probes.slang reads trilinearly. M45
+	// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): a relightable volume's relight block too, as a
+	// structured buffer of SkyRelightProbeVectors float4 a probe (Shared/SkyConstants.h's layout), which the view's ProbeRelight
+	// row reads (Passes/Sky.slang's CSProbeRelight), and its probes' baked constant terms (SH9[0]), from which the view's
+	// reflection probes' relit scale is taken; null and empty for a volume without one.
 	struct GpuIrradianceVolume
 	{
 		nvrhi::BufferHandle Probes{};
@@ -136,6 +140,8 @@ namespace Engine {
 		uint32_t CountY = 0;
 		uint32_t CountZ = 0;
 		uint64_t Version = 0;
+		nvrhi::BufferHandle Relight{};
+		std::vector<glm::vec3> ConstantTerms{};
 	};
 
 	// M26 (C26.1, R-LUT; decision 15, stream X-B): a LUT's GPU mirror: its table as a Size^3 3D texture, RGBA16_FLOAT (rgb

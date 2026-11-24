@@ -634,10 +634,17 @@ namespace Engine {
 		{
 			// One scene at noon and at dusk, the quad lit by the sky alone: its image-based light (the diffuse SH9 and the specular
 			// cube's reflection, both the sky's), the sky above it and the fog's colour (a dense fog tinted by the sky's ambient light
-			// over the quad) all dim, and the sky reddens, as the sun sets.
+			// over the quad) all dim, and the sky reddens, as the sun sets. The W45.2 review's finding 4: a metallic, smooth quad,
+			// whose colour is the sky's specular cube alone, shows the reflections follow it too.
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+			constexpr AssetHandle ChromeMaterial{ 0x9f46 };
+			auto chrome = CreateRef<MaterialData>();
+			chrome->BaseColor = glm::vec4(1.0f);
+			chrome->Metallic = 1.0f;
+			chrome->Roughness = 0.1f;
+			fixture.Assets().Publish(ChromeMaterial, chrome);
 			const auto render = [&gpu, &fixture](const RenderSnapshot& snapshot)
 			{
 				fixture.Submit(snapshot);
@@ -646,10 +653,11 @@ namespace Engine {
 			struct Measured
 			{
 				glm::dvec3 Ambient{};
+				glm::dvec3 Reflection{};
 				glm::dvec3 Sky{};
 				glm::dvec3 Fogged{};
 			};
-			const auto measure = [&fixture, &render](float elevation)
+			const auto measure = [&fixture, &render, ChromeMaterial](float elevation)
 			{
 				Measured measured;
 				RenderSnapshot snapshot = MakeSkyViewSnapshot(fixture, elevation);
@@ -657,6 +665,9 @@ namespace Engine {
 				measured.Ambient = MeanSceneColor(texels, 32, 32, true);
 				measured.Sky = MeanSceneColor(texels, 32, 32, false);
 				CHECK(fixture.Renderer().GetRenderStats().SkyUpdates == 1U);
+				RenderSnapshot chromed = snapshot;
+				chromed.Meshes[0].Materials = { ChromeMaterial };
+				measured.Reflection = MeanSceneColor(render(chromed), 32, 32, true);
 				snapshot.Fog = RenderFog{ .Enabled = true, .Color = glm::vec3(1.0f), .AmbientTint = 1.0f, .Density = 10.0f, .MaxOpacity = 1.0f, .FogSkybox = false };
 				texels = render(snapshot);
 				measured.Fogged = MeanSceneColor(texels, 32, 32, true);
@@ -665,19 +676,24 @@ namespace Engine {
 			const Measured noon = measure(80.0f);
 			const Measured dusk = measure(2.0f);
 			INFO("noon ambient " << noon.Ambient.r << " " << noon.Ambient.b << ", dusk " << dusk.Ambient.r << " " << dusk.Ambient.b);
+			INFO("noon reflection " << noon.Reflection.r << " " << noon.Reflection.b << ", dusk " << dusk.Reflection.r << " " << dusk.Reflection.b);
 			CHECK(noon.Ambient.g > 0.0);
 			CHECK(noon.Ambient.g > 2.0 * dusk.Ambient.g);
+			CHECK(noon.Reflection.g > 0.0);
+			CHECK(noon.Reflection.g > 2.0 * dusk.Reflection.g);
 			CHECK(noon.Sky.g > 2.0 * dusk.Sky.g);
 			CHECK(noon.Fogged.g > 2.0 * dusk.Fogged.g);
-			// At dusk the light is redder relative to its blue than at noon.
+			// At dusk the light, and its reflection, are redder relative to their blue than at noon.
 			CHECK(dusk.Sky.r / dusk.Sky.b > noon.Sky.r / noon.Sky.b);
+			CHECK(dusk.Reflection.r / dusk.Reflection.b > noon.Reflection.r / noon.Reflection.b);
 		}
 
 		TEST_CASE("SkyLighting: the sky's lighting is regenerated only when its key changes" * doctest::test_suite(Test::GpuSuite))
 		{
-			// RenderStats::SkyUpdates: 1 on the view's first render with a Sky, 0 for the same sky, a moved camera, a turned Moon
-			// without a light or the clouds' drift within a SkyCloudLightingStep, and 1 for a turned Sun, a new Intensity or a drift
-			// across a step.
+			// RenderStats::SkyUpdates: 1 on the view's first render with a Sky, 0 for the same sky, a moved camera or the clouds'
+			// drift within a SkyCloudLightingStep, 1 for a drift across a step and a turned Sun. The W45.2 review's finding 2: the
+			// key holds only what the update reads, so 0 for a new Intensity (which the finalize applies every frame: the view's
+			// image still changes), new stars or a new disc, a turned Moon without a light, and a cloudless sky's drift across a step.
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::SceneRendererIntegrationFixture fixture(gpu, 16, 16);
@@ -701,8 +717,26 @@ namespace Engine {
 			snapshot.Lights[0].Direction = glm::normalize(glm::vec3(0.3f, -0.6f, 0.4f));
 			CHECK(updates(snapshot) == 1U);
 			CHECK(updates(snapshot) == 0U);
+			const std::vector<glm::dvec4> before = ReadHalfTexels(gpu.GetDevice(), *fixture.Renderer().GetSceneColorTexture());
 			snapshot.Sky.Intensity = 2.0f;
+			CHECK(updates(snapshot) == 0U);
+			CHECK(ReadHalfTexels(gpu.GetDevice(), *fixture.Renderer().GetSceneColorTexture()) != before);
+			snapshot.Sky.Stars = 5.0f;
+			snapshot.Sky.SunDisc = 3.0f;
+			snapshot.Sky.MoonSize = 4.0f;
+			CHECK(updates(snapshot) == 0U);
+			// A Moon without a light scatters nothing, wherever it stands.
+			snapshot.Sky.HasMoon = true;
+			snapshot.Sky.MoonLight.reset();
+			snapshot.Sky.MoonDirection = glm::normalize(glm::vec3(0.0f, 1.0f, 1.0f));
+			CHECK(updates(snapshot) == 0U);
+			snapshot.Sky.MoonDirection = glm::normalize(glm::vec3(1.0f, 1.0f, 0.0f));
+			CHECK(updates(snapshot) == 0U);
+			// Without clouds, their drift changes nothing.
+			snapshot.Sky.Clouds = 0.0f;
 			CHECK(updates(snapshot) == 1U);
+			snapshot.Sky.SimulationTime = 12.05;
+			CHECK(updates(snapshot) == 0U);
 			// The passes' rows: SkyLuts and SkyIbl every frame (the finalize and the copies), the Sky pass where it draws.
 			const RenderStats& stats = fixture.Renderer().GetRenderStats();
 			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "SkyLuts") != nullptr);
@@ -714,6 +748,36 @@ namespace Engine {
 			fixture.Submit(snapshot);
 			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "SkyLuts") == nullptr);
 			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Sky") == nullptr);
+		}
+
+		// The W45.2 review's finding 1: a shader reload (SceneRendererPipelines::CreatePipelines) replaces the pipelines that drew the
+		// sky's LUTs and its image-based light, so the next render regenerates both, as the shadow cache's maps are redrawn.
+		TEST_CASE("SkyLighting: the sky's lighting is regenerated after the pipelines are created again" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 16, 16);
+			const RenderSnapshot snapshot = MakeSkyViewSnapshot(fixture, 30.0f);
+			const auto render = [&fixture, &snapshot]()
+			{
+				fixture.Submit(snapshot);
+				return fixture.Renderer().GetRenderStats();
+			};
+			CHECK(render().SkyUpdates == 1U);
+			const RenderStats still = render();
+			CHECK(still.SkyUpdates == 0U);
+			const RenderPassStats* stillLuts = Test::SceneRendererIntegrationFixture::FindPass(still, "SkyLuts");
+			REQUIRE(stillLuts != nullptr);
+			CHECK(stillLuts->Dispatches == 1U);
+			gpu.GetDevice().WaitForIdle();
+			const Status reloaded = fixture.Pipelines().CreatePipelines();
+			REQUIRE_MESSAGE(reloaded.has_value(), reloaded.error().ToString());
+			gpu.GetDevice().RunGarbageCollection();
+			const RenderStats reloadedStats = render();
+			CHECK(reloadedStats.SkyUpdates == 1U);
+			const RenderPassStats* luts = Test::SceneRendererIntegrationFixture::FindPass(reloadedStats, "SkyLuts");
+			REQUIRE(luts != nullptr);
+			CHECK(luts->Dispatches == 3U);
 		}
 
 		// The review of W45.1 (finding 2): the renderer gives the cascades to a Sky's Sun while it is above the horizon and to its
@@ -928,7 +992,7 @@ namespace Engine {
 			}
 			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
-			// The recovered renderer regenerated the sky's light in its first frame after the loss.
+			// The recovered renderer draws the sky (the byte comparison above proves its light regenerated to the same bytes).
 			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Sky") != nullptr);
 		}
 
@@ -982,6 +1046,118 @@ namespace Engine {
 				CHECK(fixture.Renderer().GetRenderStats().SkyUpdates == 1U);
 				CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Sky") != nullptr);
 				CHECK_FALSE(device.IsLost());
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The W45.2 review's finding 11: without a Sun light, ApplySkyLightDriving drives the Moon light as a full moon (k 1), and
+		// the sky's constants agree: the moon's fraction is 1 and its disc is lit from behind the viewer (SunDirection opposite
+		// the moon), while no sun scatters or shines. With a Sun light, the fraction follows the elongation.
+		TEST_CASE("SkyLighting: without a Sun light, the sky's moon is full, as its driven light is")
+		{
+			RenderSnapshot snapshot;
+			snapshot.HasCamera = true;
+			const glm::vec3 toMoon = glm::normalize(glm::vec3(0.0f, 0.42f, -0.9f));
+			snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional,
+				.Color = glm::vec3(0.8f, 0.85f, 1.0f),
+				.Intensity = 0.2f,
+				.Direction = -toMoon,
+				.Entity = UUID(78) });
+			snapshot.Sky.Enabled = true;
+			snapshot.Sky.Sun = UUID(5150);
+			snapshot.Sky.Moon = UUID(78);
+			ResolveSkyLights(snapshot);
+			REQUIRE(snapshot.Sky.MoonLight.has_value());
+			REQUIRE(snapshot.Sky.HasMoon);
+			snapshot.Sky.SunLight.reset();
+			const SkyConstants moonOnly = MakeSkyConstants(snapshot.Sky, snapshot.Lights, snapshot.Camera, snapshot.Fog);
+			CHECK(moonOnly.HasMoon == 1U);
+			CHECK(moonOnly.MoonFraction == 1.0f);
+			CHECK(glm::dot(moonOnly.SunDirection, moonOnly.MoonDirection) == doctest::Approx(-1.0));
+			CHECK(moonOnly.SunIlluminance == glm::vec3(0.0f));
+			CHECK(moonOnly.SunDiscRadiance == 0.0f);
+			// With a Sun light 30 degrees above the moon, the fraction is its elongation's.
+			const RenderSnapshot sunlit = MakeSkySnapshot(60.0f);
+			snapshot.Lights.push_back(sunlit.Lights[0]);
+			snapshot.Sky.SunLight = static_cast<uint32_t>(snapshot.Lights.size() - 1);
+			snapshot.Sky.SunLightColor = sunlit.Sky.SunLightColor;
+			const SkyConstants withSun = MakeSkyConstants(snapshot.Sky, snapshot.Lights, snapshot.Camera, snapshot.Fog);
+			const glm::dvec3 toSun = -glm::dvec3(sunlit.Lights[0].Direction);
+			CHECK(withSun.MoonFraction == doctest::Approx(ComputeMoonIlluminatedFraction(glm::normalize(toSun), glm::dvec3(withSun.MoonDirection))).epsilon(1e-5));
+			CHECK(withSun.MoonFraction < 0.5f);
+		}
+
+		// The W45.2 review's nits 12 and 13: the moon hides the stars behind it, its dark limb included (a 10-degree moon filling
+		// the view's centre renders the same bytes there with and without stars, which show around it), and an orthographic
+		// view, whose one direction would spread a disc or a star over the whole background, draws none: looking along the sun,
+		// its background is the sky's, far below the disc's radiance.
+		TEST_CASE("SkyPass: the moon hides the stars behind it, and an orthographic view draws no disc or star" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			constexpr uint32_t Size = 64;
+			Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+			// The camera turned 30 degrees up, toward the moon (or the sun) 30 degrees above -Z.
+			const glm::vec3 up30 = glm::normalize(glm::vec3(0.0f, 0.5f, -0.8660254f));
+			const glm::mat4 view = glm::rotate(glm::mat4(1.0f), glm::radians(-30.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+			{
+				RenderSnapshot night = MakeSkyViewSnapshot(fixture, -30.0f);
+				night.Meshes.clear();
+				night.Camera.View = view;
+				night.Camera.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 20.0f, 2.0f, 0.1f, 1000.0f, Size, Size);
+				night.Lights.push_back(LightData{ .Type = RenderLightType::Directional,
+					.Color = glm::vec3(0.8f, 0.85f, 1.0f),
+					.Intensity = 0.2f,
+					.Direction = -up30,
+					.Entity = UUID(78) });
+				night.Sky.Moon = UUID(78);
+				night.Sky.MoonSize = 10.0f;
+				ResolveSkyLights(night);
+				REQUIRE(night.Sky.HasMoon);
+				const auto render = [&fixture, &device, &night](float stars)
+				{
+					night.Sky.Stars = stars;
+					++night.FrameIndex;
+					fixture.Submit(night);
+					return ReadHalfTexels(device, *fixture.Renderer().GetSceneColorTexture());
+				};
+				const std::vector<glm::dvec4> dark = render(0.0f);
+				const std::vector<glm::dvec4> starry = render(100.0f);
+				// Within 12 pixels of the centre (3.75 degrees at 20 degrees over 64 pixels) is the moon's disc of 5 degrees' radius.
+				uint32_t insideDiffers = 0;
+				uint32_t outsideDiffers = 0;
+				for (uint32_t y = 0; y < Size; ++y)
+				{
+					for (uint32_t x = 0; x < Size; ++x)
+					{
+						const int dx = static_cast<int>(x) - static_cast<int>(Size / 2);
+						const int dy = static_cast<int>(y) - static_cast<int>(Size / 2);
+						const size_t index = static_cast<size_t>(y) * Size + x;
+						const bool differs = dark[index] != starry[index];
+						if (dx * dx + dy * dy <= 12 * 12)
+							insideDiffers += differs ? 1U : 0U;
+						else if (dx * dx + dy * dy > 24 * 24)
+							outsideDiffers += differs ? 1U : 0U;
+					}
+				}
+				CHECK(insideDiffers == 0U);
+				CHECK(outsideDiffers > 0U);
+			}
+			{
+				// Orthographic, along the sun 30 degrees up: every pixel takes that one direction.
+				RenderSnapshot ortho = MakeSkyViewSnapshot(fixture, 30.0f);
+				ortho.Meshes.clear();
+				ortho.Camera.ProjectionKind = RenderProjection::Orthographic;
+				ortho.Camera.Projection = ComputeReverseZProjection(RenderProjection::Orthographic, 60.0f, 2.0f, 0.1f, 1000.0f, Size, Size);
+				ortho.Camera.View = view;
+				fixture.Submit(ortho);
+				const std::vector<glm::dvec4> texels = ReadHalfTexels(device, *fixture.Renderer().GetSceneColorTexture());
+				const SkyConstants constants = MakeSkyConstants(ortho.Sky, ortho.Lights, ortho.Camera, ortho.Fog);
+				REQUIRE(constants.SunDiscRadiance > 0.0f);
+				INFO("background " << texels[0].g << ", the disc's radiance per unit illuminance " << constants.SunDiscRadiance);
+				for (const glm::dvec4& texel : texels)
+					CHECK(texel.g < 0.01 * static_cast<double>(constants.SunDiscRadiance));
 			}
 			device.RunGarbageCollection();
 		}

@@ -1455,7 +1455,8 @@ end
 			CHECK(position(AnimationAttachmentInvalidCode) + 1 == position(RenderReflectionInvalidCode));
 			CHECK(position(RenderReflectionInvalidCode) + 1 == position(SkyLightInvalidCode));
 			CHECK(position(SkyLightInvalidCode) + 1 == position(SkyEnvironmentIgnoredCode));
-			CHECK(codes.back() == SkyEnvironmentIgnoredCode);
+			CHECK(position(SkyEnvironmentIgnoredCode) + 1 == position(ProbeNotRelightableCode));
+			CHECK(codes.back() == ProbeNotRelightableCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

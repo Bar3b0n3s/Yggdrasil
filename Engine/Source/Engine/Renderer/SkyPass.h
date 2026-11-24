@@ -20,9 +20,9 @@
 // the probe's altitude.
 //
 // Binding layout (set 0): b0 ViewConstants, b1 SkyConstants, b5 FogConstants, t0 the transmittance LUT, t2 the sky-view LUT,
-// s0 LinearClamp, s1 LinearWrapU (the sky-view LUT wraps in azimuth), and the program's push constants (unread). The pipeline is created for
-// GetSceneColorFramebufferInfo() (SceneTargetFormats.h), once per device at startup, owned by SceneRendererPipelines; binding
-// sets come from the view's PassBindingCache. Main thread only; not copyable or movable.
+// s0 LinearClamp, s1 LinearWrapU (the sky-view LUT wraps in azimuth), and the program's push constants (unread). The pipeline
+// is created for GetSceneColorFramebufferInfo() (SceneTargetFormats.h), once per device at startup, owned by
+// SceneRendererPipelines; binding sets come from the view's PassBindingCache. Main thread only; not copyable or movable.
 
 namespace Engine {
 

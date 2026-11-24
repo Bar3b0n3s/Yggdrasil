@@ -675,6 +675,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/07153a848bb6cb7b.irradiance",
+			"XXH64": "7159462f393ba041",
+			"Method": "lighting.bake",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/07153a848bb6cb7b.irradiance.meta",
+			"XXH64": "4ff849570bcbba6f",
+			"Method": "lighting.bake",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/a6ff3c973e360d5c.hdr",
+			"XXH64": "dd2cea1ab6423db4",
+			"Method": "lighting.bake",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/a6ff3c973e360d5c.hdr.meta",
+			"XXH64": "23e5a436cdc8b5d1",
+			"Method": "lighting.bake",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Lighting/Scenes/Probes/b73d7c47fdf24aef.irradiance",
 			"XXH64": "eb668af47448c685",
 			"Method": "lighting.bake",
@@ -2207,6 +2239,38 @@
 			"XXH64": "189952e192e1955e",
 			"Method": "asset.create",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSky/Chrome.material",
+			"XXH64": "0d483e110fca9525",
+			"Method": "asset.create",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSky/Chrome.material.meta",
+			"XXH64": "e182101a52cfe08c",
+			"Method": "asset.create",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSky/Plaster.material",
+			"XXH64": "9f11f3da130928a9",
+			"Method": "asset.create",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSky/Plaster.material.meta",
+			"XXH64": "1ebcfd947057e5ef",
+			"Method": "asset.create",
+			"RequestId": 10,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3823,6 +3887,22 @@
 			"XXH64": "b01e67624a9d8bb1",
 			"Method": "edit.batch",
 			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenSky/SkyProbes.scene",
+			"XXH64": "f4bf214457a0adf4",
+			"Method": "scene.save",
+			"RequestId": 16,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenSky/SkyProbes.scene.meta",
+			"XXH64": "c258a81eca2464cd",
+			"Method": "edit.batch",
+			"RequestId": 13,
 			"Client": "batch",
 			"TranscriptLine": null
 		},

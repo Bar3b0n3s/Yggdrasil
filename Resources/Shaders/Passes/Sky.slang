@@ -8,6 +8,7 @@
 //     discs, no stars), the ground below the horizon;
 //   - CSSkyFinalize: the reduced radiance SH9 (EnvironmentBake's CSProjectIrradiance and CSReduceIrradiance) to the
 //     irradiance SH9 times Intensity and the fog's tinted colour, into SkyResults;
+//   - CSProbeRelight: the relit irradiance volumes and the reflection probes' relit intensities (ProbeRelight);
 //   - VSMain, PSMain: the Sky pass, a fullscreen triangle at depth 0 as the Skybox's.
 // Every value is radiance in §8.5's artist units: the lights' authored Color times Intensity scatter.
 //
@@ -30,7 +31,9 @@ ConstantBuffer<FogConstants> Fog : register(b5, space0);
 Texture2D<float4> TransmittanceLut : register(t0, space0);
 Texture2D<float4> MultipleScatteringLut : register(t1, space0);
 Texture2D<float4> SkyViewLut : register(t2, space0);
-StructuredBuffer<float4> RadianceTotals : register(t3, space0); // CSSkyFinalize: CSReduceIrradiance's ten totals
+StructuredBuffer<float4> RadianceTotals : register(t3, space0); // CSSkyFinalize, CSProbeRelight: CSReduceIrradiance's ten totals
+StructuredBuffer<float4> RelightProbes : register(t4, space0); // CSProbeRelight's volume mode: the volume's relight block
+StructuredBuffer<float4> RelightReflections : register(t5, space0); // CSProbeRelight's reflection mode: the view's entries
 SamplerState LinearClamp : register(s0, space0);
 SamplerState LinearWrapU : register(s1, space0); // the sky-view LUT: wrapping in azimuth, clamped in elevation
 [vk::image_format("rgba16f")]
@@ -38,6 +41,7 @@ RWTexture2D<float4> LutDestination : register(u0, space0);
 [vk::image_format("rgba16f")]
 RWTexture2DArray<float4> CubeDestination : register(u1, space0);
 RWStructuredBuffer<float4> Results : register(u2, space0);
+RWStructuredBuffer<float4> IrradianceProbes : register(u3, space0); // CSProbeRelight: the view's copy of its volumes' probes
 RWStructuredBuffer<float4> TestResults : register(u6, space0);
 RWStructuredBuffer<float4> TestReadback : register(u7, space0);
 
@@ -435,6 +439,64 @@ void CSSkyFinalize(uint3 id : SV_DispatchThreadID)
 	Results[SkyResultsFogColor] = float4(Sky.FogColor * lerp(float3(1.0, 1.0, 1.0), ambient, Sky.FogAmbientTint), 0.0);
 }
 
+// The largest scale a reflection probe inside a relit volume takes (Renderer/ProbeRelight.h's MaxReflectionRelightScale).
+static const float SkyRelightMaxScale = 4.0;
+
+// T_ij of the probe whose relight block starts at element `probe` of RelightProbes: its Transfer's upper triangle, row by row,
+// four values a float4 after the nine local coefficients (Renderer/ProbeRelight.h's GetSkyTransferIndex).
+float GetRelightTransfer(uint probe, uint i, uint j)
+{
+	const uint row = min(i, j);
+	const uint column = max(i, j);
+	const uint index = row * (19u - row) / 2u + (column - row);
+	return RelightProbes[probe + 9u + index / 4u][index % 4u];
+}
+
+// The probes' relight (Renderer/ProbeRelight.h, decision 3), one thread per item:
+//   - SkyRelightModeVolume: probe `item` of a relightable volume's Count probes gets Local + conv(T S) into the view's
+//     IrradianceProbes copy from element Face, S the sky's radiance SH9 (its totals normalized as CSSkyFinalize normalizes
+//     them, times Intensity), conv the clamped cosine's lobe and the Hanning window per band (RelightIrradianceSH9);
+//   - SkyRelightModeReflections: reflection probe `item` of the view's Count gets its Intensity times the luminance ratio of
+//     the relit to the baked constant term of the volume probe nearest its centre, clamped to [0, 4] (1 for a probe baked in
+//     the dark, its Intensity alone outside every relit volume), into SkyResults (ComputeReflectionRelightScale), after the
+//     volumes' relight wrote that term.
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CSProbeRelight(uint3 id : SV_DispatchThreadID)
+{
+	const uint item = id.x;
+	if (item >= Dispatch.Count)
+		return;
+	if (Dispatch.Mode == SkyRelightModeReflections)
+	{
+		const float4 entry = RelightReflections[item];
+		float scale = entry.z;
+		if (entry.x >= 0.0 && entry.y >= 1e-6)
+		{
+			const float relit = dot(IrradianceProbes[uint(entry.x)].xyz, float3(0.2126, 0.7152, 0.0722));
+			scale *= clamp(relit / entry.y, 0.0, SkyRelightMaxScale);
+		}
+		Results[SkyResultsReflectionScales + item] = float4(scale, 0.0, 0.0, 0.0);
+		return;
+	}
+	const float solidAngle = RadianceTotals[SkyShTerms - 1].x;
+	const float normalization = solidAngle > 0.0 ? 4.0 * AtmospherePi / solidAngle * Sky.Intensity : 0.0;
+	float3 sky[9];
+	for (uint j = 0; j < 9; ++j)
+		sky[j] = RadianceTotals[j].xyz * normalization;
+	const float lobes[3] = { 1.0, 2.0 / 3.0, 0.25 };
+	const uint probe = item * SkyRelightProbeVectors;
+	for (uint i = 0; i < 9; ++i)
+	{
+		float3 seen = float3(0.0, 0.0, 0.0);
+		for (uint j = 0; j < 9; ++j)
+			seen += sky[j] * GetRelightTransfer(probe, i, j);
+		const uint band = i == 0 ? 0u : (i < 4 ? 1u : 2u);
+		const float window = (1.0 + cos(AtmospherePi * float(band) / SkyIrradianceShWindow)) * 0.5;
+		IrradianceProbes[Dispatch.Face + item * 9u + i] = float4(RelightProbes[probe + i].xyz + seen * (lobes[band] * window), 0.0);
+	}
+}
+
 struct SkyVaryings
 {
 	float4 Position : SV_Position;
@@ -460,7 +522,8 @@ SkyVaryings VSMain(uint vertexID : SV_VulkanVertexID)
 }
 
 // Each pixel at the cleared depth: the camera's sky-view LUT, the clouds at their live offset, the stars, the moon and the
-// sun's disc above the horizon and the atmosphere's ground below it, times Intensity, fogged with FogSkybox as the skybox is (Common/Fog.slang; a mirror view from its glass on).
+// sun's disc above the horizon (none in an orthographic view; no star behind the moon) and the atmosphere's ground below it,
+// times Intensity, fogged with FogSkybox as the skybox is (Common/Fog.slang; a mirror view from its glass on).
 [shader("fragment")]
 float4 PSMain(SkyVaryings input) : SV_Target0
 {
@@ -474,7 +537,17 @@ float4 PSMain(SkyVaryings input) : SV_Target0
 	float3 radiance = SampleSkyView(direction, r);
 	const float skyLuminance = dot(radiance, float3(0.2126, 0.7152, 0.0722));
 	if (direction.y > 0.0)
-		radiance += EvaluateStars(direction, skyLuminance) + EvaluateMoon(direction, r) + EvaluateSunDisc(direction, r);
+	{
+		// An orthographic view's one direction would magnify a disc or a star over the whole background, so it draws neither;
+		// the moon hides the stars behind its dark limb.
+		if (View.ProjectionKind != ProjectionKindOrthographic)
+		{
+			const bool behindMoon = Sky.HasMoon != 0 && dot(direction, Sky.MoonDirection) > Sky.MoonCosRadius;
+			if (!behindMoon)
+				radiance += EvaluateStars(direction, skyLuminance);
+			radiance += EvaluateMoon(direction, r) + EvaluateSunDisc(direction, r);
+		}
+	}
 	else
 		radiance += EvaluateSkyGround(r);
 	const float4 clouds = EvaluateClouds(direction, Fog.CameraPosition, Sky.CloudOffset, r);

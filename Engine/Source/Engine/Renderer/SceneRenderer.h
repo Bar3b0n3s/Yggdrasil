@@ -195,7 +195,7 @@ namespace Engine {
 		// Lights2DPass (1), M26's ExposurePass (2), M26's TaaPass (1), SsrPass (3: M26's trace and composite and M32's tile
 		// classification), TerrainPass (3: TerrainDepthNormal's prepass and picking prepass, TerrainForward's forward pass) and
 		// M33's ParticlePass (3) and M42's PlanarReflectionPass (1, the planar reflections' mip chain), and M45's
-		// SkyLightingPass (9: the Sky program's five computes and EnvironmentBake's four) and SkyPass (1): 87, the declarations'
+		// SkyLightingPass (10: the Sky program's six computes and EnvironmentBake's four) and SkyPass (1): 88, the declarations'
 		// sum (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's
 		// PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
@@ -429,6 +429,15 @@ namespace Engine {
 		// chain), at the scene resolution, borrowed until the next Render, Resize, ReleaseTargets or destruction; null before
 		// the first Render. ProbeCapture reads a bake's faces back from it.
 		[[nodiscard]] nvrhi::ITexture* GetSceneColorTexture() const;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): the last Render's SceneDepth
+		// (SceneDepthFormat, D32, reverse-Z: 0 where nothing was drawn), borrowed as GetSceneColorTexture's; null before the first
+		// Render. A relight capture (ProbeCapture) reads its sky visibility back from it.
+		[[nodiscard]] nvrhi::ITexture* GetSceneDepthTexture() const;
+		// M45: the view's sky radiance totals (SkyViewResources::Totals, Renderer/SkyLighting.h: ten float4, the radiance SH9's
+		// nine sums in xyz, then the solid angle in x, before the Sky's Intensity), what the view's last render with a Sky
+		// regenerated or kept, borrowed until the next Render, a device loss's release or destruction; null before the view's
+		// first render with a Sky. A relight capture reads the bake's sky from it (Renderer/ProbeRelight.h's MakeSkyRadianceSH9).
+		[[nodiscard]] nvrhi::IBuffer* GetSkyRadianceTotals() const;
 		// M26 (C26.1, R-TAA-VEL, R-SSR-IN; Docs/Decisions/0037-m26-contract.md decision 14, stream X-C): the last Render's
 		// SceneVelocity (SceneVelocityFormat: the prepass's motion vectors) and SceneRoughness (SceneRoughnessFormat: SSR's
 		// specular inputs), at the scene resolution, borrowed as GetSceneColorTexture's; null before the first Render. For

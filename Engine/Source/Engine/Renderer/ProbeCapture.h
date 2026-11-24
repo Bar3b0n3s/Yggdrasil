@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/IrradianceVolumeData.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Buffer.h"
 #include "Engine/Core/Result.h"
@@ -9,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 // Probe captures for lighting.bake (M26, C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 8): the GPU capture
@@ -35,8 +37,15 @@
 //     order): two captures of one snapshot give equal texels, and the CPU steps below are pure with IEEE-exact operations,
 //     sqrt and DetMath only, so two bakes of one scene write byte-identical files (the acceptance "two probe bakes are
 //     byte-identical").
+//   - M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): a relight capture (ProbeCaptureMode::
+//     Relight) of MakeRelightCaptureSnapshot's snapshot, the scene under an enabled Sky with the sky dark and its Sun and Moon
+//     lights off, also reads back each face's sky visibility (1 where SceneDepth holds the cleared far plane: no geometry hides
+//     the sky; transparent surfaces write no depth, so a window sees it) and the sky's radiance totals, the projection of the
+//     image-based light the capture's renderer made from the snapshot's sky (before its Intensity, so the dark sky does not
+//     change them). ProjectCubeToIrradianceSH9 of such a capture is the probe's local light and ProjectCubeToSkyTransfer its sky
+//     transfer (Renderer/ProbeRelight.h relights them).
 //
-// Frozen by the M26 contract C26.1; stream Q-A implements it.
+// Frozen by the M26 contract C26.1; stream Q-A implements it; M45 adds the relight capture.
 
 namespace Engine {
 
@@ -51,6 +60,19 @@ namespace Engine {
 	{
 		uint32_t FaceSize = 0;
 		std::array<std::vector<glm::vec4>, 6> Faces{};
+		// M45, a relight capture's (empty otherwise): each face's sky visibility in the faces' texel order, 1 where the face sees
+		// the sky (no geometry's depth) and 0 elsewhere.
+		std::array<std::vector<float>, 6> Visibility{};
+		// M45, a relight capture's (empty otherwise): the radiance totals of the snapshot's sky (SceneRenderer::
+		// GetSkyRadianceTotals), which MakeSkyRadianceSH9 (Renderer/ProbeRelight.h) turns into its radiance SH9.
+		std::optional<std::array<glm::vec4, 10>> SkyRadianceTotals{};
+	};
+
+	// M45: what a capture reads back.
+	enum class ProbeCaptureMode : uint8_t
+	{
+		Radiance, // the faces' radiance
+		Relight,  // the faces' radiance, their sky visibility and the sky's radiance totals (the snapshot's Sky enabled)
 	};
 
 	// An equirectangular image of linear radiance, EnvironmentData.h's equirectangular mapping (what EnvironmentImporter
@@ -68,6 +90,18 @@ namespace Engine {
 	// DetMath only (each texel's solid angle through DetMath::ATan2), in a fixed order (faces, then rows, then columns), so it
 	// is identical in every configuration.
 	[[nodiscard]] std::array<glm::vec3, 9> ProjectCubeToIrradianceSH9(const ProbeCubeCapture& capture);
+
+	// M45: the sky transfer of a relight capture (its Visibility of FaceSize^2 values a face, asserted): T_ij, the sum over its
+	// texels of V Y_i Y_j times the texel's exact solid angle, as ProjectCubeToIrradianceSH9 sums (the same basis, solid angles
+	// and order, in double), as IrradianceProbeRelight::Transfer holds it (the upper triangle, row by row). A capture that sees
+	// the sky everywhere gives about the identity, one that sees it nowhere zero. Pure.
+	[[nodiscard]] std::array<float, IrradianceTransferCount> ProjectCubeToSkyTransfer(const ProbeCubeCapture& capture);
+
+	// M45: the snapshot a relight capture renders (decision 3): `source` with its Sky's Intensity 0 (the sky pass draws black
+	// and the sky's image-based light is zero) and its Sun's and Moon's lights' colours 0 (they light nothing, while the sky
+	// still scatters their authored illuminance into the radiance its totals hold), so a capture of it sees the scene's own
+	// lights alone. `source` without an enabled Sky is returned unchanged. Pure.
+	[[nodiscard]] RenderSnapshot MakeRelightCaptureSnapshot(const RenderSnapshot& source);
 
 	// The reflection probe's image of `capture`: 4 FaceSize x 2 FaceSize texels, each the bilinear sample of the cube in its
 	// direction (EnvironmentData.h's mapping, directions through DetMath, so identical in every configuration). Pure.
@@ -108,10 +142,13 @@ namespace Engine {
 		// [16, 512]). Blocks until the readback is done (bounded like every engine wait). Before it returns, it collects the
 		// garbage of its completed submissions (GraphicsDevice::CollectCompletedSubmissions; World Tree's brief 21), so what its
 		// faces used and dropped (each face's read-back staging) is released with it rather than at the frame's garbage
-		// collection, and any number of captures in one frame hold one capture's device allocations. Errors: InvalidArgument
-		// for a face size out of range or a non-finite position; those of SceneRenderer::Render and of the readback (Gpu; on a
-		// lost device the loss).
-		[[nodiscard]] Result<ProbeCubeCapture> Capture(const RenderSnapshot& snapshot, const glm::vec3& position, uint32_t faceSize);
+		// collection, and any number of captures in one frame hold one capture's device allocations. M45: with
+		// ProbeCaptureMode::Relight it also reads back each face's sky visibility from SceneDepth and, after the first face, the
+		// sky's radiance totals. Errors: InvalidArgument for a face size out of range, a non-finite position, or a relight
+		// capture of a snapshot without an enabled Sky; those of SceneRenderer::Render and of the readback (Gpu, also when a
+		// relight capture's renderer made no sky lighting; on a lost device the loss).
+		[[nodiscard]] Result<ProbeCubeCapture> Capture(const RenderSnapshot& snapshot, const glm::vec3& position, uint32_t faceSize,
+			ProbeCaptureMode mode = ProbeCaptureMode::Radiance);
 	private:
 		// The renderer, the back-references and the staging textures (ProbeCapture.cpp).
 		struct State;

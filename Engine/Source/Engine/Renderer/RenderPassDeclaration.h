@@ -41,7 +41,7 @@
 // rows SkyLuts, SkyIbl and ProbeRelight) and its Sky directly after Skybox in Forward (the procedural sky in the skybox's place,
 // row Sky; Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), declared by its W45.1 with their rows and target and
 // without pipelines, as M26's contract declared its passes; W45.2 set their PipelineCount (9 and 1) and Programs with the
-// passes (87 pipelines), and W45.3 the relight's. M47's Water follows Sky.
+// passes (87 pipelines), and W45.3 the relight's (10, 88 pipelines). M47's Water follows Sky.
 
 namespace Engine {
 
@@ -204,10 +204,10 @@ namespace Engine {
 		// lighting for a Lit view, recorded after the light clusters and before the forward passes read it: the transmittance,
 		// multiple-scattering and sky-view LUTs (SkyLuts), the run-time image-based light and the copies of its results into the
 		// view's constant buffers (SkyIbl), and the relit irradiance volumes (ProbeRelight); no target (the LUTs, cubes and
-		// buffers are the view's SkyViewResources). SkyLightingPass's pipelines: the Sky program's five computes and EnvironmentBake's
-		// four (CSDownsampleCube, CSPrefilterSpecular, CSProjectIrradiance, CSReduceIrradiance; the same SPIR-V as the import
-		// bake's); W45.3 adds the relight's.
-		{ .Name = "SkyLighting", .Stage = RenderStage::Ambient, .PipelineCount = 9, .Programs = Detail::SkyLightingPrograms, .StatsRows = Detail::SkyLightingRows },
+		// buffers are the view's SkyViewResources). SkyLightingPass's pipelines: the Sky program's six computes (CSProbeRelight the
+		// relight's) and EnvironmentBake's four (CSDownsampleCube, CSPrefilterSpecular, CSProjectIrradiance, CSReduceIrradiance;
+		// the same SPIR-V as the import bake's).
+		{ .Name = "SkyLighting", .Stage = RenderStage::Ambient, .PipelineCount = 10, .Programs = Detail::SkyLightingPrograms, .StatsRows = Detail::SkyLightingRows },
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: first in the Forward stage, before
 		// ForwardOpaque): the planar reflections a Lit view draws (Renderer/PlanarReflections.h), each a mirror view of the
 		// scene rendered from the camera mirrored in its plane into its slot's PlanarReflectionColor, whose mips the main view's

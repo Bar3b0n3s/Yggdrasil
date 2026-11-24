@@ -25,7 +25,11 @@
 //     EnvironmentBake's CSDownsampleCube, CSPrefilterSpecular, CSProjectIrradiance and CSReduceIrradiance and their layouts
 //     (EnvironmentBaker::GetLayoutDescriptions), the same SPIR-V, so every import bake stays byte-identical. Then, every frame,
 //     CSSkyFinalize (the irradiance SH9 times Intensity and the fog's tinted colour into SkyResults) and RecordSkyResultCopies.
-//   - ProbeRelight: the relit irradiance volumes (W45.3).
+//   - ProbeRelight (decision 3's "Relit probes", Renderer/ProbeRelight.h): when the view shades a relightable irradiance volume
+//     and its light changed or its probes were copied again, CSProbeRelight writes each such volume's relit probes into the
+//     view's IrradianceProbes copy (t13); then, every frame the view has a reflection probe, each reflection probe's relit
+//     intensity into SkyResults, which RecordSkyResultCopies places over its ProbeConstants' Intensity. Recorded only when it
+//     runs.
 // The view's Prepare binds the specular cube at t3 and writes EnvironmentConstants by MakeSkyEnvironmentConstants
 // (Private/LightingInputs.h), so the forward, terrain, SSR, probe and fog shaders do not change. Nothing is spread over frames
 // and nothing temporal is added: a frame's lighting is a pure function of that frame (§8.3), regenerated in the frame its key
@@ -41,9 +45,9 @@
 // write-after-write hazard without it). Every Vulkan buffer of the vendored NVRHI is created with TRANSFER_SRC and
 // TRANSFER_DST. copyBuffer, unlike writeBuffer, ends an open render pass only when a barrier is pending, so the copies are
 // recorded outside every render pass: at the end of the Ambient stage, right after the sky's dispatches. No layout changes:
-// the forward, terrain, skybox, SSR, probe and fog shaders read the constants they always read. Proved on the device, under validation and synchronization
-// validation at API 1.4 and 1.3, by "SkyLighting: a buffer copied into a view's constant buffers after their CPU writes
-// reaches the passes that read them".
+// the forward, terrain, skybox, SSR, probe and fog shaders read the constants they always read. Proved on the device, under
+// validation and synchronization validation at API 1.4 and 1.3, by "SkyLighting: a buffer copied into a view's constant
+// buffers after their CPU writes reaches the passes that read them".
 
 namespace Engine {
 
@@ -77,8 +81,8 @@ namespace Engine {
 	};
 
 	// The view's sky resources (SceneRenderer::State's place-2 members, Architecture §8.14 item 10): created on the first render
-	// with a Sky, dropped with the view's state on a device loss or trim and created again by the next render, which then
-	// regenerates everything (the keys are empty). RGBA16F LUTs and cubes; the cubes with their mips.
+	// with a Sky, dropped with the view's state on a device loss and created again by the next render, which then regenerates
+	// everything (the keys are empty; a shader reload empties them too). RGBA16F LUTs and cubes; the cubes with their mips.
 	struct SkyViewResources
 	{
 		nvrhi::BufferHandle Constants{};             // SkyConstants, b1
@@ -91,6 +95,7 @@ namespace Engine {
 		nvrhi::BufferHandle Partials{};              // the SH9 projection's partial sums
 		nvrhi::BufferHandle Totals{};                // their reduction: the radiance SH9 and the solid angle
 		nvrhi::BufferHandle Results{};               // SkyResults (Shared/SkyConstants.h)
+		nvrhi::BufferHandle ReflectionRelights{};    // MaxViewReflectionProbes float4, the reflection probes' relight entries
 		std::optional<SkyLutKey> LutKey{};           // the atmosphere the transmittance and multiple-scattering LUTs hold
 		std::optional<SkyLightingKey> LightingKey{}; // the light the cubes and totals hold
 	};
@@ -117,14 +122,14 @@ namespace Engine {
 	[[nodiscard]] Result<SkyViewResources> CreateSkyViewResources(GraphicsDevice& device);
 
 	// The SkyLighting declaration's pipelines: the Sky program's computes (CSTransmittanceLut, CSMultipleScatteringLut,
-	// CSSkyViewLut, CSSkyCube, CSSkyFinalize; W45.3 adds CSProbeRelight) and EnvironmentBake's CSDownsampleCube,
-	// CSPrefilterSpecular, CSProjectIrradiance and CSReduceIrradiance from EnvironmentBaker::GetLayoutDescriptions, the same SPIR-V.
-	// Created once per device at startup and owned by SceneRendererPipelines; binding sets from the view's PassBindingCache.
-	// Main thread only; not copyable or movable.
+	// CSSkyViewLut, CSSkyCube, CSSkyFinalize, CSProbeRelight) and EnvironmentBake's CSDownsampleCube, CSPrefilterSpecular,
+	// CSProjectIrradiance and CSReduceIrradiance from EnvironmentBaker::GetLayoutDescriptions, the same SPIR-V. Created once per
+	// device at startup and owned by SceneRendererPipelines; binding sets from the view's PassBindingCache. Main thread only; not
+	// copyable or movable.
 	class SkyLightingPass
 	{
 	public:
-		static constexpr uint32_t PipelineCount = 9;
+		static constexpr uint32_t PipelineCount = 10;
 
 		class ConstructionKey
 		{
@@ -142,7 +147,7 @@ namespace Engine {
 		// those of PipelineFactory and the GraphicsDevice wrappers.
 		[[nodiscard]] static Result<Scope<SkyLightingPass>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
-		// The Sky program's five compute layouts (EnvironmentBaker::GetLayoutDescriptions lists the bake's).
+		// The Sky program's six compute layouts, then the four of the bake's it runs (EnvironmentBaker::GetLayoutDescriptions').
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		[[nodiscard]] uint32_t GetPipelineCount() const;
 
@@ -164,6 +169,19 @@ namespace Engine {
 
 		// The SkyIbl row's every-frame part: CSSkyFinalize into resources.Results. Errors: as above.
 		[[nodiscard]] Status RecordFinalize(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const SkyViewResources& resources);
+
+		// The ProbeRelight row's relight of one volume (W45.3): CSProbeRelight's SkyRelightModeVolume over `probeCount` probes of
+		// `relight` (the volume's GPU relight block, SkyRelightProbeVectors float4 a probe) and the sky's totals
+		// (resources.Totals, times resources.Constants' Intensity), into `coefficients` (the view's IrradianceProbes copy,
+		// UAV-capable) from element `first`. Errors: as above.
+		[[nodiscard]] Status RecordProbeRelight(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const SkyViewResources& resources, nvrhi::IBuffer& relight,
+			nvrhi::IBuffer& coefficients, uint32_t first, uint32_t probeCount);
+
+		// The ProbeRelight row's reflection scales: CSProbeRelight's SkyRelightModeReflections over the first `reflectionProbes`
+		// entries of resources.ReflectionRelights (written by the caller first), reading `coefficients`, into resources.Results'
+		// SkyResultsReflectionScales. Errors: as above.
+		[[nodiscard]] Status RecordReflectionRelight(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const SkyViewResources& resources,
+			nvrhi::IBuffer& coefficients, uint32_t reflectionProbes);
 	private:
 		[[nodiscard]] Status RecordSkyView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const SkyViewResources& resources, nvrhi::ITexture& target,
 			float altitude);

@@ -408,12 +408,14 @@ namespace Engine {
 			// Sky lights the view (an enabled Sky in a Lit view with a camera outside the wireframe whose resources exist), the Sky
 			// pass draws over the cleared pixels (it lights the view and the camera clears to the skybox), the atmosphere's LUTs
 			// and the image-based light are regenerated this render (their keys changed), and the view's SkyConstants and the
-			// light's key. SkyUpdates is RenderStats::SkyUpdates.
+			// light's key. SkyUpdates is RenderStats::SkyUpdates, and RelitIrradianceVolumes (W45.3) the volumes its ProbeRelight row
+			// relit (RenderStats::RelitIrradianceVolumes).
 			bool Sky = false;
 			bool DrawsSky = false;
 			bool SkyLutUpdate = false;
 			bool SkyUpdate = false;
 			uint32_t SkyUpdates = 0;
+			uint32_t RelitIrradianceVolumes = 0;
 			SkyConstants SkyView{};
 			SkyLutKey SkyLuts{};
 			SkyLightingKey SkyLighting{};
@@ -923,6 +925,8 @@ namespace Engine {
 		// or a mirror slot's with its framebuffer, constants and scissor).
 		void PrepareSky(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera, bool lit);
 		void RecordSkyLighting(Detail::SceneRendererFrame& frame);
+		// M45's W45.3: the ProbeRelight row (SceneRendererSky.cpp), at the end of RecordSkyLighting.
+		void RecordProbeRelight(Detail::SceneRendererFrame& frame);
 		[[nodiscard]] Status RecordSky(nvrhi::ICommandList& commandList, nvrhi::IFramebuffer& framebuffer, nvrhi::IBuffer& viewConstants, nvrhi::IBuffer& fogConstants,
 			const std::optional<nvrhi::Rect>& scissor);
 		// LightClusterConstantsBuffer when it is null, and LightClusterBuffer when it is null or holds fewer than

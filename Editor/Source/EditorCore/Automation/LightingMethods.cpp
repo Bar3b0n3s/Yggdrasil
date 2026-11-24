@@ -34,7 +34,8 @@ namespace Engine {
 				probes.push_back({ .Entity = context.MakeEntitySummary(scene.FindEntityByID(entry.Entity)),
 					.Path = entry.Path,
 					.Asset = AssetSummary{ .Id = entry.Asset.ToString(), .Path = entry.Path, .Type = type },
-					.Changed = entry.Changed });
+					.Changed = entry.Changed,
+					.Relightable = entry.Relightable });
 			}
 			return probes;
 		}
@@ -65,7 +66,11 @@ namespace Engine {
 			.Field("entity", &LightingBakeProbe::Entity, "The probe's entity.")
 			.Field("path", &LightingBakeProbe::Path, "The written source file, project-relative: Assets/Lighting/<the scene's path below Assets/ without .scene>/<entity id>.irradiance or .hdr.")
 			.Field("asset", &LightingBakeProbe::Asset, "The baked asset, which the probe's Data now references.")
-			.Field("changed", &LightingBakeProbe::Changed, "Whether the file's bytes changed (false when a rebake found the same light).");
+			.Field("changed", &LightingBakeProbe::Changed, "Whether the file's bytes changed (false when a rebake found the same light).")
+			.Field("relightable", &LightingBakeProbe::Relightable,
+				"Whether the IrradianceVolume was baked relightable: under an enabled Sky, its data keeps each probe's local light and sky "
+				"transfer, so the renderer relights it by the sky it renders (a cave darkens at night with no bake between); false for a "
+				"ReflectionProbe and for a scene without a Sky.");
 		registry.Struct<LightingBakeMethodResult>("LightingBakeMethodResult", "The probes lighting.bake baked, in canonical entity order.")
 			.Field("irradianceVolumes", &LightingBakeMethodResult::IrradianceVolumes, "The baked IrradianceVolumes.")
 			.Field("reflectionProbes", &LightingBakeMethodResult::ReflectionProbes, "The baked ReflectionProbes.");
@@ -80,7 +85,8 @@ namespace Engine {
 							   "the saved scene (Assets/Lighting/<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene "
 							   "bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes "
 							   "of one scene write byte-identical files. Each capture and import frees what it used before the next, so a bake's "
-							   "device allocations stay the same whatever its probe count, and baking again adds none.",
+							   "device allocations stay the same whatever its probe count, and baking again adds none. Under an enabled Sky the "
+							   "IrradianceVolumes bake relightable, so the sky relights them as it turns.",
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsSceneTarget = true,

@@ -1350,6 +1350,14 @@ namespace Engine {
 		{
 			state.ClearBindings();
 			state.ShadowCache.Clear(); // M29: maps drawn by the replaced pipelines are not reused
+			// M45 (the W45.2 review's finding 1): nor are the sky's LUTs and image-based light, nor the probes they relit, which
+			// the view copies again from their bakes (and relights when its sky asks).
+			if (state.SkyResources.has_value())
+			{
+				state.SkyResources->LutKey.reset();
+				state.SkyResources->LightingKey.reset();
+			}
+			state.ProbeResources.CopiedVolumes.clear();
 			state.PipelineGeneration = state.Pipelines->Generation;
 		}
 		state.Stats = {};
@@ -1488,6 +1496,7 @@ namespace Engine {
 		stats.CulledPlanarReflections = frame.CulledPlanarReflections;
 		stats.PlanarReflectionEntities = std::move(frame.PlanarReflectionEntities);
 		stats.SkyUpdates = frame.SkyUpdates; // M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3)
+		stats.RelitIrradianceVolumes = frame.RelitIrradianceVolumes;
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1896,7 +1905,8 @@ namespace Engine {
 		frame.Fog.SkyIsClearColor = frame.DrawsSkybox || frame.DrawsSky ? 0U : 1U;
 		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the view's probes, in the views
 		// that light with the environment, never in a bake's captures (RenderQualitySettings::Probes false: one bounce).
-		frame.Probes = Utils::PrepareProbeShading(*Cache, snapshot, camera, hasCamera && frame.IsLit && !frame.Wireframe && snapshot.Quality.Probes);
+		// M45: with a Sky lighting the view, its relightable volumes are relit (SceneRendererSky.cpp's ProbeRelight row).
+		frame.Probes = Utils::PrepareProbeShading(*Cache, snapshot, camera, hasCamera && frame.IsLit && !frame.Wireframe && snapshot.Quality.Probes, frame.Sky);
 		frame.KeepFirstError(Utils::EnsureProbeViewResources(*Device, ProbeResources, frame.Probes));
 		if ((frame.Probes.DroppedVolumes > 0 || frame.Probes.DroppedReflectionProbes > 0) && !ProbeLimitLogged)
 		{

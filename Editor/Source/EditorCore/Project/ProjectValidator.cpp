@@ -227,6 +227,7 @@ namespace Engine {
 			// 0060's phase-8 ledger: after M44's codes), an array of its own (SkyDiagnosticCodes).
 			SkyLightInvalidCode,
 			SkyEnvironmentIgnoredCode,
+			ProbeNotRelightableCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -512,6 +513,11 @@ namespace Engine {
 				"An Environment is beside a Sky in one scene: the Sky lights the scene and draws its sky, so the Environment is unused.",
 				"Remove the Environment (or disable its entity) to light the scene with the Sky, or remove the Sky to light it with the "
 				"Environment's map." },
+			ValidationCodeInfo{ ProbeNotRelightableCode, "Warning", false,
+				"Under a Sky, an IrradianceVolume was baked without the Sky (its data has no relight block), or a ReflectionProbe lies in no "
+				"relightable IrradianceVolume: the sky does not relight it, so it keeps its bake's light as the sun turns.",
+				"Bake the scene's lighting under its Sky with lighting.bake (the editor's Bake Lighting), with an IrradianceVolume around each "
+				"ReflectionProbe, then save the scene." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1312,7 +1318,8 @@ namespace Engine {
 		}
 
 		// The probe checks of §13.7 (M26, Scene/ProbeValidation.h): PROBE_NOT_BAKED on each IrradianceVolume and ReflectionProbe
-		// without data that loads through the editor's asset manager. Not fixable: baking renders (lighting.bake).
+		// without data that loads through the editor's asset manager, and M45's PROBE_NOT_RELIGHTABLE on each a Sky does not
+		// relight. Not fixable: baking renders (lighting.bake).
 		static void CheckProbes(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			AssetManager* assets = editor.GetEngine().GetAssetManager();

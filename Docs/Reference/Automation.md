@@ -1383,7 +1383,7 @@ Example: Check that a replay's verification fails without its input.
 
 ### lighting.bake
 
-Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/\<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files. Each capture and import frees what it used before the next, so a bake's device allocations stay the same whatever its probe count, and baking again adds none.
+Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/\<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files. Each capture and import frees what it used before the next, so a bake's device allocations stay the same whatever its probe count, and baking again adds none. Under an enabled Sky the IrradianceVolumes bake relightable, so the sky relights them as it turns.
 
 - Flags: tool `lighting_bake`, mutates, scene target
 - Timeout: 600 s

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <functional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 // The sky's goldens of M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 6; Roadmap M45's acceptance), the scene
@@ -21,6 +22,10 @@
 //     the moon and the stars, the sun (and at night the moon) turned in the extracted snapshot and the lights driven again
 //     (ApplySkyLightDriving; the roles stay resolved, so no ResolveSkyLights, whose precondition is the authored colours).
 //   - SkyOvercast: two tiles, a thick haze with broken clouds and the storm's full overcast, the sun in the morning.
+//   - SkyProbes (W45.3): two tiles of SkyProbes.scene, a room with a window and a cave mouth under the Sky, lit by a lamp, a
+//     relightable irradiance volume and a reflection probe (a chrome ball) that the scaffold baked once under the scene's
+//     sun: noon, the sun through the window, and midnight, the sun below the horizon, with no bake between, the volume and
+//     the reflection relit by the sky (Renderer/ProbeRelight.h).
 // Each grid is rendered twice, to the same bytes.
 
 namespace Engine {
@@ -44,16 +49,22 @@ namespace Engine {
 			std::function<void(RenderSky&)> Edit{};
 		};
 
-		// The cove's tiles rendered at 320 x 180 and laid out in `columns` columns.
-		[[nodiscard]] Image RenderSkyTiles(Test::HeadlessGpuFixture& gpu, std::span<const SkyTile> tiles, uint32_t columns)
+		// The tiles of the golden scene `scene` rendered at 320 x 180 and laid out in `columns` columns.
+		[[nodiscard]] Image RenderSkyTiles(Test::HeadlessGpuFixture& gpu, std::string_view scene, std::span<const SkyTile> tiles, uint32_t columns)
 		{
 			std::vector<Image> images;
-			const auto inspect = [](const RenderSnapshot& snapshot)
+			const bool probes = scene == "SkyProbes";
+			const auto inspect = [probes](const RenderSnapshot& snapshot)
 			{
 				CHECK(snapshot.Sky.Enabled);
 				CHECK(snapshot.Sky.HasMoon);
 				CHECK(snapshot.Sky.DriveLights);
 				CHECK(snapshot.Camera.ClearToSkybox);
+				if (probes)
+				{
+					CHECK(snapshot.IrradianceVolumes.size() == 1);
+					CHECK(snapshot.ReflectionProbes.size() == 1);
+				}
 			};
 			for (const SkyTile& tile : tiles)
 			{
@@ -68,7 +79,7 @@ namespace Engine {
 					ApplySkyLightDriving(snapshot);
 				};
 				const Test::GoldenSceneOptions options{ .Width = 320, .Height = 180, .EditSnapshot = edit, .InspectSnapshot = inspect };
-				Result<Image> image = Test::RenderGoldenScene(gpu, "SkyDay", options);
+				Result<Image> image = Test::RenderGoldenScene(gpu, scene, options);
 				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
 				REQUIRE(image->IsValid());
 				images.push_back(std::move(*image));
@@ -96,10 +107,10 @@ namespace Engine {
 				{ .Sun = SkyDirection(1.0f, 42.0f), .Moon = moon },    // dusk
 				{ .Sun = SkyDirection(-25.0f, 100.0f), .Moon = moon }, // night: the moon and the stars
 			};
-			const Image day = RenderSkyTiles(gpu, tiles, 3);
+			const Image day = RenderSkyTiles(gpu, "SkyDay", tiles, 3);
 			CHECK(day.Width == 960);
 			CHECK(day.Height == 360);
-			CHECK(RenderSkyTiles(gpu, tiles, 3).Pixels == day.Pixels);
+			CHECK(RenderSkyTiles(gpu, "SkyDay", tiles, 3).Pixels == day.Pixels);
 			ENGINE_CHECK_GOLDEN("SkyDay", day, gpu.GetDevice().GetInfo().DeviceClass);
 			gpu.GetDevice().RunGarbageCollection();
 		}
@@ -121,11 +132,30 @@ namespace Engine {
 				sky.Clouds = 1.0f;
 			};
 			const std::vector<SkyTile> tiles = { { .Sun = sun, .Moon = moon, .Edit = haze }, { .Sun = sun, .Moon = moon, .Edit = storm } };
-			const Image overcast = RenderSkyTiles(gpu, tiles, 2);
+			const Image overcast = RenderSkyTiles(gpu, "SkyDay", tiles, 2);
 			CHECK(overcast.Width == 640);
 			CHECK(overcast.Height == 180);
-			CHECK(RenderSkyTiles(gpu, tiles, 2).Pixels == overcast.Pixels);
+			CHECK(RenderSkyTiles(gpu, "SkyDay", tiles, 2).Pixels == overcast.Pixels);
 			ENGINE_CHECK_GOLDEN("SkyOvercast", overcast, gpu.GetDevice().GetInfo().DeviceClass);
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("Golden: SkyProbes")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			// The moon stands in the east all night; the sun shines through the window from the west at noon and is 40 degrees
+			// below the horizon at midnight.
+			const glm::vec3 moon = SkyDirection(40.0f, 90.0f);
+			const std::vector<SkyTile> tiles = {
+				{ .Sun = SkyDirection(60.0f, -90.0f), .Moon = moon },  // noon
+				{ .Sun = SkyDirection(-40.0f, -60.0f), .Moon = moon }, // midnight
+			};
+			const Image probes = RenderSkyTiles(gpu, "SkyProbes", tiles, 2);
+			CHECK(probes.Width == 640);
+			CHECK(probes.Height == 180);
+			CHECK(RenderSkyTiles(gpu, "SkyProbes", tiles, 2).Pixels == probes.Pixels);
+			ENGINE_CHECK_GOLDEN("SkyProbes", probes, gpu.GetDevice().GetInfo().DeviceClass);
 			gpu.GetDevice().RunGarbageCollection();
 		}
 	}

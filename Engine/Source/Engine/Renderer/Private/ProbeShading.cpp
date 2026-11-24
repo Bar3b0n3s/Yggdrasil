@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace Engine {
@@ -39,6 +40,10 @@ namespace Engine {
 				nvrhi::BufferHandle Probes{};
 				ProbeMirrorId Id{};
 				glm::uvec3 Counts = glm::uvec3(0);
+				// M45: the mirror's relight block and baked constant terms (null without a relight, or without one); the terms
+				// are the cache's, read within PrepareProbeShading only.
+				nvrhi::BufferHandle Relight{};
+				const std::vector<glm::vec3>* ConstantTerms = nullptr;
 			};
 
 			struct ReflectionCandidate
@@ -99,6 +104,40 @@ namespace Engine {
 			return IsOutsideView(Aabb{ .Min = -size * 0.5f, .Max = size * 0.5f }, world, camera);
 		}
 
+		// M45: the relight entry of a reflection probe centred at `centre` among the view's sorted `volumes` (largest first, the
+		// first coefficient of each in `firsts`): the smallest relightable one whose box holds the centre, its probe nearest the
+		// centre in grid coordinates (rounded, clamped), that probe's constant term's element in the view's copy and its baked
+		// constant term's luminance; x -1 outside every relit volume. z is `intensity`.
+		template<typename Candidate>
+		static glm::vec4 MakeReflectionRelight(std::span<const Candidate> volumes, std::span<const uint32_t> firsts, const glm::vec3& centre, float intensity)
+		{
+			for (size_t index = volumes.size(); index-- > 0;)
+			{
+				const Candidate& volume = volumes[index];
+				if (volume.Relight == nullptr || volume.ConstantTerms == nullptr)
+					continue;
+				const glm::vec3 local = glm::vec3(volume.Box.WorldToLocal * glm::vec4(centre, 1.0f));
+				const glm::vec3 size = volume.Item->Size;
+				if (glm::any(glm::greaterThan(glm::abs(local), size * 0.5f)))
+					continue;
+				const glm::vec3 grid = (local / size + 0.5f) * glm::vec3(volume.Counts - glm::uvec3(1));
+				glm::uvec3 nearest(0);
+				for (glm::length_t axis = 0; axis < 3; ++axis)
+				{
+					const float rounded = std::floor(grid[axis] + 0.5f);
+					nearest[axis] = static_cast<uint32_t>(std::clamp(rounded, 0.0f, static_cast<float>(volume.Counts[axis] - 1)));
+				}
+				const size_t probe = static_cast<size_t>(nearest.x)
+					+ static_cast<size_t>(volume.Counts.x) * (static_cast<size_t>(nearest.y) + static_cast<size_t>(volume.Counts.y) * nearest.z);
+				if (probe >= volume.ConstantTerms->size())
+					continue;
+				const float luminance = glm::dot((*volume.ConstantTerms)[probe], glm::vec3(0.2126f, 0.7152f, 0.0722f));
+				const uint32_t element = firsts[index] + static_cast<uint32_t>(probe) * IrradianceProbeCoefficientCount;
+				return glm::vec4(static_cast<float>(element), luminance, intensity, 0.0f);
+			}
+			return glm::vec4(-1.0f, 0.0f, intensity, 0.0f);
+		}
+
 		// Orders `candidates` from the largest box to the smallest, ties in snapshot order.
 		template<typename Candidate>
 		static void SortLargestFirst(std::vector<Candidate>& candidates)
@@ -109,7 +148,15 @@ namespace Engine {
 			});
 		}
 
-		ProbeShadingInputs PrepareProbeShading(GpuResourceCache& cache, const RenderSnapshot& snapshot, const CameraData& camera, bool enabled)
+		bool ProbeShadingInputs::HasRelight() const
+		{
+			return std::ranges::any_of(Relights, [](const nvrhi::BufferHandle& relight)
+			{
+				return relight != nullptr;
+			});
+		}
+
+		ProbeShadingInputs PrepareProbeShading(GpuResourceCache& cache, const RenderSnapshot& snapshot, const CameraData& camera, bool enabled, bool relight)
 		{
 			ProbeShadingInputs inputs;
 			if (!enabled)
@@ -129,11 +176,14 @@ namespace Engine {
 				const GpuIrradianceVolume* mirror = cache.GetIrradianceVolume(item.Data);
 				if (mirror == nullptr || mirror->Probes == nullptr)
 					continue;
+				const bool relit = relight && mirror->Relight != nullptr;
 				volumes.push_back({ .Item = &item,
 					.Box = *box,
 					.Probes = mirror->Probes,
 					.Id = { .Asset = item.Data, .Version = mirror->Version },
-					.Counts = glm::uvec3(mirror->CountX, mirror->CountY, mirror->CountZ) });
+					.Counts = glm::uvec3(mirror->CountX, mirror->CountY, mirror->CountZ),
+					.Relight = relit ? mirror->Relight : nvrhi::BufferHandle(),
+					.ConstantTerms = relit ? &mirror->ConstantTerms : nullptr });
 			}
 
 			std::vector<ReflectionCandidate> reflections;
@@ -165,6 +215,7 @@ namespace Engine {
 			}
 
 			SortLargestFirst(volumes);
+			std::vector<uint32_t> firsts;
 			for (size_t index = 0; index < volumes.size(); ++index)
 			{
 				const VolumeCandidate& candidate = volumes[index];
@@ -173,9 +224,11 @@ namespace Engine {
 				constants.HalfSize = glm::vec4(candidate.Item->Size * 0.5f, ClampBlendDistance(candidate.Item->BlendDistance));
 				constants.AxisScale = glm::vec4(candidate.Box.AxisScale, ClampProbeIntensity(candidate.Item->Intensity));
 				constants.Probes = glm::uvec4(candidate.Counts, inputs.CoefficientCount);
+				firsts.push_back(inputs.CoefficientCount);
 				inputs.CoefficientCount += candidate.Counts.x * candidate.Counts.y * candidate.Counts.z * IrradianceProbeCoefficientCount;
 				inputs.Volumes.push_back(candidate.Probes);
 				inputs.VolumeIds.push_back(candidate.Id);
+				inputs.Relights.push_back(candidate.Relight);
 			}
 
 			SortLargestFirst(reflections);
@@ -191,6 +244,8 @@ namespace Engine {
 				constants.Indices = glm::uvec4(static_cast<uint32_t>(index), candidate.Item->BoxProjection ? 1U : 0U, 0U, 0U);
 				inputs.Cubes.push_back(candidate.Cube);
 				inputs.CubeIds.push_back(candidate.Id);
+				inputs.ReflectionRelights[index] = MakeReflectionRelight(std::span<const VolumeCandidate>(volumes), std::span<const uint32_t>(firsts),
+					glm::vec3(candidate.Item->World[3]), ClampProbeIntensity(candidate.Item->Intensity));
 			}
 			inputs.Constants.Counts = glm::uvec4(static_cast<uint32_t>(volumes.size()), static_cast<uint32_t>(reflections.size()), 0U, 0U);
 			return inputs;
@@ -210,7 +265,10 @@ namespace Engine {
 				inputs.Constants.Counts.x = 0;
 				inputs.Volumes.clear();
 				inputs.VolumeIds.clear();
+				inputs.Relights.clear();
 				inputs.CoefficientCount = 0;
+				for (glm::vec4& entry : inputs.ReflectionRelights)
+					entry.x = -1.0f;
 			};
 			const auto withoutReflections = [&inputs]()
 			{
@@ -246,9 +304,12 @@ namespace Engine {
 				{
 					resources.Coefficients = nullptr;
 					resources.CopiedVolumes.clear();
+					resources.HoldsRelight = false;
 					nvrhi::BufferDesc desc;
 					desc.byteSize = needed;
 					desc.structStride = sizeof(glm::vec4);
+					// M45: the ProbeRelight row writes the relit volumes' probes.
+					desc.canHaveUAVs = true;
 					desc.initialState = nvrhi::ResourceStates::ShaderResource;
 					desc.keepInitialState = true;
 					desc.debugName = "SceneRenderer.IrradianceProbes";
@@ -303,7 +364,9 @@ namespace Engine {
 			if (resources.Constants == nullptr)
 				return;
 			commandList.writeBuffer(resources.Constants, &inputs.Constants, sizeof(inputs.Constants));
-			if (!inputs.Volumes.empty() && resources.CopiedVolumes != inputs.VolumeIds)
+			// M45: copies that hold a relight no sky asks for any more take their bakes again.
+			const bool restoreBakes = resources.HoldsRelight && !inputs.HasRelight();
+			if (!inputs.Volumes.empty() && (resources.CopiedVolumes != inputs.VolumeIds || restoreBakes))
 			{
 				for (size_t index = 0; index < inputs.Volumes.size(); ++index)
 				{
@@ -312,6 +375,7 @@ namespace Engine {
 					commandList.copyBuffer(resources.Coefficients, static_cast<uint64_t>(probes.w) * sizeof(glm::vec4), inputs.Volumes[index], 0, bytes);
 				}
 				resources.CopiedVolumes = inputs.VolumeIds;
+				resources.HoldsRelight = false;
 			}
 			if (!inputs.Cubes.empty() && resources.CopiedCubes != inputs.CubeIds)
 			{

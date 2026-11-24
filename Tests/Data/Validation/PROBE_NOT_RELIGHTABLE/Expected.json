@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PROBE_NOT_RELIGHTABLE"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

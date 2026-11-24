@@ -7,6 +7,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/ProbeRelight.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -19,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -489,6 +491,124 @@ namespace Engine {
 				};
 				const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
 				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): T_ij is the integral of V Y_i Y_j over the sphere. A
+		// probe that sees the sky everywhere has the orthonormal basis' Gram matrix, the identity (within the basis constants'
+		// six digits and the texels' sampling); one that sees it nowhere has zero, exactly; one that sees the upper hemisphere
+		// alone has half of T00 (Y00 is constant) and T01 = Y00 Y1(-1) integrated over it, pi Y00 0.488603 (the y over a hemisphere
+		// integrating to pi).
+		TEST_CASE("ProbeCapture: an open probe's sky transfer is the identity and a closed one's is zero")
+		{
+			const auto visible = [](const auto& rule)
+			{
+				ProbeCubeCapture capture = MakeCapture(16, [](const glm::dvec3&)
+				{
+					return glm::vec3(0.0f);
+				});
+				for (uint32_t face = 0; face < 6; ++face)
+				{
+					for (uint32_t row = 0; row < 16; ++row)
+					{
+						for (uint32_t column = 0; column < 16; ++column)
+							capture.Visibility[face].push_back(rule(Test::CubeTexelDirection(face, column, row, 16)) ? 1.0f : 0.0f);
+					}
+				}
+				return capture;
+			};
+			const std::array<float, IrradianceTransferCount> open = ProjectCubeToSkyTransfer(visible([](const glm::dvec3&)
+			{
+				return true;
+			}));
+			for (size_t i = 0; i < 9; ++i)
+			{
+				for (size_t j = i; j < 9; ++j)
+				{
+					CAPTURE(i);
+					CAPTURE(j);
+					CHECK(open[GetSkyTransferIndex(i, j)] == doctest::Approx(i == j ? 1.0 : 0.0).epsilon(0.01).scale(1.0));
+				}
+			}
+			const std::array<float, IrradianceTransferCount> closed = ProjectCubeToSkyTransfer(visible([](const glm::dvec3&)
+			{
+				return false;
+			}));
+			for (const float value : closed)
+				CHECK(value == 0.0f);
+			const std::array<float, IrradianceTransferCount> upper = ProjectCubeToSkyTransfer(visible([](const glm::dvec3& direction)
+			{
+				return direction.y > 0.0;
+			}));
+			CHECK(upper[GetSkyTransferIndex(0, 0)] == doctest::Approx(0.5).epsilon(0.01));
+			CHECK(upper[GetSkyTransferIndex(0, 1)] == doctest::Approx(std::numbers::pi * 0.282095 * 0.488603).epsilon(0.01));
+		}
+
+		// M45: a relight capture (ProbeCaptureMode::Relight) of MakeRelightCaptureSnapshot's snapshot, the sky dark and the Sun
+		// light off, sees the scene's own light alone (the emitting markers, black where the sky is), reads back each face's
+		// visibility in the faces' texel order (0 on its marker, 1 where the sky is, never at a mirrored or flipped texel: the
+		// depth's columns are mirrored back as the colour's), and the sky's totals, whose solid angle is the sphere's. A plain
+		// capture reads neither, and a relight capture of a snapshot without a Sky is refused.
+		TEST_CASE("ProbeCapture: a relight capture reads where each face sees the sky, and the sky's totals" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				ProbeCaptureSetup setup(gpu);
+				RenderSnapshot snapshot = MakeProbeSnapshot(glm::vec3(0.0f));
+				snapshot.Camera.ClearToSkybox = true;
+				AddFaceMarkers(snapshot);
+				snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional,
+					.Color = glm::vec3(1.0f),
+					.Intensity = 5.0f,
+					.Direction = glm::normalize(glm::vec3(0.3f, -0.8f, -0.4f)),
+					.LightAngle = 0.53f,
+					.Entity = UUID(77) });
+				snapshot.Sky.Enabled = true;
+				snapshot.Sky.Sun = UUID(77);
+				snapshot.Sky.DriveLights = false;
+				ResolveSkyLights(snapshot);
+				const RenderSnapshot relight = MakeRelightCaptureSnapshot(snapshot);
+				CHECK(relight.Sky.Intensity == 0.0f);
+				CHECK(relight.Lights[0].Color == glm::vec3(0.0f));
+				CHECK(relight.Lights[0].Intensity == 5.0f);
+
+				const Result<ProbeCubeCapture> capture = setup.GetCapture().Capture(relight, glm::vec3(0.0f), 16, ProbeCaptureMode::Relight);
+				REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+				const auto visibility = [&capture](size_t face, uint32_t column, uint32_t row)
+				{
+					return capture->Visibility[face][static_cast<size_t>(row) * 16 + column];
+				};
+				for (size_t face = 0; face < 6; ++face)
+				{
+					CAPTURE(face);
+					REQUIRE(capture->Visibility[face].size() == 256);
+					CHECK(visibility(face, 12, 12) == 0.0f);
+					CHECK(visibility(face, 3, 12) == 1.0f);
+					CHECK(visibility(face, 12, 3) == 1.0f);
+					CHECK(visibility(face, 8, 8) == 1.0f);
+					// The marker's own light, and the dark sky.
+					const glm::vec4 marker = capture->Faces[face][12 * 16 + 12];
+					CHECK(glm::max(marker.x, glm::max(marker.y, marker.z)) > 3.0f);
+					CHECK(capture->Faces[face][8 * 16 + 8] == glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+				}
+				REQUIRE(capture->SkyRadianceTotals.has_value());
+				CHECK((*capture->SkyRadianceTotals)[9].x == doctest::Approx(4.0 * std::numbers::pi).epsilon(1e-3));
+				CHECK((*capture->SkyRadianceTotals)[0].z > 0.0f);
+
+				const Result<ProbeCubeCapture> plain = setup.GetCapture().Capture(snapshot, glm::vec3(0.0f), 16);
+				REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+				CHECK(plain->Visibility[0].empty());
+				CHECK_FALSE(plain->SkyRadianceTotals.has_value());
+				// The plain capture sees the lit sky where the relight capture saw black.
+				CHECK(plain->Faces[2][8 * 16 + 8].z > 0.0f);
+
+				RenderSnapshot skyless = snapshot;
+				skyless.Sky.Enabled = false;
+				const Result<ProbeCubeCapture> refused = setup.GetCapture().Capture(skyless, glm::vec3(0.0f), 16, ProbeCaptureMode::Relight);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
