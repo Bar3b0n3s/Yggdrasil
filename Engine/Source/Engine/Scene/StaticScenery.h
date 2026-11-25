@@ -32,9 +32,10 @@ namespace Engine {
 	{
 		std::string Code{}; // SceneStaticMovesCode
 		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
-		UUID Entity{};           // the static entity
-		std::string Component{}; // the component that moves it: "RigidBody", "CharacterController", "BoneAttachment", "Animator" or "VehicleWheel"
-		std::string Field{};     // "Type" for a RigidBody, "RootMotion" for an Animator, empty otherwise
+		UUID Entity{}; // the static entity
+		// The component that moves it: "RigidBody", "CharacterController", "BoneAttachment", "Animator" or "VehicleWheel".
+		std::string Component{};
+		std::string Field{}; // "Type" for a RigidBody, "RootMotion" for an Animator, empty otherwise
 		std::string Message{};
 		std::string Hint{};
 

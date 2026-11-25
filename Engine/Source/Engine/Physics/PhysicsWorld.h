@@ -52,8 +52,8 @@
 // surfaces (PhysicsColliderSurface, SetColliderSurfaces; Docs/Decisions/0053-m36-contact-surfaces.md decision 2) and
 // bounds BodyDescription::Friction by MaxPhysicsFriction (the W36.1 review's finding 1); M37 appends the joints section
 // (Docs/Decisions/0054-m37-joints.md decision 2); M44 appends BodyDescription::MassOverride and the centres of mass and
-// vehicles sections (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3); each reviewed as a change to a frozen
-// interface.
+// vehicles sections (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3); M47 appends ApplyBuoyancy
+// (Physics/PhysicsBuoyancy.h; Docs/Decisions/0065-m47-water.md decision 3); each reviewed as a change to a frozen interface.
 
 namespace Engine {
 

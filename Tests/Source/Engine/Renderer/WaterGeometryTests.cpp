@@ -428,6 +428,49 @@ namespace Engine {
 			CHECK(raised->Max.y == doctest::Approx(-std::tan(glm::radians(20.0f)) / std::tan(glm::radians(30.0f))).epsilon(1.0e-3));
 		}
 
+		// Phase 8's landing (the last fixes' review, finding 2, decided by the lead): an Ocean's mirror needs no allowance for its
+		// waves' height. Water.slang samples the mirror at the base plane's point under each pixel, never at the displaced
+		// surface's, and the mirror camera is the view's reflected in that plane, so every sample lies in the base plane's band,
+		// a crest above the camera's height included. A camera 1.5 m over a swell whose amplitudes sum to 2 m gets the calm
+		// sea's band, which a level camera's tops out under the horizon.
+		TEST_CASE("WaterGeometry: an Ocean's mirror is its base plane's band whatever its waves' height")
+		{
+			const auto camera = [](const glm::vec3& eye, const glm::vec3& target)
+			{
+				CameraData data;
+				data.Position = eye;
+				data.View = glm::lookAt(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
+				data.NearClip = 0.1f;
+				data.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 10.0f, 0.1f, 1000.0f, 64, 64);
+				return data;
+			};
+			const std::array<WaterWave, 2> swell = { WaterWave{ .Direction = 0.0f, .Wavelength = 60.0f, .Amplitude = 1.2f, .Steepness = 0.5f },
+				WaterWave{ .Direction = 40.0f, .Wavelength = 40.0f, .Amplitude = 0.8f, .Steepness = 0.5f } };
+			const WaterItem calm = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0);
+			const WaterItem wavy = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), swell, 2.0);
+			float amplitudes = 0.0f;
+			for (uint32_t index = 0; index < wavy.WaveCount; ++index)
+				amplitudes += wavy.Waves[index].Amplitude;
+			REQUIRE(amplitudes > 1.9f); // the crests rise about 0.5 m above the camera
+
+			const glm::vec3 eye(0.0f, 1.5f, 0.0f);
+			for (const float pitch : { 0.0f, -10.0f, 10.0f })
+			{
+				CAPTURE(pitch);
+				const CameraData view = camera(eye, eye + glm::vec3(0.0f, std::tan(glm::radians(pitch)), -1.0f));
+				const std::optional<PlanarReflectionScreenRect> calmRect = ComputeWaterPlanarReflectionScreenRect(calm, view);
+				const std::optional<PlanarReflectionScreenRect> wavyRect = ComputeWaterPlanarReflectionScreenRect(wavy, view);
+				REQUIRE(calmRect.has_value());
+				REQUIRE(wavyRect.has_value());
+				CHECK(*wavyRect == *calmRect);
+				if (pitch == 0.0f)
+				{
+					CHECK(wavyRect->Min.y == -1.0f);
+					CHECK(wavyRect->Max.y < 0.0f);
+				}
+			}
+		}
+
 		// W47.3's review, nit 7: a Rectangle's mirror covers its footprint widened by the surface's sampling offset
 		// (WaterPlanarDistortion) and its waves' sideways reach (the sum of Q A), so its drawn edge never samples the mirror
 		// view's clear colour.

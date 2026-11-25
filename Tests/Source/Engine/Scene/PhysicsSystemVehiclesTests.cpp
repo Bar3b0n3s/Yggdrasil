@@ -45,9 +45,11 @@
 #include <vector>
 
 // The play session's vehicles (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; Architecture §9.11;
-// PhysicsSystem.h's M44 paragraph): wheel poses (marked written for M43's change tracking since the landing), driver input and waking, kept wheel frames, settings in place, every body
-// removal path, the grip by surface, PHYSICS_VEHICLE_INVALID at run time, the state hash's vehicle part, two histories
-// stepping alike, and random vehicles and edits never reaching a Jolt assert. Through PlaySession (lockstep ticks, Play mode).
+// PhysicsSystem.h's M44 paragraph): wheel poses (marked written for M43's change tracking since the landing), driver input
+// and waking, kept wheel frames, settings in place, every body removal path, the grip by surface, PHYSICS_VEHICLE_INVALID at
+// run time, the state hash's vehicle part, two histories stepping alike, the visits of a step (M43's EntitiesVisited, since
+// the landing), and random vehicles and edits never reaching a Jolt assert. Through PlaySession (lockstep ticks, Play mode),
+// but for the visits, counted on a PhysicsSystem stepped alone.
 
 namespace Engine {
 
@@ -336,6 +338,70 @@ namespace Engine {
 			// The ticks this case is about: the chassis rests while a wheel turns.
 			CHECK(turned > 0);
 			scene.CloseWorldChangeList(list);
+		}
+
+		// Phase 8's landing (ADR 0060's ledger, "Rules for every pass a later lander adds"; the merge review's finding 1): item 4b
+		// and the wheel poses visit the vehicles alone (State::CollectVehicleOwners), as M43's "PhysicsSystem: a tick visits only
+		// the moving bodies and the bodies whose transforms changed" counts the other passes. A braked buggy and three boxes asleep
+		// on the ground: a box's step visits it once (the write-back of every Dynamic body's owner), the buggy's three times (the
+		// write-back, 4b and its wheel poses), and the four wheels, the ground and plain entities never.
+		TEST_CASE("PhysicsVehicles: a step visits each vehicle once in 4b and once in its wheel poses")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddGround(scene));
+			Entity buggy = AddBuggy(scene, "Buggy");
+			buggy.Patch<WheeledVehicleComponent>([](WheeledVehicleComponent& vehicle)
+			{
+				vehicle.Brake = 1.0f;
+			});
+			constexpr int BoxCount = 3;
+			std::vector<UUID> sleepers = { buggy.GetUUID() };
+			for (int index = 0; index < BoxCount; ++index)
+				sleepers.push_back(Test::AddBoxBody(scene, "Box", glm::vec3(6.0f + 3.0f * static_cast<float>(index), 0.5f, 0.0f), glm::vec3(0.5f), BodyType::Dynamic).GetUUID());
+			for (int index = 0; index < 40; ++index)
+			{
+				Entity prop = scene.CreateEntity("Prop");
+				prop.Patch<TransformComponent>([index](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(2.0f * static_cast<float>(index), 5.0f, 10.0f);
+				});
+			}
+			TransformSystem::Update(scene);
+			PhysicsSystemSpecification specification;
+			specification.RuntimeScene = &scene;
+			Result<Scope<PhysicsSystem>> created = PhysicsSystem::Create(specification);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PhysicsSystem& physics = **created;
+			// The transform update, then one step: the entities the step's passes visited.
+			const auto stepVisits = [&scene, &physics](uint64_t tick)
+			{
+				TransformSystem::Update(scene);
+				const uint64_t visited = scene.GetEntitiesVisited();
+				const SimStep step = SimStep::FromTick(tick, 1.0 / 60.0);
+				physics.PreStep(step);
+				physics.Step(step);
+				physics.PostStep(step);
+				return scene.GetEntitiesVisited() - visited;
+			};
+			const auto asleep = [&physics, &sleepers]()
+			{
+				return std::ranges::all_of(sleepers, [&physics](const UUID id)
+				{
+					const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(id);
+					return report.has_value() && report->IsSleeping;
+				});
+			};
+
+			uint64_t tick = 0;
+			for (; tick < 1800 && !asleep(); ++tick)
+				static_cast<void>(stepVisits(tick));
+			REQUIRE(asleep());
+			const std::optional<PhysicsVehicleReport> vehicle = physics.GetVehicleInfo(buggy.GetUUID());
+			REQUIRE(vehicle.has_value());
+			REQUIRE(vehicle->Created);
+			for (int quiet = 0; quiet < 3; ++quiet)
+				CHECK(stepVisits(tick++) == BoxCount + 3);
 		}
 
 		TEST_CASE("PhysicsVehicles: a driver-input write wakes a sleeping vehicle and composes nothing")

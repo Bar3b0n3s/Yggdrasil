@@ -40,8 +40,8 @@
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
-#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
+#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
@@ -72,9 +72,9 @@
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Components/VehicleWheelComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Components/WheeledVehicleComponent.h"
 #include "Engine/Scene/Components/WindComponent.h"
-#include "Engine/Scene/Components/WaterComponent.h"
 
 namespace Engine {
 

@@ -5,12 +5,14 @@
 #include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/BuoyancyComponent.h"
+#include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/WaterValidation.h"
 #include "Support/PhysicsTestScene.h"
 
@@ -20,12 +22,15 @@
 #include <cmath>
 #include <format>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
 // Buoyancy in the play session (M47, Docs/Decisions/0065-m47-water.md decision 3; Architecture §9.12): PhysicsSystem's PreStep
 // item 4c floats every Buoyancy's Dynamic body on the planes its colliders' waters give at the tick's world time, a body on
-// calm, unchanged water sleeps and a change wakes it, and the result is deterministic across Jolt thread counts.
+// calm, unchanged water sleeps and a change wakes it, and the result is deterministic across Jolt thread counts. Phase 8's
+// landing: 4c visits its owners alone (M43's EntitiesVisited), and a body it skipped asleep that item 5 wakes (a character's
+// weight) floats in that step too.
 
 namespace Engine {
 
@@ -423,6 +428,167 @@ namespace Engine {
 			CAPTURE(report->LinearVelocity.x);
 			CHECK(report->LinearVelocity.x > 0.0f);
 			CHECK(Test::GetWorldPosition(**session, "/Box").x > 0.0f);
+		}
+
+		// Phase 8's landing (ADR 0060's ledger, "Rules for every pass a later lander adds"; the merge review's finding 1): item 4c
+		// visits the owners of a Buoyancy alone (Scene::CollectCanonical), as M43's "PhysicsSystem: a tick visits only the moving
+		// bodies and the bodies whose transforms changed" counts the other passes. Rafts asleep on calm water among plain
+		// entities: a step visits each raft twice, once in the write-back (every Dynamic body's owner) and once in 4c, and
+		// nothing else, however many plain entities the scene holds.
+		TEST_CASE("Buoyancy: item 4c visits only its Buoyancy owners")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(AddSea(scene, {}, 1.0f));
+			constexpr int RaftCount = 3;
+			std::vector<UUID> rafts;
+			for (int index = 0; index < RaftCount; ++index)
+				rafts.push_back(AddRaft(scene, "Raft", glm::vec3(8.0f * static_cast<float>(index), 0.1f, 0.0f)).GetUUID());
+			const auto addProps = [&scene](int count)
+			{
+				for (int index = 0; index < count; ++index)
+				{
+					Entity prop = scene.CreateEntity("Prop");
+					prop.Patch<TransformComponent>([index](TransformComponent& transform)
+					{
+						transform.Translation = glm::vec3(2.0f * static_cast<float>(index), 5.0f, 10.0f);
+					});
+				}
+			};
+			addProps(40);
+			TransformSystem::Update(scene);
+			PhysicsSystemSpecification specification;
+			specification.RuntimeScene = &scene;
+			Result<Scope<PhysicsSystem>> created = PhysicsSystem::Create(specification);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PhysicsSystem& physics = **created;
+			// The transform update, then one step: the entities the step's passes visited.
+			const auto stepVisits = [&scene, &physics](uint64_t tick)
+			{
+				TransformSystem::Update(scene);
+				const uint64_t visited = scene.GetEntitiesVisited();
+				const SimStep step = SimStep::FromTick(tick, 1.0 / 60.0);
+				physics.PreStep(step);
+				physics.Step(step);
+				physics.PostStep(step);
+				return scene.GetEntitiesVisited() - visited;
+			};
+			const auto asleep = [&physics, &rafts]()
+			{
+				return std::ranges::all_of(rafts, [&physics](const UUID raft)
+				{
+					const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(raft);
+					return report.has_value() && report->IsSleeping;
+				});
+			};
+
+			// Settled on calm, unchanged water, every raft sleeps.
+			uint64_t tick = 0;
+			for (; tick < 1800 && !asleep(); ++tick)
+				static_cast<void>(stepVisits(tick));
+			REQUIRE(asleep());
+			CHECK(stepVisits(tick++) == 2 * RaftCount);
+			// Forty more plain entities: the step that adds them may look at them, the next ones visit the rafts alone again.
+			addProps(40);
+			static_cast<void>(stepVisits(tick++));
+			REQUIRE(asleep());
+			CHECK(stepVisits(tick++) == 2 * RaftCount);
+		}
+
+		// Phase 8's landing (the merge review's finding 10: M47's wake rule with M48's light bodies): a raft lighter than the
+		// character standing still on it, on calm water. Once the raft slept, item 4c skipped it (asleep, its planes and settings
+		// bit-identical), and item 5's ground push (CharacterController's PushGround, at most the raft's own weight) woke it for
+		// a step without buoyancy, which dropped it by about two ticks' fall (2 g dt^2, 5.4 mm) each time it fell asleep. A
+		// sleeping body that a grounded character stood on in its last update is now woken and floated by 4c, before item 5, as
+		// in an awake tick, so the raft keeps its draft, within 1 mm, over the 3 s after it first sleeps once settled, at Jolt
+		// thread counts 0, 1 and 8 alike. The raft moves only up and down (its other axes locked), so its colliders' bounds keep
+		// their centre's x and z to the bit, and its planes stay bit-identical while it rests: a raft that drifts a little takes
+		// new planes at every tick, and 4c wakes it for them.
+		TEST_CASE("Buoyancy: a raft a character stands on in calm water keeps its draft when its rider wakes it")
+		{
+			struct Ride
+			{
+				float Settled = 0.0f;
+				float Lowest = 0.0f;
+				uint32_t Sleeps = 0;
+				uint64_t Hash = 0;
+			};
+			const auto ride = [](uint32_t workerThreads)
+			{
+				const Test::ScopedWorkerThreadCount threads(workerThreads);
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				static_cast<void>(AddSea(scene, {}, 1.0f));
+				// A 50 kg raft 3 m x 0.5 m x 3 m, lighter than the 70 kg rider: its draft is (50 + 50) / (1000 x 9) m, about 1.1 cm.
+				Entity raft = scene.CreateEntity("Raft");
+				raft.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 0.24f, 0.0f);
+				});
+				RigidBodyComponent body;
+				body.Type = BodyType::Dynamic;
+				body.Mass = 50.0f;
+				body.LockTranslation = glm::bvec3(true, false, true);
+				body.LockRotation = glm::bvec3(true);
+				raft.AddComponent<RigidBodyComponent>(body);
+				raft.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(1.5f, 0.25f, 1.5f) });
+				raft.AddComponent<BuoyancyComponent>();
+				Entity rider = scene.CreateEntity("Rider");
+				rider.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 1.6f, 0.0f);
+				});
+				rider.AddComponent<CharacterControllerComponent>(CharacterControllerComponent{});
+				Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture));
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				PlaySession& play = **session;
+				const UUID raftId = Test::GetEntityId(play.GetScene(), "/Raft");
+				const UUID riderId = Test::GetEntityId(play.GetScene(), "/Rider");
+				const auto sleeping = [&play, raftId]()
+				{
+					const std::optional<PhysicsBodyReport> report = play.GetPhysics().GetBodyInfo(raftId);
+					REQUIRE(report.has_value());
+					return report->IsSleeping;
+				};
+
+				// The rider lands and stands still, and the raft settles under it for 10 s (Jolt may put a body to sleep while it
+				// still rocks a little, so the first sleeps can stop it off its draft), then falls asleep at the end of a step.
+				Test::RunTicks(play, 600);
+				uint32_t tick = 600;
+				for (; tick < 1800 && !sleeping(); ++tick)
+					Test::RunTicks(play, 1);
+				CAPTURE(tick);
+				REQUIRE(sleeping());
+				const Result<PhysicsCharacterState> standing = play.GetPhysics().GetCharacterState(riderId);
+				REQUIRE(standing.has_value());
+				REQUIRE(standing->IsGrounded);
+				CHECK(standing->GroundCollider == raftId);
+
+				// The next 3 s: the raft falls asleep again and again, and wakes under its rider each time.
+				Ride result{ .Settled = Test::GetWorldPosition(play, "/Raft").y };
+				result.Lowest = result.Settled;
+				for (uint32_t step = 0; step < 180; ++step)
+				{
+					Test::RunTicks(play, 1);
+					result.Lowest = std::min(result.Lowest, Test::GetWorldPosition(play, "/Raft").y);
+					result.Sleeps += sleeping() ? 1 : 0;
+				}
+				result.Hash = play.ComputeStateHash();
+				return result;
+			};
+			const Ride none = ride(0);
+			for (const uint32_t workerThreads : { 0U, 1U, 8U })
+			{
+				CAPTURE(workerThreads);
+				const Ride run = workerThreads == 0 ? none : ride(workerThreads);
+				CAPTURE(run.Settled);
+				CAPTURE(run.Lowest);
+				CAPTURE(run.Sleeps);
+				CHECK(run.Sleeps > 0);
+				CHECK(run.Settled - run.Lowest < 0.001f);
+				CHECK(run.Hash == none.Hash);
+				CHECK(run.Lowest == none.Lowest);
+			}
 		}
 
 		// Nothing new is hashed and nothing steps differently without a Buoyancy: a box falling past a sea's surface lands as

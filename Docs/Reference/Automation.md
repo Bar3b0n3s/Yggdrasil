@@ -3321,7 +3321,7 @@ Reads host and displayed-view statistics without waiting for the GPU or advancin
 | `particles` | `UInt32` | Live particles of the play session after its last Particles phase; 0 without a session. |
 | `transformsUpdated` | `UInt32` | World matrices the play session's last tick and the frame phase after it recomputed: the subtrees of the transforms written since the previous update, physics' write-back of every awake or parented dynamic body and every character included; 0 for a tick that writes no transform; 0 without a session. |
 | `entitiesVisited` | `UInt32` | Entities the per-tick passes of the play session's last tick visited, summed: the owners of kinematic, dynamic and character bodies, the bodies whose transforms were written, scripted entities, audio sources, animators, skinned meshes, emitters, sprite animators, bone attachments and UI canvas trees. Static scenery adds none, so the count does not grow with the static entities; 0 without a session. |
-| `staticCellRebuilds` | `UInt32` | Static cells the play session's last tick's frame-phase extraction rebuilt or removed (a write to a static entity rebuilds its cell there); 0 when that frame phase did not extract; an editor view's, a capture's or a query's extraction never counts; 0 without a session. |
+| `staticCellRebuilds` | `UInt32` | Static cells the play session's scene rebuilt or removed during its last tick (a write to a static entity rebuilds its cell at the next extraction): its frame phase's extraction, or a script's capture inside the tick; 0 when nothing in the tick extracted; an extraction between ticks (an editor view's, a capture's or a query's) never counts; 0 without a session. |
 
 Example: Inspect current host and renderer observations.
 

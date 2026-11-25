@@ -28,7 +28,8 @@
 //
 // Frozen by M47's contract C47 (decision 2): the class, its pipeline count, Create and RecordSurface. W47.2's render stream
 // implements them and the pipeline set creates the pass; W47.3 adds the Underwater pass's recording (RecordUnderwater, its
-// one pipeline of the program Water) and the planar opt-in's slots.
+// one pipeline of the program Water) and the planar opt-in's slots; phase 8's landing splits the Underwater pass's set out
+// of its recording (PrepareUnderwater), reviewed by the lead as the contract's owner.
 //
 // The Underwater pass (decision 3; W47.3): first in HdrPost, before TAA, when the camera's near plane may lie under a water
 // (IsNearPlaneUnderWater, WaterGeometry.h, on the snapshot alone): one triangle over the viewport blended into SceneColor,
@@ -72,12 +73,12 @@ namespace Engine {
 	};
 
 	// What RecordUnderwater draws with (W47.3): the framebuffer of SceneColor alone, the view set RecordSurface drew with
-	// (set 0) and SceneDepth, read as a texture. None of the pointers is null.
+	// (set 0) and the pass's own set PrepareUnderwater gave this render (set 1). None of the pointers is null.
 	struct WaterUnderwaterInputs
 	{
 		nvrhi::IFramebuffer* Framebuffer = nullptr;
 		nvrhi::IBindingSet* ViewSet = nullptr;
-		nvrhi::ITexture* SceneDepth = nullptr;
+		nvrhi::IBindingSet* UnderwaterSet = nullptr;
 	};
 
 	class WaterPass
@@ -122,11 +123,16 @@ namespace Engine {
 		[[nodiscard]] Status RecordSurface(nvrhi::ICommandList& commandList, GpuResourceCache& cache, WaterViewResources& resources,
 			const WaterSurfaceInputs& inputs, RenderPassCounters& counters);
 
-		// W47.3: draws the Underwater pass under the caller's Underwater row, counting its draw in `counters`, with the records
-		// RecordSurface wrote into `resources` this render (InvalidState without them). Errors: those of its binding set's
-		// creation, with nothing drawn.
-		[[nodiscard]] Status RecordUnderwater(nvrhi::ICommandList& commandList, WaterViewResources& resources, const WaterUnderwaterInputs& inputs,
-			RenderPassCounters& counters);
+		// W47.3 (split from RecordUnderwater at phase 8's landing, so a pass whose set cannot be created leaves no Underwater
+		// row, M42's rule): the Underwater pass's own set, t0 the records RecordSurface wrote into `resources` this render and
+		// t5 `sceneDepth` read as a texture, from `resources`' binding cache, which the caller takes before it begins the row.
+		// The pointer stays valid as PassBindingCache::GetOrCreate's does. Errors: InvalidState without the records,
+		// InvalidArgument for a null `sceneDepth`, and those of the set's creation.
+		[[nodiscard]] Result<nvrhi::IBindingSet*> PrepareUnderwater(WaterViewResources& resources, nvrhi::ITexture* sceneDepth);
+
+		// W47.3: draws the Underwater pass under the caller's Underwater row, counting its draw in `counters`. Errors:
+		// InvalidArgument for a null input, with nothing drawn.
+		[[nodiscard]] Status RecordUnderwater(nvrhi::ICommandList& commandList, const WaterUnderwaterInputs& inputs, RenderPassCounters& counters);
 	private:
 		struct State;
 		Scope<State> m_State;

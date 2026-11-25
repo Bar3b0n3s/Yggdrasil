@@ -277,9 +277,10 @@ namespace Engine {
 				"emitters, sprite animators, bone attachments and UI canvas trees. Static scenery adds none, so the count does not grow "
 				"with the static entities; 0 without a session.")
 			.Field("staticCellRebuilds", &StatsGetResult::StaticCellRebuilds,
-				"Static cells the play session's last tick's frame-phase extraction rebuilt or removed (a write to a static entity rebuilds "
-				"its cell there); 0 when that frame phase did not extract; an editor view's, a capture's or a query's extraction never "
-				"counts; 0 without a session.");
+				"Static cells the play session's scene rebuilt or removed during its last tick (a write to a static entity rebuilds its "
+				"cell at the next extraction): its frame phase's extraction, or a script's capture inside the tick; 0 when nothing in the "
+				"tick extracted; an extraction between ticks (an editor view's, a capture's or a query's) never counts; 0 without a "
+				"session.");
 	}
 
 	void RegisterStatsMethods(MethodRegistry& methods)

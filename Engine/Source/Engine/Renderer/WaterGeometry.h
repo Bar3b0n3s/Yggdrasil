@@ -110,7 +110,13 @@ namespace Engine {
 	//     waves' Q A (how far its drawn edge moves sideways), in metres through the World's column lengths.
 	//   - An Ocean: its base plane below the horizon: the square of the plane WaterHorizonDistance around the camera's (x, z),
 	//     clipped in clip space to w > 0 (in front of the camera) and bounded by its clipped corners' projections, so a camera
-	//     looking up at the sky has none and a level camera's rectangle tops out at the horizon.
+	//     looking up at the sky has none and a level camera's rectangle tops out at the horizon. It needs no allowance for the
+	//     waves' height (phase 8's landing): Water.slang samples the mirror at the base plane's point under each pixel (moved
+	//     by WaterPlanarDistortion along the wave normal's lean), never at the displaced surface's, and the mirror camera is
+	//     the view's reflected in that plane, so a point of the plane has the mirror's texel of its own pixel in the view
+	//     (mirrored in x), inside the square's projection, a crest above a camera lower than the crests included. A shader that
+	//     sampled the mirror at the displaced surface's point would invalidate this: the band would then need the crest
+	//     plane's square (the base raised by the summed amplitudes) united with the base plane's.
 	[[nodiscard]] std::optional<PlanarReflectionScreenRect> ComputeWaterPlanarReflectionScreenRect(const WaterItem& water, const CameraData& camera);
 
 }

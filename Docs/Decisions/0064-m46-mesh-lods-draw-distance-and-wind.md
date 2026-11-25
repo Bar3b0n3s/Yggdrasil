@@ -326,7 +326,7 @@ The Roadmap's M46 acceptance, each a named test or check:
 - "Wind: a wind-swept caster's shadow sways with it" (gpu)
 - "Wind: the prepass's motion vectors follow the sway" (gpu)
 - "MeshLods: a scene with levels and wind renders the same bytes after a device loss" (gpu)
-- W46.4: the `MeshLods` and `Wind` gpu cases pass with their meshes `Static` too, and M43's "StaticScenery: a scene renders the same bytes with its scenery static and without" passes on a scene with levels and wind.
+- W46.4: the `MeshLods` and `Wind` gpu cases pass with their meshes `Static` too, and "MeshLods: a scene with levels and wind renders the same bytes with its scenery static and without" (M43's byte-identity check over a scene with levels and wind; the W46.4 record) passes.
 - `Golden: MeshLods` and `Golden: Wind`, with every existing golden byte-identical.
 - `test_mesh_lods.py` and `test_wind.py` pass.
 - The `MeshLods` and `Wind` suites pass in the editor, Release and Dist; `Wind.replay` verifies at one hash in Debug, Release and Dist and fails without its input.

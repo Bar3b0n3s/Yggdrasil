@@ -443,7 +443,8 @@ namespace Engine {
 		};
 
 		// M42: what PrepareViewDraws leaves out of a mirror view besides its cull camera's frustum: the reflection's own entity
-		// (a reflection never draws its own glass) and the submeshes wholly behind its clip plane.
+		// (a reflection never draws its own glass; a water's reflection, whose glass is its surface, excludes none) and the
+		// submeshes wholly behind its clip plane.
 		struct SceneRendererMirrorCull
 		{
 			UUID Excluded{};
@@ -1256,8 +1257,9 @@ namespace Engine {
 		[[nodiscard]] Status EnsureWaterTargets(bool picking);
 		// M47 (W47.3): first in HdrPost, before TAA: with the Water pass's surfaces drawn and the camera's near plane possibly
 		// under a water (IsNearPlaneUnderWater), WaterPass::RecordUnderwater under the Underwater row into SceneColor
-		// (UnderwaterFramebuffer, created when missing) with the Water pass's view set and SceneDepth; frame.Underwater says it
-		// recorded. An error is the render's, and SceneColor keeps its image.
+		// (UnderwaterFramebuffer, created when missing) with the Water pass's view set and the pass's own set over SceneDepth
+		// (WaterPass::PrepareUnderwater, taken before the row begins); frame.Underwater says it recorded. An error is the
+		// render's, SceneColor keeps its image, and a framebuffer or set that cannot be created leaves no Underwater row.
 		void RecordUnderwater(Detail::SceneRendererFrame& frame);
 		// M26 (stream X-D): SsrColor and SsrFramebuffer at the scene resolution (Targets), and the depth pyramid's ViewDepth when
 		// GTAO did not create it, each created when missing. M32: SsrColor at the trace image's size (SsrPass::GetTraceSize with

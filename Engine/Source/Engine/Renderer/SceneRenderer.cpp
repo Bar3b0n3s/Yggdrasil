@@ -2867,11 +2867,19 @@ namespace Engine {
 			}
 			Targets.UnderwaterFramebuffer = std::move(*framebuffer);
 		}
+		// The pass's own set before its row, so a set that cannot be created leaves no Underwater row: a row means the pass
+		// recorded, as M42's planar reflections keep it (phase 8's landing).
+		Result<nvrhi::IBindingSet*> set = Pipelines->Water->PrepareUnderwater(WaterResources, Targets.SceneDepth);
+		if (!set)
+		{
+			frame.KeepFirstError(std::unexpected(std::move(set).error()));
+			return;
+		}
 		nvrhi::ICommandList& commandList = *frame.CommandList;
 		frame.Recording->BeginPass("Underwater", &commandList);
 		RenderPassCounters counters;
-		const Status recorded = Pipelines->Water->RecordUnderwater(commandList, WaterResources,
-			{ .Framebuffer = Targets.UnderwaterFramebuffer, .ViewSet = frame.WaterViewSet, .SceneDepth = Targets.SceneDepth }, counters);
+		const Status recorded = Pipelines->Water->RecordUnderwater(commandList,
+			{ .Framebuffer = Targets.UnderwaterFramebuffer, .ViewSet = frame.WaterViewSet, .UnderwaterSet = *set }, counters);
 		frame.Recording->EndPass(counters);
 		frame.Underwater = recorded.has_value();
 		frame.KeepFirstError(recorded);

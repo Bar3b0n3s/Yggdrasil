@@ -26,7 +26,8 @@ namespace Engine {
 	//   ScriptVisible   reachable by name from scripts (GetComponent, proxies);
 	//   EditorVisible   listed by the inspector and the add-component menu;
 	//   Removable       may be removed by users, scripts and automation;
-	//   UniquePerScene  at most one per scene (Environment, PostProcess; a duplicate is a structural defect, §6);
+	//   UniquePerScene  at most one per scene (Environment, PostProcess, Sky, Fog, Navigation, Wind; a duplicate is a structural
+	//                   defect, §6);
 	//   Required        every entity has it from creation (ID, Name, Relationship, Transform);
 	//   Hidden          not shown in the inspector or as a script shortcut; maintained by the engine (ID, Relationship,
 	//                   Prefab, PrefabLink), so the by-name write paths (Scene's ComponentAccess) reject writes to it;

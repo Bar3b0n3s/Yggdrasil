@@ -49,7 +49,7 @@
 // a snapshot reflection is a candidate when its plane is finite, the camera faces its reflecting side and a draw of its
 // entity survived the main view's culling; its glass's rectangle on screen is the union of those draws' bounds' rectangles
 // (M47: a Water entity's reflection is the water's base plane, a candidate while its surface is on screen, its rectangle
-// ComputeWaterPlanarReflectionScreenRect's and never its entity's meshes'), whose pixel area ranks it
+// ComputeWaterPlanarReflectionScreenRect's and never its entity's meshes', which its mirror view draws), whose pixel area ranks it
 // (RankPlanarReflections: the largest first, ties by entity, at most MaxPlanarReflectionsPerView). Each ranked reflection
 // takes the next slot: its mirror camera (the camera mirrored in its plane, S * View * R, at ComputePlanarReflectionSize
 // of the scene resolution, with ComputePlanarReflectionMipCount's chain for the view's SsrMaxRoughness), its draws
@@ -244,10 +244,15 @@ namespace Engine {
 		slot.Scissor = Utils::ToReflectionScissor(MirrorPlanarReflectionScreenRect(widened), size.x, size.y);
 
 		// The draws: every mesh item but the glass's own, culled by the mirror camera cropped to the widened rectangle and by
-		// the plane.
+		// the plane. A water's slot has no glass (its surface is the water's, not a mesh), so it leaves out nothing: the meshes
+		// its entity draws, such as a pool's basin, show in its reflection as those of any other entity do (phase 8's landing).
 		const glm::vec4 clipPlane = ComputePlanarReflectionClipPlane(plane);
 		const CameraData cull = MakePlanarReflectionCullCamera(slot.Camera, widened);
-		const Detail::SceneRendererMirrorCull mirror{ .Excluded = reflection.Entity, .ClipPlane = clipPlane, .View = &slot.Camera };
+		const bool water = std::ranges::any_of(snapshot.Waters, [&reflection](const WaterItem& item)
+		{
+			return item.Entity == reflection.Entity;
+		});
+		const Detail::SceneRendererMirrorCull mirror{ .Excluded = water ? UUID() : reflection.Entity, .ClipPlane = clipPlane, .View = &slot.Camera };
 		frame.KeepFirstError(PrepareViewDraws(frame, snapshot, cull, slot.OpaqueDraws, slot.TransparentDraws, &mirror));
 
 		// The light list: the main view's, whose shadow slots and directional index stay valid, then the lights only the mirror

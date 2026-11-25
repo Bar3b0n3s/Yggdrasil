@@ -10,7 +10,7 @@ The `PHYSICS_*` codes also report the 2D world (RigidBody2D, BoxCollider2D, Circ
 |---|---|---|---|
 | `SCENE_NO_PRIMARY_CAMERA` | Warning | A scene with entities has no Primary camera. | Set Primary on the camera, or add one with `entity.create {components: {Camera: {Primary: true}}}`; the fix makes a scene's only camera Primary. |
 | `SCENE_MULTIPLE_PRIMARY_CAMERAS` | Error | Several cameras are Primary. | Clear Primary on all but one; the fix keeps the first in scene order. |
-| `SCENE_DUPLICATE_UNIQUE_COMPONENT` | Error | A scene file holds two Environment or PostProcess components. | `scene.open {repair: true}`, then `scene.save`. |
+| `SCENE_DUPLICATE_UNIQUE_COMPONENT` | Error | A scene file holds more than one component that is unique per scene (Environment, PostProcess, Sky, Fog, Navigation, Wind). | `scene.open {repair: true}`, then `scene.save`. |
 | `SCENE_NONCANONICAL_ORDER` | Warning | A child is listed before its parent in a scene file. | `scene.open {repair: true}`, then `scene.save`. |
 | `SCENE_INVALID_HIERARCHY` | Error | A Parent names no entity, or parents form a cycle. | `scene.open {repair: true}`, then `scene.save`. |
 | `SCENE_INCONSISTENT_PREFAB_LINK` | Error | A prefab member's PrefabLink does not match its instance root, an OuterPrefabEntityID names no enclosing instance, or a nested instance root records overrides. | `scene.open {repair: true}` (unpacks the member, clears the OuterPrefabEntityID or drops the nested root's overrides), then `scene.save`, or re-instantiate the prefab. |

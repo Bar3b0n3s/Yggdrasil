@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/PhysicsSystem.h"
 
+#include "Engine/Physics/CharacterController.h"
 #include "Engine/Scene/Components/BuoyancyComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
@@ -25,8 +26,9 @@
 // each effectively enabled Buoyancy whose owner holds a created Dynamic body takes, per collider, the plane of its water's
 // surface under the collider's world bounds centre at the tick's world time, and PhysicsWorld::ApplyBuoyancy floats the body
 // on them. A body whose planes and settings are bit-identical to its last tick's may sleep and is skipped while asleep; one
-// whose planes or settings changed is woken. The planes are runtime state: nothing here is hashed, and a scene without a
-// Buoyancy runs none of it.
+// whose planes or settings changed is woken, and so is one a grounded character stood on in its last update (phase 8's
+// landing): item 5's ground push would wake it after this item, for a step without buoyancy. The planes are runtime state:
+// nothing here is hashed, and a scene without a Buoyancy runs none of it.
 
 namespace Engine {
 
@@ -45,6 +47,24 @@ namespace Engine {
 			for (const entt::entity handle : handles)
 				owners.emplace_back(handle, &scene);
 			return owners;
+		}
+
+		// The bodies the characters stood on in their last updates (CharacterController::GetGroundState of a grounded one),
+		// sorted by handle: a membership set, the same whatever the characters' order.
+		static std::vector<uint32_t> CollectRiddenBodies(const std::map<UUID, PhysicsCharacterEntry>& characters)
+		{
+			std::vector<uint32_t> ridden;
+			for (const auto& [id, character] : characters)
+			{
+				static_cast<void>(id);
+				if (character.Controller == nullptr)
+					continue;
+				const CharacterGroundState ground = character.Controller->GetGroundState();
+				if (ground.IsGrounded && ground.GroundBody.IsValid())
+					ridden.push_back(ground.GroundBody.GetValue());
+			}
+			std::ranges::sort(ridden);
+			return ridden;
 		}
 
 		static bool SameBits(float a, float b)
@@ -80,6 +100,7 @@ namespace Engine {
 			return;
 		}
 		const SceneWaters waters = CollectSceneWaters(scene);
+		const std::vector<uint32_t> ridden = Utils::CollectRiddenBodies(Characters);
 		const auto deltaTime = static_cast<float>(step.FixedDelta);
 		std::map<UUID, PhysicsBuoyancyEntry> applied;
 		for (const Entity& owner : Utils::CollectBuoyancyOwners(scene))
@@ -189,10 +210,12 @@ namespace Engine {
 				.AngularDrag = buoyancy.AngularDrag };
 
 			// The wake rule: a sleeping body applied as last time sleeps on with its last report; a change of its planes (waves,
-			// a tide) or of its settings (a BuoyancyScale or drag write, its water's Density) wakes it.
+			// a tide) or of its settings (a BuoyancyScale or drag write, its water's Density) wakes it, and so does a grounded
+			// character standing on it (phase 8's landing): its ground push in item 5 would wake it after this item, for a step
+			// without buoyancy, so it is woken and floated here, as in an awake tick, and stays awake while ridden.
 			if (World->IsSleeping(bodyEntry.Handle))
 			{
-				if (Utils::IsSameApplication(planes, settings, entry))
+				if (Utils::IsSameApplication(planes, settings, entry) && !std::ranges::binary_search(ridden, bodyEntry.Handle.GetValue()))
 				{
 					applied.emplace(id, std::move(entry));
 					continue;

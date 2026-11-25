@@ -32,8 +32,8 @@
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
-#include "Engine/Scene/Components/WindComponent.h"
 #include "Engine/Scene/Components/WaterComponent.h"
+#include "Engine/Scene/Components/WindComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/PixelPerfectCamera.h"
@@ -46,8 +46,8 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiExtraction.h"
 #include "Engine/Scene/UiLayout.h"
-#include "Engine/Scene/Wind.h"
 #include "Engine/Scene/WaterQueries.h"
+#include "Engine/Scene/Wind.h"
 
 #include <glm/gtc/quaternion.hpp>
 

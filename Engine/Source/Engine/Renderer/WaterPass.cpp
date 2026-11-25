@@ -361,26 +361,34 @@ namespace Engine {
 		return {};
 	}
 
-	Status WaterPass::RecordUnderwater(nvrhi::ICommandList& commandList, WaterViewResources& resources, const WaterUnderwaterInputs& inputs,
-		RenderPassCounters& counters)
+	Result<nvrhi::IBindingSet*> WaterPass::PrepareUnderwater(WaterViewResources& resources, nvrhi::ITexture* sceneDepth)
 	{
-		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr && inputs.ViewSet != nullptr && inputs.SceneDepth != nullptr, "WaterPass::RecordUnderwater needs every input");
-		if (inputs.Framebuffer == nullptr || inputs.ViewSet == nullptr || inputs.SceneDepth == nullptr)
-			return MakeError(ErrorCode::InvalidArgument, "the underwater pass needs a framebuffer, a view set and SceneDepth");
+		ENGINE_CORE_ASSERT(sceneDepth != nullptr, "WaterPass::PrepareUnderwater needs SceneDepth");
+		if (sceneDepth == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "the underwater pass needs SceneDepth");
 		if (resources.Records == nullptr)
 			return MakeError(ErrorCode::InvalidState, "the underwater pass needs the records the water's surfaces wrote this render");
 		State& state = *m_State;
 		nvrhi::BindingSetDesc desc;
 		desc.bindings = {
 			nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::WaterRecordsRegister, resources.Records),
-			nvrhi::BindingSetItem::Texture_SRV(Utils::UnderwaterSceneDepthRegister, inputs.SceneDepth),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::UnderwaterSceneDepthRegister, sceneDepth),
 		};
-		ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, resources.Bindings.GetOrCreate(*state.Device, desc, *state.UnderwaterLayout));
+		return resources.Bindings.GetOrCreate(*state.Device, desc, *state.UnderwaterLayout);
+	}
+
+	Status WaterPass::RecordUnderwater(nvrhi::ICommandList& commandList, const WaterUnderwaterInputs& inputs, RenderPassCounters& counters)
+	{
+		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr && inputs.ViewSet != nullptr && inputs.UnderwaterSet != nullptr,
+			"WaterPass::RecordUnderwater needs every input");
+		if (inputs.Framebuffer == nullptr || inputs.ViewSet == nullptr || inputs.UnderwaterSet == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "the underwater pass needs a framebuffer, a view set and its own set");
+		const State& state = *m_State;
 		nvrhi::GraphicsState graphics;
 		graphics.pipeline = state.Underwater.Pipeline;
 		graphics.framebuffer = inputs.Framebuffer;
 		graphics.viewport.addViewportAndScissorRect(inputs.Framebuffer->getFramebufferInfo().getViewport());
-		graphics.bindings = { inputs.ViewSet, set };
+		graphics.bindings = { inputs.ViewSet, inputs.UnderwaterSet };
 		commandList.setGraphicsState(graphics);
 		// The push-constant range is set 0's layout's; the pass reads none of it.
 		const WaterDrawConstants constants{};

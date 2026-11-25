@@ -1123,7 +1123,9 @@ namespace Engine {
 		// emitting wall standing on it 10 m away, in a scene with no light and no ambient; the water entity also draws a polished
 		// metal quad above the water. With the water's planar reflection the water shows the wall's mirror image, while the
 		// quad's pixels stay exactly those of the render without it (it reflects the black environment), where sampling the
-		// mirror would show the wall's green.
+		// mirror would show the wall's green. Phase 8's landing (the last fixes' review, finding 1): the mirror view draws the
+		// water entity's meshes as any other entity's, so a red emitting basin wall the water's entity draws standing on the water
+		// shows its mirror image in the water too.
 		TEST_CASE("Water: a water's planar reflection is its surface's, never its entity's meshes'" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -1140,6 +1142,11 @@ namespace Engine {
 				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), quadCentre) * glm::scale(glm::mat4(1.0f), glm::vec3(0.6f)),
 					.Mesh = QuadMeshHandle,
 					.Materials = { MirrorMaterialHandle },
+					.Entity = UUID(600) });
+				const glm::vec3 basinCentre(2.0f, 0.5f, -6.0f);
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), basinCentre) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { RedFloorMaterialHandle },
 					.Entity = UUID(600) });
 				WaterItem water = MakeWater(RenderWaterShape::Rectangle, glm::mat4(1.0f), {}, 0.0, 600, 0);
 				water.Size = glm::vec2(40.0f);
@@ -1163,6 +1170,17 @@ namespace Engine {
 				INFO("the reflection's pixel (" << rx << ", " << ry << "): green " << Texel(probed, rx, ry).g << " without, " << Texel(mirrored, rx, ry).g << " with");
 				CHECK(Texel(probed, rx, ry).g < 0.02);
 				CHECK(Texel(mirrored, rx, ry).g > 0.1);
+				// The basin wall's mirror image, at its centre (2, 0.5, -6) mirrored in the plane: red the render without the planar
+				// reflection lacks (a mirror view that left the water's entity out shows the green wall behind it there).
+				const glm::vec2 basin = ProjectToPixel(viewProjection, glm::vec3(basinCentre.x, -basinCentre.y, basinCentre.z));
+				REQUIRE(basin.x >= 0.0f);
+				REQUIRE(basin.x < static_cast<float>(Size));
+				REQUIRE(basin.y >= 0.0f);
+				REQUIRE(basin.y < static_cast<float>(Size));
+				const auto bx = static_cast<uint32_t>(basin.x);
+				const auto by = static_cast<uint32_t>(basin.y);
+				INFO("the basin's reflection pixel (" << bx << ", " << by << "): red " << Texel(probed, bx, by).r << " without, " << Texel(mirrored, bx, by).r << " with");
+				CHECK(Texel(mirrored, bx, by).r > Texel(probed, bx, by).r + 0.1);
 				// The quad's 3 x 3 pixels round its centre are those of the render without the planar reflection.
 				const glm::vec2 quad = ProjectToPixel(viewProjection, quadCentre);
 				const auto qx = static_cast<uint32_t>(quad.x);
@@ -1257,8 +1275,9 @@ namespace Engine {
 		}
 
 		// W47.3's review, finding 3 (b): the Underwater pass's set (t0 the records, t5 SceneDepth) failing to be created leaves
-		// the view unfogged with its surfaces drawn, and the render returns the error (RenderStats::Underwater false; the row,
-		// begun before the set, stays with the time it took); the next render records the pass.
+		// the view unfogged with its surfaces drawn, and the render returns the error (RenderStats::Underwater false); the next
+		// render records the pass. Phase 8's landing (the last fixes' review, finding 3): the set is created before the row
+		// begins, so a failed pass leaves no Underwater row, as a row means the pass recorded (M42's rule).
 		TEST_CASE("Underwater: a pass whose set cannot be created leaves the view unfogged, returns the error, and the next render records it"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -1291,12 +1310,14 @@ namespace Engine {
 				CHECK_FALSE(failed.has_value());
 				const RenderStats& unfogged = fixture.Renderer().GetRenderStats();
 				CHECK_FALSE(unfogged.Underwater);
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(unfogged, "Underwater") == nullptr);
 				CHECK(unfogged.WaterSurfaces == 1);
 				CHECK(glm::dvec3(HalfTexel(ReadTexture(device, fixture.Renderer().GetSceneColorTexture()), 32, 32, 4)) == dry);
 
 				const Status recovered = RenderStatus(device, fixture, snapshot);
 				REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
 				CHECK(fixture.Renderer().GetRenderStats().Underwater);
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Underwater") != nullptr);
 				CHECK(glm::dvec3(HalfTexel(ReadTexture(device, fixture.Renderer().GetSceneColorTexture()), 32, 32, 4)) != dry);
 			}
 			device.RunGarbageCollection();

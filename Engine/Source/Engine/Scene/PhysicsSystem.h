@@ -82,8 +82,10 @@
 //          project.validate names: Buoyancy.Water, RigidBody.Type, RigidBody.LockTranslation, else Buoyancy). A body whose
 //          planes and settings (the density, BuoyancyScale and drags) are bit-identical to its last tick's may sleep and is
 //          skipped while asleep, keeping its last report; one whose planes changed (waves, a tide, a WaveScale write) or whose
-//          settings changed (a BuoyancyScale or drag write, its water's Density) is woken first. The planes are runtime
-//          state, never hashed, and a scene without a Buoyancy runs nothing.
+//          settings changed (a BuoyancyScale or drag write, its water's Density) is woken first, and so is one a grounded
+//          character stood on in its last update (phase 8's landing: item 5's ground push would wake it after this item, for a
+//          step without buoyancy), so a ridden body stays awake. The planes are runtime state, never hashed, and a scene
+//          without a Buoyancy runs nothing.
 //       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes,
 //          and (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3) that call's
 //          CharacterMoveMode, consumed with it: Walk when the tick made no call.
@@ -226,7 +228,8 @@
 // step's M36 paragraph), PhysicsCharacterState's GroundCollider, IsSqueezed and SqueezedBy, PhysicsSurfaceInfo and GetSurface
 // (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), M37 appends its joints (the M37 paragraph
 // above), M44 appends PhysicsBodyReport::CenterOfMass and its vehicles (the M44 paragraph above; Docs/Decisions/
-// 0062-m44-wheeled-vehicles.md decision 3), and M48 adds MoveCharacter's mode and PhysicsCharacterState's LastMove
+// 0062-m44-wheeled-vehicles.md decision 3), M47 appends PhysicsBodyReport::Buoyancy and item 4c (Docs/Decisions/
+// 0065-m47-water.md decision 3), and M48 adds MoveCharacter's mode and PhysicsCharacterState's LastMove
 // (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3), each reviewed as a change to a
 // frozen interface.
 

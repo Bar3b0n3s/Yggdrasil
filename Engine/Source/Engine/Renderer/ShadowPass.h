@@ -108,8 +108,8 @@ namespace Engine {
 	[[nodiscard]] bool ShadowBoxesOverlap(const ShadowBox& caster, const ShadowBox& light);
 
 	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): what the static casters of one key draw with (RenderStaticDrawKey:
-	// the caster variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh): ShadowCasterDraw's members a key
-	// determines, resolved when a static cell is prepared and shared by the cells of the renderer that hold the key.
+	// the caster variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh): ShadowCasterDraw's
+	// members a key determines, resolved when a static cell is prepared and shared by the cells of the renderer that hold the key.
 	struct StaticShadowKey
 	{
 		RenderStaticDrawKey Key{};
@@ -365,11 +365,11 @@ namespace Engine {
 
 		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the caster draws of static item `item` (a finite world
 		// matrix), by PrepareCasters' rule and in its submesh order, appended to `draws` with their keys (RenderStaticDrawKey: the
-		// variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh; M46: and `level`) and their M29 signatures,
-		// Instance unset: a static cell's casters, prepared once per cell version and level. Nothing for an item that does not
-		// cast, or at a level beyond its mesh's last. M46 (W46.4): the draws of `level` (0 to the mesh's last), each with its
-		// material's wind (a static record holds none), whose signature hashes the response but not the render's wind (its
-		// face's does, PrepareStaticFaces). Main thread (the cache's mirrors).
+		// variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh; M46: and `level`) and
+		// their M29 signatures, Instance unset: a static cell's casters, prepared once per cell version and level. Nothing for
+		// an item that does not cast, or at a level beyond its mesh's last. M46 (W46.4): the draws of `level` (0 to the mesh's
+		// last), each with its material's wind (a static record holds none), whose signature hashes the response but not the
+		// render's wind (its face's does, PrepareStaticFaces). Main thread (the cache's mirrors).
 		static void AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, uint32_t level, std::vector<StaticCasterDraw>& draws);
 
 		// M43: the static casters' draws of every face of the plan (`cascades`, `spots`, `points`; null for none), `keyCount` the
