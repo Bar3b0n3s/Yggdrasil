@@ -4451,6 +4451,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/StaticScenery.scene",
+			"XXH64": "f67fb3370e8f8763",
+			"Method": "scene.save",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/StaticScenery.scene.meta",
+			"XXH64": "33ef8b175c04349d",
+			"Method": "edit.batch",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Surfaces.scene",
 			"XXH64": "90db7d96a175a489",
 			"Method": "scene.save",
@@ -5471,6 +5487,22 @@
 			"XXH64": "194b194dbc9afcc2",
 			"Method": "script.write",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/StaticScenery/StaticDirector.luau",
+			"XXH64": "0261dc5ee1ae938e",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/StaticScenery/StaticDirector.luau.meta",
+			"XXH64": "71cddd04c21e2645",
+			"Method": "script.write",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -7699,6 +7731,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/StaticScenery.replay",
+			"XXH64": "0e9ba80fd0421be2",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/StaticScenery.replay.meta",
+			"XXH64": "3e41bbbb09a0019b",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/Surfaces.replay",
 			"XXH64": "bae2609ecd107178",
 			"Method": "input.record",
@@ -7871,6 +7919,22 @@
 			"XXH64": "ab8cdc21fc19a9bf",
 			"Method": "script.write",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/StaticScenery/StaticScenery.test.luau",
+			"XXH64": "bc451f674d22de54",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/StaticScenery/StaticScenery.test.luau.meta",
+			"XXH64": "6c8b2af8c4622205",
+			"Method": "script.write",
+			"RequestId": 5,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -8532,7 +8596,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "a7ffeb5069b91268",
+			"XXH64": "2121df8ec6590c46",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

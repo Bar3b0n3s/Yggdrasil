@@ -1,0 +1,287 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "5ebe9df059135ce6",
+		"Path": "Assets/Scenes/StaticScenery.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.8.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "044bb39ea28c84a7",
+				"Path": "/Scenery/Rock3",
+				"Hash": "49af96fc33a0dd39",
+				"Components": {
+					"Transform": "476b2b1893b5bd29",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0b1f82927e677d62",
+				"Path": "/Scenery/Windmill/Blade",
+				"Hash": "a6cb09a99ec37f7b",
+				"Components": {
+					"Transform": "78f2f988c68b54dc",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "1562c7303bc0f4a7",
+				"Path": "/Scenery",
+				"Hash": "abc95f12bd632ba5",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Static": "7a2083cfe4edccd9"
+				}
+			},
+			{
+				"Id": "1a55e30e04b08439",
+				"Path": "/Camera",
+				"Hash": "ce00083c08fe595e",
+				"Components": {
+					"Transform": "ed4aa808f0ba3796",
+					"Camera": "8509390a2ff98dfc"
+				}
+			},
+			{
+				"Id": "31c11426e60c3f86",
+				"Path": "/Scenery/Rock1/Shape",
+				"Hash": "7a9aa965ea12cd4e",
+				"Components": {
+					"Transform": "d97c1d801216fe8a",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "352583afae406570",
+				"Path": "/Scenery/Lift",
+				"Hash": "862be131a21cedc1",
+				"Components": {
+					"Transform": "bfd2b8cc54c69361",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "363f7b13de083367",
+				"Path": "/Scenery/Rock0/Shape",
+				"Hash": "aaa8b24bb9ebda84",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "4bc11d00202550af",
+				"Path": "/Ball",
+				"Hash": "0d0080463a63498c",
+				"Components": {
+					"Transform": "8df3e7548f327332",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"RigidBody": "0d8db2325a9ad74f",
+					"SphereCollider": "9cd09cbe54c4e3b3"
+				}
+			},
+			{
+				"Id": "5b69aaa0275ff794",
+				"Path": "/Beacon/Lamp",
+				"Hash": "aab628a91652fbcc",
+				"Components": {
+					"Transform": "52bd20bc6b69a9d7",
+					"MeshRenderer": "f433c3ab9a1171d2"
+				}
+			},
+			{
+				"Id": "5dd4d1656d656237",
+				"Path": "/Scenery/Rock5/Shape",
+				"Hash": "7754874f5cc1827d",
+				"Components": {
+					"Transform": "39df00e36c9ee8c8",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "71c1e7215ac96cac",
+				"Path": "/Scenery/Rock2/Shape",
+				"Hash": "05c6cc6353092a6a",
+				"Components": {
+					"Transform": "bda8a525668a21d2",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "775cd0e1c77956f6",
+				"Path": "/Scenery/Rock0",
+				"Hash": "6ee657fa90dc560a",
+				"Components": {
+					"Transform": "33a04c39840bd828",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "7d070338a52a5c3a",
+				"Path": "/Scenery/Windmill",
+				"Hash": "9cbca543fd2847cd",
+				"Components": {
+					"Transform": "c9f94610fbca01d5",
+					"Static": "b7b994a38c095c68"
+				}
+			},
+			{
+				"Id": "844554bc5d80386f",
+				"Path": "/Director",
+				"Hash": "31f44507b3c5eef3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "469c581fb0187311"
+				}
+			},
+			{
+				"Id": "b02a980c58637ba3",
+				"Path": "/Scenery/Rock5",
+				"Hash": "6c3554eb61ef5193",
+				"Components": {
+					"Transform": "f124d477fb47498e",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "c0fb1e7e422ada20",
+				"Path": "/Scenery/Rock2",
+				"Hash": "8bcccc8c7ea31cc8",
+				"Components": {
+					"Transform": "ba4b6a0b56eb40d3",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "c5f9e9ad14e23144",
+				"Path": "/Scenery/Rock4/Shape",
+				"Hash": "144812051c84964c",
+				"Components": {
+					"Transform": "caa8bcf83859d0ef",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "c97730158d43c0a8",
+				"Path": "/Scenery/Rock1",
+				"Hash": "127b4d645a5a2005",
+				"Components": {
+					"Transform": "fb397a00c8386902",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "d9fc7cb6c2741d6b",
+				"Path": "/Scenery/Floor",
+				"Hash": "3c034c529fabef58",
+				"Components": {
+					"Transform": "de143b32a75d281b",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "e456068ef6375cab",
+				"Path": "/Beacon",
+				"Hash": "656990d1cb7d9b96",
+				"Components": {
+					"Transform": "8126993bc04faa61",
+					"Static": "e72c6ab0f929229e",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "e632e59b713e0ee2",
+				"Path": "/Scenery/Rock4",
+				"Hash": "0964a12fc6428e85",
+				"Components": {
+					"Transform": "c6744f02e4cc9e3e",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "e844edbaeddac589",
+				"Path": "/Sun",
+				"Hash": "ed83e27e9b1bd113",
+				"Components": {
+					"Transform": "b12cf37696743467",
+					"DirectionalLight": "a097c37b57c06fa5"
+				}
+			},
+			{
+				"Id": "ea89148417de7da4",
+				"Path": "/Scenery/Rock3/Shape",
+				"Hash": "2dc7e9fcf8fc3a9a",
+				"Components": {
+					"Transform": "ee51436b7e0b22a1",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "6d07404e8d9c31c9",
+				"Path": "Assets/Scripts/StaticScenery/StaticDirector.luau",
+				"Type": "Script",
+				"Hash": "65a9aea3fd4890b2"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 20,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "F"
+		},
+		{
+			"Tick": 21,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "F"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 10,
+			"Luau": "local director = Scene.FindByName(\"Director\"):GetScript()\nreturn director.Pushes == 0 and director.Lifts == 0"
+		},
+		{
+			"Tick": 120,
+			"Luau": "local director = Scene.FindByName(\"Director\"):GetScript()\nlocal lift = Scene.FindByPath(\"/Scenery/Lift\").Transform.Translation\nlocal ball = Scene.FindByPath(\"/Ball\").Transform.WorldPosition\nreturn director.Pushes == 1 and director.Lifts == 6 and math.abs(lift.y - 2) < 1e-4 and ball.z < 0"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "c17998ce1cf396fd"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "5bc31f32c83025c2"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "c746c3ec23e6b336"
+		}
+	],
+	"FinalTick": 240,
+	"FinalStateHash": "5905bd142b6ebfe8"
+}

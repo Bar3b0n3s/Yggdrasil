@@ -597,6 +597,16 @@
 			]
 		},
 		{
+			"File": "StaticScenery.jsonl",
+			"IdSeed": 4001,
+			"Renderer": "none"
+		},
+		{
+			"File": "StaticSceneryReplay.jsonl",
+			"IdSeed": 4002,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"
