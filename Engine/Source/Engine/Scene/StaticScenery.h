@@ -19,7 +19,8 @@ namespace Engine {
 	class Scene;
 
 	// Warning, not fixable: an effectively static entity (HierarchyStaticTag, StaticComponent.h) that a component moves every
-	// tick: a Dynamic or Kinematic RigidBody, a CharacterController, a BoneAttachment or an Animator whose RootMotion is Apply.
+	// tick: a Dynamic or Kinematic RigidBody, a CharacterController, a BoneAttachment, an Animator whose RootMotion is Apply or
+	// (M44) a VehicleWheel.
 	// Moving it is correct, but it rebuilds its static cell each tick it moves and renders at its current pose, without
 	// interpolation; a moving part belongs outside the static subtree, or under a Static with Scope NotStatic.
 	inline constexpr std::string_view SceneStaticMovesCode = "SCENE_STATIC_MOVES";
@@ -32,7 +33,7 @@ namespace Engine {
 		std::string Code{}; // SceneStaticMovesCode
 		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
 		UUID Entity{};           // the static entity
-		std::string Component{}; // the component that moves it: "RigidBody", "CharacterController", "BoneAttachment" or "Animator"
+		std::string Component{}; // the component that moves it: "RigidBody", "CharacterController", "BoneAttachment", "Animator" or "VehicleWheel"
 		std::string Field{};     // "Type" for a RigidBody, "RootMotion" for an Animator, empty otherwise
 		std::string Message{};
 		std::string Hint{};
@@ -42,7 +43,7 @@ namespace Engine {
 
 	// The static scenery checks over `scene`: every effectively static entity, enabled or not (an enabled one moves at once),
 	// in canonical order, with at most one finding an entity, naming the first of the moving components in the order above
-	// (M44 appends VehicleWheel to the list at its merge). Pure function of the scene; main thread.
+	// (M44's VehicleWheel appended at its merge). Pure function of the scene; main thread.
 	[[nodiscard]] std::vector<StaticSceneryIssue> FindStaticSceneryIssues(const Scene& scene);
 
 #if defined(ENGINE_DEBUG)

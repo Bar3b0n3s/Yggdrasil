@@ -2,16 +2,21 @@
 
 #include "Engine/Scene/PhysicsSystem.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsEngine.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/ColliderSurfaceComponent.h"
 #include "Engine/Scene/Components/HingeJointComponent.h"
 #include "Engine/Scene/Components/MassPropertiesComponent.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TerrainColliderComponent.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -40,7 +45,7 @@
 #include <vector>
 
 // The play session's vehicles (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; Architecture §9.11;
-// PhysicsSystem.h's M44 paragraph): wheel poses, driver input and waking, kept wheel frames, settings in place, every body
+// PhysicsSystem.h's M44 paragraph): wheel poses (marked written for M43's change tracking since the landing), driver input and waking, kept wheel frames, settings in place, every body
 // removal path, the grip by surface, PHYSICS_VEHICLE_INVALID at run time, the state hash's vehicle part, two histories
 // stepping alike, and random vehicles and edits never reaching a Jolt assert. Through PlaySession (lockstep ticks, Play mode).
 
@@ -261,6 +266,76 @@ namespace Engine {
 			// The spin is about the axle (local X): the wheel's X axis stays the chassis's.
 			const glm::vec3 axle = Find(*session, "/Buggy/RL").GetComponent<TransformComponent>().Rotation * glm::vec3(1.0f, 0.0f, 0.0f);
 			CHECK(axle.x == doctest::Approx(1.0f).epsilon(1.0e-3));
+		}
+
+		TEST_CASE("PhysicsVehicles: a wheel pose written in PostStep reaches the world-change list and the static cache")
+		{
+			// The landing of M44 over M43 (Docs/Decisions/0061-m43-static-scenery.md's W43.1 record; ADR 0060's ledger, the
+			// PhysicsSystem.cpp row): PostStep writes the wheels' Transforms directly and marks each write
+			// (Scene::MarkTransformWritten), so the next update recomputes the wheel's world matrix, a world-change list sees it
+			// and the render static cache moves its item. A sleeping vehicle is not written back, but Jolt still turns its wheels
+			// by their last spin: those ticks move the wheels alone, which only the wheels' own marks reveal.
+			Test::SceneTestFixture fixture;
+			static_cast<void>(Test::AddGround(fixture.GetScene()));
+			Entity buggy = AddBuggy(fixture.GetScene(), "Buggy");
+			buggy.AddComponent<StaticComponent>();
+			for (const std::string_view name : WheelNames)
+				fixture.GetScene().FindEntityByPath(std::format("/Buggy/{}", name)).AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+			Scope<PlaySession> session = StartSession(fixture);
+			Scene& scene = session->GetScene();
+			const uint32_t list = scene.OpenWorldChangeList();
+			Test::RunTicks(*session, 600);
+			REQUIRE(GetBody(*session, "/Buggy").IsSleeping);
+
+			// The static item of `wheel` (its MeshRenderer, held by the static set) and its world matrix there.
+			const auto staticWorld = [&scene](const Entity& wheel) -> std::optional<glm::mat4>
+			{
+				const Ref<const RenderStaticSet> set = scene.RefreshStaticSet();
+				REQUIRE(set != nullptr);
+				for (const Ref<const RenderStaticCell>& cell : set->Cells)
+				{
+					for (size_t index = 0; index < cell->PickTable.size(); ++index)
+					{
+						if (cell->PickTable[index] == wheel.GetUUID())
+							return cell->Items[index].World;
+					}
+				}
+				return std::nullopt;
+			};
+
+			std::vector<entt::entity> changed;
+			static_cast<void>(scene.TakeWorldChanges(list, changed));
+			const TransformComponent chassis = Find(*session, "/Buggy").GetComponent<TransformComponent>();
+			std::array<TransformComponent, 4> before{};
+			for (size_t index = 0; index < WheelNames.size(); ++index)
+				before[index] = Find(*session, std::format("/Buggy/{}", WheelNames[index])).GetComponent<TransformComponent>();
+			Test::RunTicks(*session, 1);
+			REQUIRE(GetBody(*session, "/Buggy").IsSleeping);
+			const TransformComponent& after = Find(*session, "/Buggy").GetComponent<TransformComponent>();
+			REQUIRE(SameBits(after.Translation, chassis.Translation));
+			REQUIRE(SameBits(after.Rotation, chassis.Rotation));
+
+			changed.clear();
+			REQUIRE(scene.TakeWorldChanges(list, changed));
+			size_t turned = 0;
+			for (size_t index = 0; index < WheelNames.size(); ++index)
+			{
+				INFO(WheelNames[index]);
+				const Entity wheel = Find(*session, std::format("/Buggy/{}", WheelNames[index]));
+				const TransformComponent& transform = wheel.GetComponent<TransformComponent>();
+				const bool moved = !SameBits(transform.Translation, before[index].Translation) || !SameBits(transform.Rotation, before[index].Rotation);
+				// A wheel written this tick is in the list; its world matrix and its static item are the walked one's.
+				CHECK((std::ranges::find(changed, wheel.GetHandle()) != changed.end()) == moved);
+				const glm::mat4 walked = TransformSystem::ComputeWorldMatrix(wheel);
+				CHECK(wheel.GetComponent<WorldTransformComponent>().Matrix == walked);
+				const std::optional<glm::mat4> item = staticWorld(wheel);
+				REQUIRE(item.has_value());
+				CHECK(*item == walked);
+				turned += moved ? 1 : 0;
+			}
+			// The ticks this case is about: the chassis rests while a wheel turns.
+			CHECK(turned > 0);
+			scene.CloseWorldChangeList(list);
 		}
 
 		TEST_CASE("PhysicsVehicles: a driver-input write wakes a sleeping vehicle and composes nothing")

@@ -8,6 +8,7 @@
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/StaticComponent.h"
+#include "Engine/Scene/Components/VehicleWheelComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 
@@ -33,6 +34,10 @@ namespace Engine {
 			if (const AnimatorComponent* animator = entity.TryGetComponent<AnimatorComponent>();
 				animator != nullptr && animator->RootMotion == AnimatorRootMotion::Apply)
 				return std::pair<std::string_view, std::string_view>{ "Animator", "RootMotion" };
+			// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), appended at its merge: its vehicle's physics writes a
+			// wheel's suspension, steer and spin to its Transform every tick the wheel moves.
+			if (entity.HasComponent<VehicleWheelComponent>())
+				return std::pair<std::string_view, std::string_view>{ "VehicleWheel", "" };
 			return std::nullopt;
 		}
 

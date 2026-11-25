@@ -2526,6 +2526,8 @@ end
 				add("Walker", "/Island", "CharacterController", "{}");
 				add("Dancer", "/Island", "Animator", R"({"RootMotion":"Apply"})");
 				add("Statue", "/Island", "Animator", R"({"RootMotion":"None"})");
+				// M44's VehicleWheel (appended at its merge): its vehicle's physics writes the wheel's pose every tick it moves.
+				add("Wheel", "/Island", "VehicleWheel", "{}");
 				// The opt-out: a NotStatic mill whose sail is Kinematic is not reported.
 				add("Mill", "/Island", "Static", R"({"Scope":"NotStatic"})");
 				add("Sail", "/Island/Mill", "RigidBody", R"({"Type":"Kinematic"})");
@@ -2542,9 +2544,10 @@ end
 				if (diagnostic.Code == SceneStaticMovesCode)
 					CHECK(moving.emplace(diagnostic.Entity, &diagnostic).second);
 			}
-			CHECK(moving.size() == 4);
+			CHECK(moving.size() == 5);
 			for (const auto& [path, component, field] : { std::tuple<std::string_view, std::string_view, std::string_view>{ "/Island/Crate", "RigidBody", "Type" },
-					 { "/Island/Lift", "RigidBody", "Type" }, { "/Island/Walker", "CharacterController", "" }, { "/Island/Dancer", "Animator", "RootMotion" } })
+					 { "/Island/Lift", "RigidBody", "Type" }, { "/Island/Walker", "CharacterController", "" }, { "/Island/Dancer", "Animator", "RootMotion" },
+					 { "/Island/Wheel", "VehicleWheel", "" } })
 			{
 				CAPTURE(path);
 				const auto found = moving.find(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());

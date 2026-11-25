@@ -513,8 +513,8 @@ namespace Engine {
 				"faces +Z, the Plane +Y)." },
 			ValidationCodeInfo{ SceneStaticMovesCode, "Warning", false,
 				"A static entity (Static on it or on an ancestor's subtree) has a component that moves it every tick: a Dynamic or Kinematic "
-				"RigidBody, a CharacterController, a BoneAttachment or an Animator whose RootMotion is Apply. It moves correctly, but rebuilds its "
-				"static cell each tick and renders without interpolation.",
+				"RigidBody, a CharacterController, a BoneAttachment, an Animator whose RootMotion is Apply or a VehicleWheel. It moves correctly, but "
+				"rebuilds its static cell each tick and renders without interpolation.",
 				"Move the moving entity out of the static subtree, or give it (or the root of its moving part) a Static with Scope NotStatic." },
 			ValidationCodeInfo{ PhysicsMassUnusedCode, "Warning", false,
 				"A MassProperties changes no body: its entity's RigidBody makes no Dynamic body (it is Static or Kinematic, its colliders are "
