@@ -28,6 +28,10 @@ namespace Engine {
 		constexpr AssetHandle CacheStripMesh(0x5c29000000000001);
 		constexpr AssetHandle CacheBlendMaterial(0x5c29000000000002);
 		constexpr AssetHandle CacheMaskMaterial(0x5c29000000000003);
+		// M46: a material with wind (every term), the same one with its wind disabled, and the fixture's quad with a level.
+		constexpr AssetHandle CacheWindMaterial(0x5c29000000000004);
+		constexpr AssetHandle CacheStillMaterial(0x5c29000000000005);
+		constexpr AssetHandle CacheLodQuad(0x5c29000000000006);
 
 		// A strip of two quads along +Y facing +Z (1 m wide, 2 m tall), skinned to two joints (the bottom row to joint 0, the
 		// top to joint 1, the middle half to each), with one morph target that pushes the top row 0.5 m along +Z.
@@ -130,6 +134,47 @@ namespace Engine {
 			blend->AlphaMode = AlphaMode::Blend;
 			fixture.Assets().Publish(CacheBlendMaterial, blend);
 			PublishMaskMaterial(fixture, 0.5f);
+		}
+
+		// M46: the fixture's quad (positions (+-1, +-1, 0), facing +Z) whose level 1, below the screen size 0.3, is its
+		// lower-right triangle.
+		Ref<MeshData> MakeCacheLodQuad()
+		{
+			Ref<MeshData> mesh = CreateRef<MeshData>();
+			mesh->Vertices = {
+				{ .Position = { -1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 1 } },
+				{ .Position = { 1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 1 } },
+				{ .Position = { 1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
+				{ .Position = { -1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
+			};
+			mesh->Indices = { 0, 1, 2, 0, 2, 3 };
+			mesh->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
+			mesh->Submeshes = { { .IndexCount = 6, .Bounds = mesh->Bounds } };
+			mesh->Slots = { {} };
+			mesh->LodIndices = { 0, 1, 2 };
+			mesh->Lods = { { .ScreenSize = 0.3f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 3 } } } };
+			const Status valid = ValidateMeshData(*mesh);
+			REQUIRE_MESSAGE(valid.has_value(), valid.error().ToString());
+			return mesh;
+		}
+
+		// M46: a storm (gusts, turbulence and a direction off the X axis) at a time where every wave is mid-cycle.
+		RenderWind MakeCacheWind()
+		{
+			return { .Enabled = true, .Direction = glm::vec3(1.0f, 0.3f, 0.5f), .Strength = 18.0f, .GustStrength = 9.0f, .GustFrequency = 0.7f, .Turbulence = 1.0f, .Time = 12.345 };
+		}
+
+		void PublishCacheLodWindAssets(Test::SceneRendererIntegrationFixture& fixture)
+		{
+			const MaterialWind wind{ .Enabled = true, .Bend = 0.25f, .Branch = 0.4f, .Flutter = 0.2f, .Stiffness = 0.1f };
+			Ref<MaterialData> swaying = CreateRef<MaterialData>();
+			swaying->Wind = wind;
+			fixture.Assets().Publish(CacheWindMaterial, swaying);
+			Ref<MaterialData> still = CreateRef<MaterialData>();
+			still->Wind = wind;
+			still->Wind.Enabled = false;
+			fixture.Assets().Publish(CacheStillMaterial, still);
+			fixture.Assets().Publish(CacheLodQuad, MakeCacheLodQuad());
 		}
 
 		// One change of the cached scene: what it does and the maps it leaves cached.
@@ -342,6 +387,58 @@ namespace Engine {
 				snapshot.Meshes[CasterA].Parameters = { .DissolveAmount = 1.0f };
 				snapshot.Meshes[SkinnedB].Parameters = { .DissolveAmount = 0.5f };
 			});
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E; the W46.2 review, finding 6): a caster's
+		// signature holds its level and, for a wind caster, its wind response and the render's wind. Caster A with a wind
+		// material under a storm: two renders at one wind time reuse every map (each change's base), and a later time draws
+		// light A's map and the spot atlas, which hold it, again, while light B's stays cached; with its material's wind
+		// disabled the moving wind keeps every map. Caster A as a quad with a level (ShadowLodOffset 0, so it casts the view's
+		// level; at 4.27 m its screen size is 0.17): a LodBias that keeps level 0 (4, then 2) keeps the maps, and one that
+		// brings it below its switch size 0.3 (1) draws them again. Each image equals the render without the cache.
+		TEST_CASE("ShadowCache: a wind caster's map draws again as its wind moves and stays cached while it holds, and a caster's new level draws it again")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishCacheAssets(fixture);
+			PublishCacheLodWindAssets(fixture);
+			const auto advance = [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Wind.Time += 0.3;
+			};
+			const auto swaying = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheWindMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			const std::vector<CacheChange> moved = { { "the wind moved on", advance, 1, 0 } };
+			CheckCacheChanges(fixture, moved, swaying);
+
+			const auto still = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheStillMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			const std::vector<CacheChange> calm = { { "the wind moved on past a caster without wind", advance, 2, 1 } };
+			CheckCacheChanges(fixture, calm, still);
+
+			const auto leveled = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Mesh = CacheLodQuad;
+				snapshot.Meshes[CasterA].Distance = { .LodBias = 4.0f, .ShadowLodOffset = 0 };
+			};
+			const std::vector<CacheChange> levels = {
+				{ "a LodBias that keeps the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 2.0f;
+			}, 2, 1 },
+				{ "a LodBias that changes the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 1.0f;
+			}, 1, 0 },
+			};
+			CheckCacheChanges(fixture, levels, leveled);
 		}
 	}
 

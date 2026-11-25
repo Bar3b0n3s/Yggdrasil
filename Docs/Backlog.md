@@ -327,6 +327,7 @@ Limits accepted for v1. A limit that names a milestone is scheduled by ADR 0028 
   - A mirror's blur margin follows the view's `SsrMaxRoughness`, not its glass's own roughness (W42.3's review, the lead's decision): every slot's chain reaches the level of `SsrMaxRoughness`, and its cull and rasterization rectangle widens by two texels of the chain's last level, so even a polished mirror culls and renders about 29% of its reflection's width as margin on each side (276 of 960 pixels at 1080p's default half resolution and `SsrMaxRoughness` 0.6). The measured cost stays far within the budget: Perf.py's room of three mirrors, a median of 0.188 ms at 1920 x 1080 against 2 ms. Sizing the chain and the margin from the glass's roughness is §2's row for later.
 - M46's mesh levels and wind (`Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md` decision 3 and its W46.2 record), accepted on its branch:
   - A view culls a wind-swept mesh by its rest bounds (each submesh's bounds over every level, undisplaced), so a vertex the wind moves beyond them can be culled with its submesh at the edge of a view or a shadow map.
+  - A material's `Flutter` is in metres at its entity's scale 1: the flutter moves along the normal through the entity's transform, unnormalized (the displacement allows no division or square root, so every pipeline computes the same bits), so it scales with the entity, and a non-uniformly scaled entity flutters off its normal; the lean and the sway are in world metres (the W46.2 review, finding 3).
 
 ## 7. Non-goals for v1
 

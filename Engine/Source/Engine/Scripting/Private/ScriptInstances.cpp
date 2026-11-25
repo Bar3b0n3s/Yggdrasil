@@ -667,7 +667,8 @@ namespace Engine {
 	uint64_t ScriptEngine::State::GetClockTick(bool worldClock) const
 	{
 		const ScriptFrameState frame = Engine.GetHost().GetFrameState();
-		return worldClock ? GetWorldTick(frame) : frame.Tick;
+		// The held ticks never exceed the session's: the world's clock starts with the session's and only falls behind it.
+		return worldClock ? frame.Tick - std::min(frame.WorldHeldTicks, frame.Tick) : frame.Tick;
 	}
 
 }

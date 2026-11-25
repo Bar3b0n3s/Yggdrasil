@@ -50,7 +50,8 @@ namespace Engine {
 		nvrhi::BufferHandle VertexBuffer{};
 		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): vertex binding 1, MeshVertexAttributes (24
 		// bytes each), bound at offset 0: the mesh's attribute stream (MeshData::Attributes), or for a mesh without one the
-		// cache's shared default stream (TexCoord1 (0, 0), opaque white), which holds at least VertexCount entries, all equal.
+		// cache's shared default stream (TexCoord1 (0, 0), opaque white), which holds at least as many entries as the vertex
+		// buffer (MeshData::Vertices then LodVertices; VertexCount stays level 0's), all equal.
 		nvrhi::BufferHandle AttributeBuffer{};
 		nvrhi::BufferHandle IndexBuffer{};
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E, 3G and 3L): vertex binding 3,

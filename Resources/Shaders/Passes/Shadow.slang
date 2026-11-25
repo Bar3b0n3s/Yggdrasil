@@ -3,7 +3,9 @@
 // R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is the view's instance record
 // Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it. Vertices are MeshVertex's
 // position and texture coordinates (binding 0, locations 0 and 1) and the attribute stream (M23, C-MESH2: binding 1,
-// locations 2 and 3), which a Mask caster's alpha test reads: the base colour map's UV set and the vertex colour's alpha.
+// locations 2 and 3), which a Mask caster's alpha test reads: the base colour map's UV set and the vertex colour's alpha;
+// and (M46) MeshVertex's normal (binding 0, location 4) and the wind stream (binding 3, location 5), which a wind caster's
+// displacement reads (Common/Wind.slang).
 // The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment shader, which does
 // not read it, leaves it out of its interface, which the validation layer reports (WARNING-Shader-OutputNotConsumed).
 // M31 (Docs/Decisions/0046-m31-material-parameters.md decision 5): the Mask variants, which an Opaque material takes while

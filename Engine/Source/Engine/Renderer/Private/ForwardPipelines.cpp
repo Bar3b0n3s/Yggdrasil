@@ -177,8 +177,8 @@ namespace Engine {
 			};
 		}
 
-		// MeshVertex (§6.8) at locations 0 to 3 and the attribute stream (M23) at 4 and 5, the order of the Scene program's
-		// VertexInput.
+		// MeshVertex (§6.8) at locations 0 to 3, the attribute stream (M23) at 4 and 5 and the wind stream (M46, vertex binding
+		// 3) at 6, the order of the Scene program's VertexInput.
 		[[nodiscard]] static std::vector<nvrhi::VertexAttributeDesc> MakeMeshVertexAttributes()
 		{
 			constexpr uint32_t Stride = sizeof(MeshVertex);
@@ -210,7 +210,7 @@ namespace Engine {
 		}
 
 		// M26 (stream X-C): the prepass variants' attributes: MakeMeshVertexAttributes', then PREVIOUSPOSITION from vertex
-		// binding 2 at location 6 (see the header's comment), the order of the Scene program's PrepassVertexInput.
+		// binding 2 at location 7 (see the header's comment), the order of the Scene program's PrepassVertexInput.
 		[[nodiscard]] static std::vector<nvrhi::VertexAttributeDesc> MakePrepassVertexAttributes()
 		{
 			std::vector<nvrhi::VertexAttributeDesc> attributes = MakeMeshVertexAttributes();

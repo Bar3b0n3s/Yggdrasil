@@ -649,6 +649,124 @@ namespace Engine {
 			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 		}
+
+		// Decision 3D (the W46.2 review's finding 1): a mirror view chooses an item's levels by its own camera, never by its cull
+		// camera, whose projection is cropped to the glass's rectangle. A small mirror (0.8 m at z = -3, a sixth of the view's
+		// height) reflects a double-sided, emissive green TriangleLodQuad scaled 1.5 behind the main camera at z = 1.5: 7.5 m from
+		// the mirror camera its screen size is about 0.49, below the level's switch (0.9), so the reflection shows its triangle
+		// alone and the glass holds green and the red clear colour; the cull camera's projection, cropped to the glass's
+		// rectangle widened by the blur margin (about 3.4 times as large with SsrMaxRoughness 0.05, whose chain has one level), would
+		// choose level 0, the whole quad, filling the glass with green. LodBias 10 keeps level 0 in the mirror's own camera too.
+		TEST_CASE("MeshLods: a mirror view chooses an item's levels by its own camera" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishAssets(fixture);
+			constexpr AssetHandle MirrorMaterial{ 0x4646000000000016ULL };
+			constexpr AssetHandle BeaconMaterial{ 0x4646000000000017ULL };
+			auto mirror = MakeMaterial(glm::vec4(1.0f));
+			mirror->Metallic = 1.0f;
+			mirror->Roughness = 0.0f;
+			fixture.Assets().Publish(MirrorMaterial, mirror);
+			auto beacon = MakeMaterial(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+			beacon->Emissive = glm::vec3(0.0f, 2.0f, 0.0f);
+			beacon->DoubleSided = true;
+			fixture.Assets().Publish(BeaconMaterial, beacon);
+
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Camera.ClearColor = glm::vec3(0.6f, 0.0f, 0.0f);
+			snapshot.Environment = RenderEnvironment{ .Environment = {}, .Intensity = 1.0f, .ShowSkybox = false, .FallbackColor = glm::vec3(0.0f) };
+			snapshot.Post.SsrEnabled = false;
+			// A one-level chain (a roughness this low blurs less than a texel), so the cull rectangle's blur margin is two texels
+			// and the crop about 3.4 times the view; the polished glass (roughness 0) still reflects below it.
+			snapshot.Post.SsrMaxRoughness = 0.05f;
+			const AssetHandle quad = snapshot.Meshes.front().Mesh;
+			const glm::mat4 glass = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f));
+			snapshot.Meshes = {
+				MeshDrawItem{ .World = glass, .Mesh = quad, .Materials = { MirrorMaterial }, .CastShadows = false, .Entity = UUID(900) },
+				MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 1.5f)) * glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)),
+					.Mesh = TriangleLodQuad,
+					.Materials = { BeaconMaterial },
+					.Entity = UUID(40) },
+			};
+			snapshot.PlanarReflections = { PlanarReflectionItem{ .World = glass, .Normal = glm::vec3(0.0f, 0.0f, 1.0f), .ResolutionScale = 1.0f, .Entity = UUID(900) } };
+
+			// The glass's pixels two in from its edges (it spans 32 +- 7.4 pixels) that show the green beacon.
+			const auto countGreen = [](const Image& image)
+			{
+				uint32_t green = 0;
+				for (uint32_t y = 27; y <= 37; ++y)
+				{
+					for (uint32_t x = 27; x <= 37; ++x)
+						green += Green(image, x, y) > 100 ? 1U : 0U;
+				}
+				return green;
+			};
+			constexpr uint32_t GlassPixels = 11 * 11;
+			const Image triangle = fixture.Render(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+			const uint32_t triangleGreen = countGreen(triangle);
+			CAPTURE(triangleGreen);
+			CHECK(triangleGreen > GlassPixels / 4);
+			CHECK(triangleGreen < GlassPixels * 3 / 4);
+
+			snapshot.Meshes[1].Distance.LodBias = 10.0f;
+			++snapshot.FrameIndex;
+			const Image whole = fixture.Render(snapshot);
+			CHECK(countGreen(whole) == GlassPixels);
+		}
+
+		// Decisions 3A and 3E (the W46.2 review's finding 7): a level with vertices of its own draws them, past level 0's in the
+		// joined vertex buffer, with the shared default attribute stream covering them in its white: a quad whose level 1 is a
+		// 4 x 1 m card of its own four vertices half a metre in front of it, wider than level 0, drawn at LodBias 0.01. The card
+		// spans the view's width in white (the vertex colour of the default stream, which a stream sized to level 0 alone would
+		// read as zeros, black), and the quad's part outside the card is not drawn.
+		TEST_CASE("MeshLods: a level with vertices of its own draws them with the default streams" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishAssets(fixture);
+			constexpr AssetHandle CardLodQuad{ 0x4646000000000005ULL };
+			Ref<MeshData> mesh = MakeLodQuad({ 0, 1, 2, 0, 2, 3 }, 0.5f);
+			mesh->LodVertices = {
+				{ .Position = { -2.0f, -0.5f, 0.5f }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 1 } },
+				{ .Position = { 2.0f, -0.5f, 0.5f }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 1 } },
+				{ .Position = { 2.0f, 0.5f, 0.5f }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
+				{ .Position = { -2.0f, 0.5f, 0.5f }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
+			};
+			mesh->LodIndices = { 4, 5, 6, 4, 6, 7 };
+			const Status valid = ValidateMeshData(*mesh);
+			REQUIRE_MESSAGE(valid.has_value(), valid.error().ToString());
+			fixture.Assets().Publish(CardLodQuad, mesh);
+
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.DebugView = RenderDebugView::Albedo;
+			snapshot.Meshes[0].Mesh = CardLodQuad;
+			snapshot.Meshes[0].Materials = { WhiteMaterial };
+			snapshot.Meshes[0].Distance.LodBias = 0.01f;
+			const Image card = fixture.Render(snapshot);
+			const RenderStats stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.MeshLodDraws[0] == 0);
+			CHECK(stats.MeshLodDraws[1] == 1);
+			// The card at z = -2.5 spans x in +-1.39 and y in +-0.35 of normalized device coordinates: every column of row 32.
+			for (const uint32_t x : { 1U, 20U, 32U, 44U, 62U })
+			{
+				CAPTURE(x);
+				CHECK(Green(card, x, 32) > 200);
+			}
+			// Level 0's quad would cover row 14 (y = 0.56); the card does not.
+			CHECK(Green(card, 32, 14) < 8);
+
+			// Level 0 at its own size draws the quad, not the card.
+			snapshot.Meshes[0].Distance = {};
+			++snapshot.FrameIndex;
+			const Image quad = fixture.Render(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().MeshLodDraws[0] == 1);
+			CHECK(Green(quad, 32, 14) > 200);
+			CHECK(Green(quad, 2, 32) < 8);
+		}
 	}
 
 }

@@ -3,11 +3,13 @@
 // Instances[MaskDraw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it. Vertices are
 // MeshVertex's position and texture coordinates (binding 0, locations 0 and 1) and the attribute stream (M23, C-MESH2:
 // binding 1, locations 2 and 3), which a Mask material's alpha test reads: the base colour map's UV set and the vertex
-// colour's alpha. The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment
-// shader, which does not read it, leaves it out of its interface, which the validation layer reports
-// (WARNING-Shader-OutputNotConsumed). M31 (Docs/Decisions/0046-m31-material-parameters.md decision 7): the mask reads only
-// the record's World, so an instance's material parameters change nothing of its outline: a faded or dissolving mesh is
-// outlined whole.
+// colour's alpha; and (M46) MeshVertex's normal (binding 0, location 4) and the wind stream (binding 3, location 5), which
+// a wind draw's displacement reads (Common/Wind.slang). The vertex colour reaches the fragment shader whole: as a scalar
+// alpha, the Opaque variants' fragment shader, which does not read it, leaves it out of its interface, which the
+// validation layer reports (WARNING-Shader-OutputNotConsumed). M31 (Docs/Decisions/0046-m31-material-parameters.md decision
+// 7): the mask reads the record's World, Flags and WindResponse, never its material parameters or its LodFade, so an
+// instance's material parameters change nothing of its outline: a faded or dissolving mesh is outlined whole, and (M46) a
+// wind-swept one where the prepass drew it.
 
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"

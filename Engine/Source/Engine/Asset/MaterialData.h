@@ -47,9 +47,12 @@ namespace Engine {
 	// M46 (Material version 3; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3H): registry struct
 	// "MaterialWind", how a material's surface answers the scene's Wind (Scene/Components/WindComponent.h). The renderer
 	// displaces the positions of a mesh drawn with an Enabled block alike in every pipeline (Common/Wind.slang): they lean
-	// along the wind by Bend times their squared height above the entity's origin, sway by Branch times the mesh's _WIND x
-	// weight and flutter along their normals by Flutter times its z weight, each scaled by the response
-	// speed / (speed + Stiffness * 10 m/s). Defaults and bounds:
+	// with the wind (its gusted speed along it and its turbulent part across it) by Bend times their squared height above
+	// the entity's origin, sway along it by Branch times the mesh's _WIND x weight and flutter along their normals by Flutter
+	// times its z weight, each scaled by the response x (2 - |x|), x = speed * (1 - Stiffness) / 10 m/s clamped to [-1, 1]
+	// (0 in a calm wind; a Stiffness of 0 saturates at 10 m/s, 1 never moves). The flutter moves along the normal through
+	// the entity's transform, so Flutter is in metres at the entity's scale 1 and scales with the entity; the lean and the
+	// sway are in world metres. Defaults and bounds:
 	//   Enabled false     Bend 0.1, 0 to 1 (about Bend m of lean at 1 m of height in a 10 m/s wind)
 	//   Branch 0.1 m, 0 to 1          Flutter 0.02 m, 0 to 0.25          Stiffness 0.5, 0 to 1
 	struct MaterialWind

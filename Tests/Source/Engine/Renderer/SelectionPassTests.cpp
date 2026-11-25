@@ -7,6 +7,8 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SkinningPass.h"
 #include "Shared/InstanceRecord.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -17,6 +19,10 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -24,6 +30,13 @@ namespace Engine {
 
 		// The most instance records a selection test writes.
 		constexpr size_t SelectionTestMaxInstances = 16;
+
+		// M46: the meshes and materials of the levels and wind case, on the integration fixture.
+		constexpr AssetHandle SelectionLodQuad{ 0x5e46000000000001ULL };     // level 1, below the screen size 0.9: the lower-right triangle
+		constexpr AssetHandle SelectionLodTriangle{ 0x5e46000000000002ULL }; // the same quad's vertices drawing that triangle as level 0
+		constexpr AssetHandle SelectionSweptGrid{ 0x5e46000000000003ULL };   // a dense vertical grid with a _WIND stream
+		constexpr AssetHandle SelectionRedMaterial{ 0x5e46000000000010ULL };
+		constexpr AssetHandle SelectionStormMaterial{ 0x5e46000000000011ULL }; // white, with wind: every term
 
 		struct SelectionTestTargets
 		{
@@ -144,6 +157,110 @@ namespace Engine {
 		static uint32_t SelectionTestRed(const Image& image, uint32_t x, uint32_t y)
 		{
 			return std::to_integer<uint32_t>(image.Pixels[(static_cast<size_t>(y) * image.Width + x) * 4]);
+		}
+
+		// M46: the integration fixture's quad (positions (+-1, +-1, 0), facing +Z) drawing `indices`, with a further level of
+		// the index-only triangles `level` below the screen size 0.9 when `level` is not empty.
+		static Ref<MeshData> MakeSelectionLodQuad(std::vector<uint32_t> indices, std::vector<uint32_t> level)
+		{
+			auto mesh = CreateRef<MeshData>();
+			mesh->Vertices = {
+				{ .Position = { -1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 1 } },
+				{ .Position = { 1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 1 } },
+				{ .Position = { 1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
+				{ .Position = { -1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
+			};
+			mesh->Indices = std::move(indices);
+			mesh->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
+			Aabb bounds;
+			for (const uint32_t index : mesh->Indices)
+				bounds.Extend(mesh->Vertices[index].Position);
+			mesh->Submeshes = { { .IndexCount = static_cast<uint32_t>(mesh->Indices.size()), .Bounds = bounds } };
+			mesh->Slots = { {} };
+			if (!level.empty())
+			{
+				const auto count = static_cast<uint32_t>(level.size());
+				mesh->LodIndices = std::move(level);
+				mesh->Lods = { { .ScreenSize = 0.9f, .Submeshes = { { .IndexOffset = 0, .IndexCount = count } } } };
+			}
+			const Status valid = ValidateMeshData(*mesh);
+			REQUIRE_MESSAGE(valid.has_value(), valid.error().ToString());
+			return mesh;
+		}
+
+		// M46: a vertical grid of 8 x 32 quads in its entity's XY plane, x in [-0.5, 0.5] and y in [0, 2], facing +Z, with a
+		// _WIND stream whose branch weight rises across the grid, whose phases vary per vertex, whose flutter is 200 / 255 and
+		// whose bottom row's bend mask holds it still (SceneRendererLodWindTests' swept grid).
+		static Ref<MeshData> MakeSelectionSweptGrid()
+		{
+			constexpr uint32_t Columns = 8;
+			constexpr uint32_t Rows = 32;
+			auto mesh = CreateRef<MeshData>();
+			for (uint32_t row = 0; row <= Rows; ++row)
+			{
+				for (uint32_t column = 0; column <= Columns; ++column)
+				{
+					const float u = static_cast<float>(column) / static_cast<float>(Columns);
+					const float v = static_cast<float>(row) / static_cast<float>(Rows);
+					mesh->Vertices.push_back({ .Position = { u - 0.5f, 2.0f * v, 0.0f }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { u, 1.0f - v } });
+					mesh->Wind.push_back({ .Branch = static_cast<uint8_t>(255U * column / Columns),
+						.Phase = static_cast<uint8_t>((37U * (row * (Columns + 1) + column)) % 256U),
+						.Flutter = 200,
+						.BendMask = static_cast<uint8_t>(row == 0 ? 255 : 0) });
+				}
+			}
+			for (uint32_t row = 0; row < Rows; ++row)
+			{
+				for (uint32_t column = 0; column < Columns; ++column)
+				{
+					const uint32_t a = row * (Columns + 1) + column;
+					const uint32_t d = a + Columns + 1;
+					mesh->Indices.insert(mesh->Indices.end(), { a, a + 1, d + 1, a, d + 1, d });
+				}
+			}
+			mesh->Bounds = { { -0.5f, 0.0f, 0.0f }, { 0.5f, 2.0f, 0.0f } };
+			mesh->Submeshes = { { .IndexCount = static_cast<uint32_t>(mesh->Indices.size()), .Bounds = mesh->Bounds } };
+			mesh->Slots = { {} };
+			const Status valid = ValidateMeshData(*mesh);
+			REQUIRE_MESSAGE(valid.has_value(), valid.error().ToString());
+			return mesh;
+		}
+
+		static void PublishSelectionLodWindAssets(Test::SceneRendererIntegrationFixture& fixture)
+		{
+			Test::InMemoryAssetManager& assets = fixture.Assets();
+			assets.Publish(SelectionLodQuad, MakeSelectionLodQuad({ 0, 1, 2, 0, 2, 3 }, { 0, 1, 2 }));
+			assets.Publish(SelectionLodTriangle, MakeSelectionLodQuad({ 0, 1, 2 }, {}));
+			assets.Publish(SelectionSweptGrid, MakeSelectionSweptGrid());
+			auto red = CreateRef<MaterialData>();
+			red->BaseColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			assets.Publish(SelectionRedMaterial, red);
+			auto storm = CreateRef<MaterialData>();
+			storm->Wind = { .Enabled = true, .Bend = 0.25f, .Branch = 0.4f, .Flutter = 0.2f, .Stiffness = 0.1f };
+			assets.Publish(SelectionStormMaterial, storm);
+		}
+
+		// Whether pixel (x, y) of a rendered view is the outline's solid colour: the default selection colour (1, 0.55, 0.1)
+		// encoded, (255, 196, 89), which SelectionFilter.slang's composite writes at alpha 1 whatever lies behind it.
+		static bool IsSelectionSolidOutline(const Image& image, uint32_t x, uint32_t y)
+		{
+			constexpr std::array<int, 3> Orange = { 255, 196, 89 };
+			for (size_t channel = 0; channel < Orange.size(); ++channel)
+			{
+				if (std::abs(Test::SceneRendererIntegrationFixture::Channel(image, x, y, channel) - Orange[channel]) > 1)
+					return false;
+			}
+			return true;
+		}
+
+		static bool SelectionPixelsDiffer(const Image& image, const Image& other, uint32_t x, uint32_t y)
+		{
+			for (size_t channel = 0; channel < 3; ++channel)
+			{
+				if (Test::SceneRendererIntegrationFixture::Channel(image, x, y, channel) != Test::SceneRendererIntegrationFixture::Channel(other, x, y, channel))
+					return true;
+			}
+			return false;
 		}
 
 	}
@@ -458,6 +575,130 @@ namespace Engine {
 			const auto resized = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, first, snapshot, 0.0f, resizedStats);
 			CHECK(Utils::SelectionTestRed(resized, 10, 24) == 255);
 			// Fixture checks all targets, binding sets and pipelines are released after submission retirement.
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G; the W46.2 review, finding 5): the
+		// mask draws what the view draws, through the scene renderer.
+		//   - The quad at 3 m (screen size 0.816) draws its level 1, its lower-right triangle (screen pixels with x + y > 64),
+		//     below the level's switch size 0.9: its mask is that one triangle, so its outline equals the outline of a mesh whose
+		//     own level is the triangle, and pixel (30, 30), inside the quad but outside the triangle, is outline; LodBias 2
+		//     (1.63) draws level 0, whose mask is the whole quad.
+		//   - At 5.1 m beyond a CullDistance of 4 m it draws no mask and no outline; within 10 m it does.
+		//   - A selected grid swept by a storm masks the surface the prepass drew, bit for bit: every pixel of the mask is
+		//     visible, so every outline pixel is solid (none dim, as an outline of occluded coverage is), and none lies on the
+		//     grid's own pixels in the image without the selection.
+		TEST_CASE("Selection: a selected item's mask draws its view's level, nothing beyond its CullDistance, and a wind-swept item where the prepass drew it")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			Utils::PublishSelectionLodWindAssets(fixture);
+			// The last render's SelectionMask row.
+			const auto maskPass = [&fixture]()
+			{
+				const RenderStats stats = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* mask = Test::SceneRendererIntegrationFixture::FindPass(stats, "SelectionMask");
+				REQUIRE(mask != nullptr);
+				return *mask;
+			};
+
+			// The view's level.
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.DebugView = RenderDebugView::Albedo;
+			snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Selection;
+			snapshot.SelectedEntities = { UUID(900) };
+			snapshot.Meshes[0].Mesh = SelectionLodQuad;
+			const Image coarse = fixture.Render(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().MeshLodDraws[1] == 1);
+			RenderPassStats mask = maskPass();
+			CHECK(mask.DrawCalls == 1);
+			CHECK(mask.Triangles == 1);
+			CHECK(Utils::IsSelectionSolidOutline(coarse, 30, 30));
+			snapshot.Meshes[0].Mesh = SelectionLodTriangle;
+			++snapshot.FrameIndex;
+			CHECK(fixture.Render(snapshot).Pixels == coarse.Pixels);
+			snapshot.Meshes[0].Mesh = SelectionLodQuad;
+			snapshot.Meshes[0].Distance.LodBias = 2.0f;
+			++snapshot.FrameIndex;
+			const Image fine = fixture.Render(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().MeshLodDraws[0] == 1);
+			mask = maskPass();
+			CHECK(mask.DrawCalls == 1);
+			CHECK(mask.Triangles == 2);
+			CHECK_FALSE(Utils::IsSelectionSolidOutline(fine, 30, 30));
+
+			// Nothing beyond the CullDistance: the SelectionMask row draws nothing and no outline is composited, so the image
+			// is the one without a selection.
+			snapshot.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f, 0.0f, -5.0f));
+			snapshot.Meshes[0].Distance = { .CullDistance = 4.0f };
+			++snapshot.FrameIndex;
+			const Image culled = fixture.Render(snapshot);
+			RenderStats stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.DistanceCulledMeshes == 1);
+			CHECK(maskPass().DrawCalls == 0);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "SelectionComposite") == nullptr);
+			RenderSnapshot unselected = snapshot;
+			unselected.SelectedEntities.clear();
+			++unselected.FrameIndex;
+			CHECK(fixture.Render(unselected).Pixels == culled.Pixels);
+			snapshot.Meshes[0].Distance.CullDistance = 10.0f;
+			snapshot.FrameIndex = unselected.FrameIndex + 1;
+			CHECK(fixture.Render(snapshot).Pixels != culled.Pixels);
+			stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.DistanceCulledMeshes == 0);
+			CHECK(maskPass().DrawCalls == 1);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "SelectionComposite") != nullptr);
+
+			// A wind-swept item: the grid at 3 m in front of a red wall of 12 x 12 m at z = -8 that fills the view.
+			RenderSnapshot swept = fixture.Snapshot();
+			swept.DebugView = RenderDebugView::Albedo;
+			swept.FrameIndex = snapshot.FrameIndex + 1;
+			MeshDrawItem wall = swept.Meshes.front();
+			wall.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -8.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(6.0f));
+			wall.Materials = { SelectionRedMaterial };
+			MeshDrawItem grid = wall;
+			grid.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -1.2f, -3.0f));
+			grid.Mesh = SelectionSweptGrid;
+			grid.Materials = { SelectionStormMaterial };
+			grid.Entity = UUID(40);
+			grid.PickId = 2;
+			swept.Meshes = { wall, grid };
+			swept.SelectedEntities = { UUID(40) };
+			const Image still = fixture.Render(swept);
+			for (const double time : { 12.345, 40.5 })
+			{
+				CAPTURE(time);
+				// A storm: gusts, turbulence and a direction off the X axis.
+				swept.Wind = { .Enabled = true, .Direction = glm::vec3(1.0f, 0.3f, 0.5f), .Strength = 18.0f, .GustStrength = 9.0f, .GustFrequency = 0.7f, .Turbulence = 1.0f, .Time = time };
+				swept.Flags = RenderViewFlags::None;
+				++swept.FrameIndex;
+				const Image plain = fixture.Render(swept);
+				CHECK(plain.Pixels != still.Pixels);
+				swept.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Selection;
+				++swept.FrameIndex;
+				const Image outlined = fixture.Render(swept);
+				mask = maskPass();
+				CHECK(mask.DrawCalls == 1);
+				CHECK(mask.Triangles == 512);
+				size_t outline = 0;
+				size_t notSolid = 0;
+				size_t onGrid = 0;
+				for (uint32_t y = 0; y < outlined.Height; ++y)
+				{
+					for (uint32_t x = 0; x < outlined.Width; ++x)
+					{
+						if (!Utils::SelectionPixelsDiffer(outlined, plain, x, y))
+							continue;
+						++outline;
+						notSolid += Utils::IsSelectionSolidOutline(outlined, x, y) ? 0U : 1U;
+						onGrid += Test::SceneRendererIntegrationFixture::Channel(plain, x, y, 1) > 128 ? 1U : 0U;
+					}
+				}
+				CAPTURE(outline);
+				CHECK(outline > 100);
+				CHECK(notSolid == 0);
+				CHECK(onGrid == 0);
+			}
 		}
 	}
 

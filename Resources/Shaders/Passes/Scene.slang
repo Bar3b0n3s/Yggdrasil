@@ -37,9 +37,11 @@
 // (WARNING-Shader-OutputNotConsumed): VSMain for PSForward, VSPrepass (with the current and previous clip positions, M26)
 // for PSPrepass,
 // VSPicking (with the clip positions and the pick id) for PSPicking and VSOverdraw for PSOverdraw, which reads only
-// the position and texture coordinates of MeshVertex and the attribute stream, the attributes the overdraw pipelines bind
-// (as the shadow casters' do), since the layer also reports a vertex attribute the vertex shader does not read. M26: the
-// prepass pipelines (VSPrepass and VSPicking) bind vertex binding 2, PREVIOUSPOSITION at location 6, which they read for a
+// the position, texture coordinates and normal of MeshVertex, the attribute stream and the wind stream (M46: NORMAL and WIND
+// at locations 4 and 5, the flutter's direction and weights), the attributes the overdraw pipelines bind (as the shadow
+// casters' and the selection mask's do), since the layer also reports a vertex attribute the vertex shader does not read.
+// M26: the prepass pipelines (VSPrepass and VSPicking) bind vertex binding 2, PREVIOUSPOSITION at location 7 (6 until M46's
+// WIND took it), which they read for a
 // deformed item's previous positions (an instance with DrawFlagPreviousPositions: M23's Skinning pass keeps them); a draw
 // without them binds its own vertex buffer there, never read as positions (Renderer/Private/ForwardPipelines.h). The
 // previous clip position is the previous local position through the instance record's PreviousWorld and

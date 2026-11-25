@@ -947,10 +947,12 @@ namespace Engine {
 			submeshes.assign(mesh.Submeshes.begin(), mesh.Submeshes.end());
 			defaults.assign(mesh.DefaultMaterials.begin(), mesh.DefaultMaterials.end());
 			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3D): the item's levels in this view, by
-			// its bounding sphere's screen size and its distance from this view's camera; an item at or beyond its CullDistance
-			// draws nothing. Only the main view counts them (RenderStats): an item it culls by distance, an item of which it
-			// draws two levels and each draw per level.
-			const MeshLodSelection lods = SelectViewMeshLod(mesh.LodScreenSizes, mesh.Bounds, item.World, item.Distance, camera);
+			// its bounding sphere's screen size and its distance from this view's camera (a mirror view's own camera, never its
+			// cull camera, whose projection is cropped to the glass); an item at or beyond its CullDistance draws nothing. Only
+			// the main view counts them (RenderStats): an item it culls by distance, an item of which it draws two levels and
+			// each draw per level.
+			const CameraData& lodCamera = mirror != nullptr && mirror->View != nullptr ? *mirror->View : camera;
+			const MeshLodSelection lods = SelectViewMeshLod(mesh.LodScreenSizes, mesh.Bounds, item.World, item.Distance, lodCamera);
 			if (lods.DrawCount == 0)
 			{
 				if (mirror == nullptr)

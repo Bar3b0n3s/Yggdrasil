@@ -85,10 +85,13 @@ namespace Engine {
 				Utils::UnitRange())
 			.Field("Branch", &MaterialWind::Branch, "How far branches sway with the gusts, times the mesh's _WIND branch weight (x).",
 				{ .Min = 0.0, .Max = 1.0, .Unit = "m" })
-			.Field("Flutter", &MaterialWind::Flutter, "How far leaves flutter along their normals, times the mesh's _WIND flutter weight (z).",
+			.Field("Flutter", &MaterialWind::Flutter,
+				"How far leaves flutter along their normals, times the mesh's _WIND flutter weight (z): metres at the entity's scale 1, since the "
+				"flutter moves along the normal through the entity's transform, so it scales with the entity.",
 				{ .Min = 0.0, .Max = 0.25, .Unit = "m" })
 			.Field("Stiffness", &MaterialWind::Stiffness,
-				"How much of the wind the plant resists: its response is speed / (speed + Stiffness x 10 m/s), so 0 follows every breeze fully.",
+				"How much of the wind the plant resists: its response is x (2 - |x|) with x = speed x (1 - Stiffness) / 10 m/s clamped to [-1, 1], "
+				"so 0 saturates at 10 m/s and 1 never moves. The response scales the lean, the sway and the flutter.",
 				Utils::UnitRange());
 	}
 

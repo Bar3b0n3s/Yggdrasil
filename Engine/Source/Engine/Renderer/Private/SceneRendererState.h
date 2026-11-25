@@ -308,6 +308,10 @@ namespace Engine {
 		{
 			UUID Excluded{};
 			glm::vec4 ClipPlane = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3D): the mirror view's own camera, whose
+			// projection chooses its items' levels of detail; the cull camera's projection is cropped to the glass's rectangle,
+			// which would inflate every screen size. Borrowed for the PrepareViewDraws call; null chooses by the cull camera.
+			const CameraData* View = nullptr;
 		};
 
 		// M42: the prepass targets of the mirror views of one size (the declaration's PlanarReflectionDepth, Normals, Velocity
