@@ -1,0 +1,38 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "e3b39767e43be620",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 4,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false,
+		"AnimationEvents": [],
+		"Lods": "Generate",
+		"LodScreenSizes": [0.5, 0.25],
+		"LodTriangleRatios": [0.3, 0.1],
+		"LodMaxError": 0.3,
+		"Wind": {
+			"Enabled": false,
+			"Bend": 0.1,
+			"Branch": 0.1,
+			"Flutter": 0.02,
+			"Stiffness": 0.5
+		}
+	},
+	"SubAssets": [
+		{
+			"Key": "material:0:Ball",
+			"Handle": "a24e671e3ad210ca",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:Sphere",
+			"Handle": "64c020fd04af1245",
+			"Type": "Mesh"
+		}
+	]
+}

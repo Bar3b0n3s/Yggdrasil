@@ -1,0 +1,33 @@
+{
+	"Format": "Material",
+	"Version": 3,
+	"BaseColor": [0.6, 0.62, 0.3, 1],
+	"BaseColorMap": null,
+	"BaseColorUVSet": "UV0",
+	"Metallic": 0,
+	"Roughness": 0.7,
+	"MetallicRoughnessMap": null,
+	"MetallicRoughnessUVSet": "UV0",
+	"NormalMap": null,
+	"NormalUVSet": "UV0",
+	"NormalScale": 1,
+	"OcclusionMap": null,
+	"OcclusionUVSet": "UV0",
+	"OcclusionStrength": 1,
+	"Emissive": [0, 0, 0],
+	"EmissiveStrength": 1,
+	"EmissiveMap": null,
+	"EmissiveUVSet": "UV0",
+	"AlphaMode": "Opaque",
+	"AlphaCutoff": 0.5,
+	"DoubleSided": false,
+	"UVScale": [1, 1],
+	"UVOffset": [0, 0],
+	"Wind": {
+		"Enabled": true,
+		"Bend": 0.15,
+		"Branch": 0,
+		"Flutter": 0,
+		"Stiffness": 0.05
+	}
+}

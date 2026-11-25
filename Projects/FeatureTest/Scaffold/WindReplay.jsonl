@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Wind.scene"}}
+{"method": "play.step", "params": {"ticks": 240, "render": "None", "input": [{"tick": 40, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 120, "type": "Action", "name": "Jump", "state": "Tap"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Wind.replay", "expect": [{"tick": 30, "luau": "local wind = Scene.FindByName(\"Weather\").Wind\nlocal kite = Scene.FindByName(\"Kite\")\nreturn wind.Strength == 12 and kite:GetScript(\"Kite\").Raises == 0"}, {"tick": 239, "luau": "local wind = Scene.FindByName(\"Weather\").Wind\nlocal kite = Scene.FindByName(\"Kite\")\nlocal moved = vector.magnitude(kite.Transform.WorldPosition - vector.create(0, 3.5, 1))\nreturn wind.Strength == 28 and kite:GetScript(\"Kite\").Raises == 2 and moved > 0.5"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

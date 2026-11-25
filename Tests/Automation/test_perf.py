@@ -200,6 +200,72 @@ class PerfTests(unittest.TestCase):
         self.assertEqual(len(dropped.warnings), 1)
         self.assertIn("drew 2 of the 3", dropped.warnings[0])
 
+    def test_the_forest_cost_sums_the_depth_shadow_and_forward_rows_of_a_forest_with_levels(self) -> None:
+        # M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): lod/Forest/gpuMs sums the
+        # DepthNormal row, the Shadows pass's rows and the ForwardOpaque row over a generated forest of 2,000 trees with
+        # authored levels and 4,000 rocks with generated ones on a 1 km plane under a gale; budget 3 ms.
+        stats = {"views": [{"name": "game", "gpuAvailable": True, "passes": [
+            {"name": "DepthNormal", "gpuAvailable": True, "gpuMilliseconds": 0.5},
+            {"name": "DirectionalShadows", "gpuAvailable": True, "gpuMilliseconds": 0.75},
+            {"name": "ForwardOpaque", "gpuAvailable": True, "gpuMilliseconds": 1.25},
+            {"name": "Tonemap", "gpuAvailable": True, "gpuMilliseconds": 4.0}]}]}
+        self.assertEqual(Perf.summed_gpu_time(Perf.game_view(stats), Perf.FOREST_PASSES), 2.5)
+        ops = Perf.forest_ops()
+        meshes = [op["params"]["components"]["MeshRenderer"]["Mesh"] for op in ops
+                  if "MeshRenderer" in op["params"]["components"]]
+        self.assertEqual(meshes.count(Perf.FOREST_TREE_MESH), 2000)
+        self.assertEqual(meshes.count(Perf.FOREST_ROCK_MESH), 4000)
+        names = [op["params"]["name"] for op in ops]
+        self.assertEqual(len(names), len(set(names)))
+        half = Perf.FOREST_EXTENT / 2
+        for op in ops:
+            translation = op["params"]["components"].get("Transform", {}).get("Translation", [0, 0, 0])
+            if op["params"]["name"].startswith(("Tree", "Rock")):
+                self.assertLess(abs(translation[0]), half, op["params"]["name"])
+                self.assertLess(abs(translation[2]), half, op["params"]["name"])
+        self.assertEqual(sum(1 for op in ops if "Wind" in op["params"]["components"]), 1)
+        self.assertEqual(perf.BUDGETS[Perf.FOREST_METRIC], 3.0)
+
+    def test_the_forest_cost_is_captured_only_when_the_view_drew_a_coarser_level(self) -> None:
+        class FakeEditor:
+            def __init__(self) -> None:
+                self.batches: list[int] = []
+                self.meshes: set[str] = set()
+
+            def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+                if method == "asset.info":
+                    handle = "000000000000a001" if params["asset"] == Perf.FOREST_TREE_MESH else "000000000000a002"
+                    return {"asset": {"id": handle, "path": params["asset"], "type": "Mesh"}}
+                if method == "edit.batch":
+                    self.batches.append(len(params["ops"]))
+                    self.meshes |= {op["params"]["components"]["MeshRenderer"]["Mesh"] for op in params["ops"]
+                                    if "MeshRenderer" in op["params"]["components"]}
+                return {}
+
+        class FixedSamples(Perf.Capture):
+            draws = [900, 1200, 2400, 0, 0]
+
+            def play_samples(self, client: Any, passes: tuple[str, ...]) -> tuple[list[float], dict[str, Any]]:
+                return [2.5, 2.0, 1.5], {"meshLodDraws": self.draws, "lodCrossFades": 12}
+
+        capture = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        editor = FakeEditor()
+        capture.forest_cost(editor)
+        self.assertEqual(capture.warnings, [])
+        self.assertEqual([metric.name for metric in capture.metrics], [Perf.FOREST_METRIC])
+        self.assertEqual(capture.metrics[0].median, 2.0)
+        # The forest's ops go in batches of at most FOREST_BATCH_OPS, naming the meshes by the handles asset.info gives
+        # (an op naming a project path would refresh the project's assets).
+        self.assertEqual(sum(editor.batches), len(Perf.forest_ops()))
+        self.assertLessEqual(max(editor.batches), Perf.FOREST_BATCH_OPS)
+        self.assertEqual(editor.meshes, {"engine://Meshes/Plane", "000000000000a001", "000000000000a002"})
+        finest = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        finest.draws = [4500, 0, 0, 0, 0]
+        finest.forest_cost(FakeEditor())
+        self.assertEqual(finest.metrics, [])
+        self.assertEqual(len(finest.warnings), 1)
+        self.assertIn("no coarser level", finest.warnings[0])
+
     def test_the_capture_reads_scene_names_gpu_passes_and_the_device_line(self) -> None:
         self.assertEqual(Perf.scene_name("Assets/Scenes/Golden/Bloom.scene"), "Golden/Bloom")
         self.assertEqual(Perf.scene_name("Assets/Scenes/Physics.scene"), "Physics")

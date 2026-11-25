@@ -44,10 +44,11 @@ PERF_REPORT_NAME = "Perf.json"
 # this capture; M32's fog "under 0.5 ms at 1920 x 1080", Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5; M30's
 # navigation case, about half of FeatureTest's 15.6 ms fixed step at 64 Hz, World Tree's brief 1's "fit comfortably in a
 # 60 Hz fixed step", Docs/Decisions/0045-m30-navigation.md decision 13; M42's three planar reflections at
-# 1920 x 1080, World Tree's brief 23's "about 2 ms or less", Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-# Exceeding one is a warning.
+# 1920 x 1080, World Tree's brief 23's "about 2 ms or less", Docs/Decisions/0059-m42-planar-reflections.md decision 3;
+# M46's forest of 2,000 trees and 4,000 rocks with levels of detail at 1920 x 1080, the Skerries brief S04's trees and
+# rocks, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K). Exceeding one is a warning.
 BUDGETS = {"playCopy/1000Entities": 30.0, "fog/Fog/gpuCostMs": 0.5, "navigation/150Agents/tickMs": 8.0,
-           "reflections/Mirrors3/gpuMs": 2.0}
+           "reflections/Mirrors3/gpuMs": 2.0, "lod/Forest/gpuMs": 3.0}
 
 _CAPTURE_MEMBERS = {"format": str, "version": int, "commit": str, "config": str, "host": dict, "metrics": list,
                     "scenes": list, "warnings": list}

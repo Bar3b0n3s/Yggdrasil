@@ -1170,30 +1170,35 @@ Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
 
 **Scope.** Phase 8 of the Skerries program, fourth in its one batch's fixed train order, after M43, M44 and M45 (`Docs/Decisions/0060-skerries-engine-program.md` decision 2; `Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md` decisions 2 to 4). Skerries' brief S04, items 1 and 3: mesh levels of detail with a cull distance per renderer, and a scene wind. Item 2, the scatter, is M49. It is delivered in four waves:
 - **W46.1:** the data, disjoint from M43: meshoptimizer vendored; cooked mesh version 3 with levels and a wind stream; `GltfImporter` version 4 with authored (`MSFT_lod`, `_LOD<n>`) and generated levels and the `_WIND` attribute; Material version 3 with the demos' materials upgraded; the `RenderDistance` and `Wind` components and `Wind:Sample`.
-- **W46.2:** the renderer: levels chosen per view by screen size and cross-faded with complementary dither, shadows from a coarser level, and wind displacement bit-identical in every pipeline.
+- **W46.2:** the renderer: levels chosen per view by screen size and cross-faded with complementary dither, shadows from a coarser level, and wind displacement bit-identical in the camera's pipelines and the selection mask.
 - **W46.3:** stats, perf, the goldens, FeatureTest and the documents.
 - **W46.4:** the adaptation to M43's static path at landing.
 
 Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
 
 **Deliverables**
-- **Mesh levels.** Up to five levels per mesh in the cooked mesh, level 0 unchanged, so colliders, the navigation bake and raycasts read level 0 alone.
-  - Import settings `Lods` (`None`, `FromGltf`, `Generate`), `LodScreenSizes`, `LodTriangleRatios`, `LodMaxError` and `Wind`.
-  - Generated levels are index-only, made by meshoptimizer's simplifier.
-- **The selection.** Per view, stateless, by projected screen size:
-  - inside a `FadeWidth` band both levels draw with complementary dither that composes with `Opacity`;
-  - casters draw the view's level plus `ShadowLodOffset`, never faded;
-  - M43's static items carry their level and fade in its per-view index entries.
+- **Mesh levels.** Cooked mesh version 3 holds up to five levels per mesh and a wind stream, level 0 unchanged, so colliders, the navigation bake, raycasts and CPU picking read level 0 alone.
+  - `GltfImporter` version 4's import settings `Lods` (`None`, `FromGltf`, `Generate`), `LodScreenSizes`, `LodTriangleRatios`, `LodMaxError` and `Wind` (the block of every material the file imports). A `.meta` without them reads their defaults.
+  - Authored levels come from a node's `MSFT_lod` extension, its `MSFT_screencoverage` giving the switch sizes, or from sibling nodes `<name>_LOD<n>`.
+  - Generated levels are index-only, made per submesh by meshoptimizer's simplifier with locked borders.
+  - The `_WIND` attribute (branch, branch phase, flutter, bend mask) becomes the mesh's wind stream; `COLOR_0` still tints.
+- **The selection.** Per view, stateless, by the projected screen size of level 0's bounding sphere times `LodBias`:
+  - inside a `FadeWidth` band both levels draw, their signed fades in the instance record's `LodFade`, with complementary dither that composes with `Opacity`, through the Mask variants;
+  - the sort and instancing keys gain the level, so levels never batch together;
+  - casters draw the view's level plus `ShadowLodOffset`, never faded, and the selection mask the view's level;
+  - at W46.4, M43's static items carry their level and fade in its per-view index entries.
 - **`RenderDistance {CullDistance, LodBias, ShadowLodOffset, FadeWidth}`** in a category of its own, requiring `MeshRenderer`: beyond `CullDistance` an item fades out, then draws and casts nothing.
 - **`Wind {Direction, Strength, GustStrength, GustFrequency, Turbulence}`,** one per scene.
-  - The material's `Wind` block (`Enabled`, `Bend`, `Branch`, `Flutter`, `Stiffness`) and the mesh's `_WIND` weights (branch, branch phase, flutter, bend mask) bend vegetation.
-  - The displacement uses `NoContraction` arithmetic without transcendental functions, so the prepass and the forward pass compute bit-identical positions, and the motion vectors follow the sway.
-  - `Wind:Sample(position, time?)` reads the gusted velocity through DetMath at the world's clock.
-- **Validation.** `ASSET_LOD_INVALID` (Warning): an authored or generated level dropped at import, with its reason.
+  - Material version 3's `Wind` block (`Enabled`, `Bend`, `Branch`, `Flutter`, `Stiffness`) and the mesh's `_WIND` weights bend, sway and flutter vegetation; the demos' materials are upgraded.
+  - The view's `WindConstants` (b8) carry the wind's phases, computed in double precision, and the record's `WindResponse` with `DrawFlagWind` the material's block; binding 3 of every mesh pipeline is the wind stream, or a shared stream of zeros.
+  - The displacement uses `NoContraction` arithmetic without division or transcendental functions, its response saturating at 10 m/s, so the prepass, the forward pass and the selection mask compute bit-identical positions, and the motion vectors follow the sway.
+  - `Wind:Sample(position, time?)` reads the gusted velocity at the world's clock, in double precision with IEEE-exact operations, so every configuration gives the same bits.
+- **Validation.** `ASSET_LOD_INVALID` (Warning): an authored or generated level dropped at import, or a malformed `MSFT_lod`, with its reason.
 - **Stats and perf.**
-  - `stats.get`'s `meshLodDraws`, `lodCrossFades` and `distanceCulledMeshes`, the Stats panel's row, and the readout's `LodCrossFades` and `DistanceCulledMeshes`.
-  - Perf.py's `lod/Forest/gpuMs`, with a budget of 3.0 ms, in the `look` part.
-- **The library.** meshoptimizer (MIT) in `Vendor/meshoptimizer/`, linked by AssetPipeline only.
+  - `stats.get`'s `meshLodDraws`, `lodCrossFades` and `distanceCulledMeshes`, the Stats panel's "Mesh LODs" row, and the readout's `LodCrossFades` and `DistanceCulledMeshes`.
+  - Perf.py's `lod/Forest/gpuMs`, with a budget of 3.0 ms, in the `look` part: 2,000 trees with authored levels and `_WIND` and 4,000 rocks with generated levels over a 1 km plane under a gale.
+- **Coverage.** FeatureTest's `MeshLods.scene` and `Wind.scene` with their suites, `Wind.replay` (input raises the wind, and a kite hangs in it), and the golden scaffolds of `Golden: MeshLods` and `Golden: Wind`.
+- **The library.** meshoptimizer v1.3 (MIT) in `Vendor/meshoptimizer/`, with precise floating point. AssetPipeline's mesh simplifier alone includes it, and no exported game links code that calls it.
 
 **Acceptance**
 - "MeshData: a version 3 payload with levels and a wind stream reads back equal"

@@ -1,0 +1,263 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "8f78479a4e91de37",
+		"Path": "Assets/Scenes/Wind.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.8.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "03483f3524aea248",
+				"Path": "/Camera",
+				"Hash": "08c91ff2eda82890",
+				"Components": {
+					"Transform": "850e969120b742b0",
+					"Camera": "ff6d33b1b7ef8196"
+				}
+			},
+			{
+				"Id": "0485252748115273",
+				"Path": "/Reed4",
+				"Hash": "ee28aa274c0e751b",
+				"Components": {
+					"Transform": "4caf3e1939e91c99",
+					"MeshRenderer": "c75c651d606f45c4"
+				}
+			},
+			{
+				"Id": "26053bd43922f30c",
+				"Path": "/Weather",
+				"Hash": "1bf4e91294ce4e5e",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Wind": "cae3a86801befd1d"
+				}
+			},
+			{
+				"Id": "527a852064247c24",
+				"Path": "/Tree0",
+				"Hash": "9fcf7f24d96e0815",
+				"Components": {
+					"Transform": "932317f1753c077c",
+					"MeshRenderer": "588c516502085332"
+				}
+			},
+			{
+				"Id": "57331623b9577dfd",
+				"Path": "/Reed0",
+				"Hash": "128ade69176db30e",
+				"Components": {
+					"Transform": "e2b8c50cb2fd69fa",
+					"MeshRenderer": "c75c651d606f45c4"
+				}
+			},
+			{
+				"Id": "72d47cab29f56725",
+				"Path": "/Reed3",
+				"Hash": "6491465ec6a35f61",
+				"Components": {
+					"Transform": "28f5971e5a0263ed",
+					"MeshRenderer": "c75c651d606f45c4"
+				}
+			},
+			{
+				"Id": "734af275522ad7f4",
+				"Path": "/Post",
+				"Hash": "2efde57cdacd9469",
+				"Components": {
+					"Transform": "3755467bfac8518b",
+					"MeshRenderer": "f3111dc3c6cae010"
+				}
+			},
+			{
+				"Id": "76963a8d7d86fabd",
+				"Path": "/Ground",
+				"Hash": "3bd757000f3f2098",
+				"Components": {
+					"Transform": "c91c1128867f628f",
+					"MeshRenderer": "42e6798e4cd87203"
+				}
+			},
+			{
+				"Id": "95a8cbebd63d996a",
+				"Path": "/Kite",
+				"Hash": "a9a0ad8dd1b417b4",
+				"Components": {
+					"Transform": "7501f979600444be",
+					"MeshRenderer": "720102fd0c63df61",
+					"RigidBody": "3f3d3c8ed09c2ee4",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "4dfd49fd3e00d747"
+				}
+			},
+			{
+				"Id": "b809ebffb7af3fca",
+				"Path": "/Reed1",
+				"Hash": "604c1fb51fa074f2",
+				"Components": {
+					"Transform": "31fb316fe878348c",
+					"MeshRenderer": "c75c651d606f45c4"
+				}
+			},
+			{
+				"Id": "d2c2217e9239fbe0",
+				"Path": "/Tree2",
+				"Hash": "3ae87ed835cff33e",
+				"Components": {
+					"Transform": "80e73c5f83d42e5f",
+					"MeshRenderer": "588c516502085332"
+				}
+			},
+			{
+				"Id": "e2c4a445e22051ac",
+				"Path": "/Rendering",
+				"Hash": "bba16193ebe12c13",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Environment": "7586b358e68ddc60",
+					"PostProcess": "8a0da1673d97fdb6"
+				}
+			},
+			{
+				"Id": "e3bee187c20ec098",
+				"Path": "/Sun",
+				"Hash": "2213b5ca5db8447e",
+				"Components": {
+					"Transform": "765da9bbb1b3cd3f",
+					"DirectionalLight": "a097c37b57c06fa5"
+				}
+			},
+			{
+				"Id": "f9670db56cc3492c",
+				"Path": "/Reed5",
+				"Hash": "61668f3e09c47a5e",
+				"Components": {
+					"Transform": "994d1a5fd70b170b",
+					"MeshRenderer": "c75c651d606f45c4"
+				}
+			},
+			{
+				"Id": "fa982afd45ae061a",
+				"Path": "/Tree1",
+				"Hash": "a801aa5ce07c8e03",
+				"Components": {
+					"Transform": "7e7941cde00e2798",
+					"MeshRenderer": "588c516502085332"
+				}
+			},
+			{
+				"Id": "ff1e148b5d5df940",
+				"Path": "/Reed2",
+				"Hash": "86598ac7c9c9da5c",
+				"Components": {
+					"Transform": "36e17fde112f8513",
+					"MeshRenderer": "c75c651d606f45c4"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "0000000000000202",
+				"Path": "engine://Environments/Sky",
+				"Type": "Environment",
+				"Hash": "326cd6c99922bd8b"
+			},
+			{
+				"Handle": "20a76b4128dbeaab",
+				"Path": "Assets/Materials/Wind/Leaves.material",
+				"Type": "Material",
+				"Hash": "b84466516e7ea23b"
+			},
+			{
+				"Handle": "2ec11a67ac15f40d",
+				"Path": "Assets/Materials/Wind/Kite.material",
+				"Type": "Material",
+				"Hash": "70c85842ce4bc2f3"
+			},
+			{
+				"Handle": "413469381147ad64",
+				"Path": "Assets/Models/MeshLods/LodTree.gltf#mesh:0:Tree",
+				"Type": "Mesh",
+				"Hash": "0d40413419358bf3"
+			},
+			{
+				"Handle": "c461bb9304e7769d",
+				"Path": "Assets/Materials/Wind/Reed.material",
+				"Type": "Material",
+				"Hash": "29b81ba4659271f7"
+			},
+			{
+				"Handle": "cd428b4e42fdf987",
+				"Path": "Assets/Scripts/Wind/Kite.luau",
+				"Type": "Script",
+				"Hash": "b9314c3ea34881f1"
+			},
+			{
+				"Handle": "cd8eac61cc2f8fc0",
+				"Path": "Assets/Models/MeshLods/LodTree.gltf#material:0:Bark",
+				"Type": "Material",
+				"Hash": "52711a0a0a23fdb2"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 40,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 41,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 120,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 121,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 30,
+			"Luau": "local wind = Scene.FindByName(\"Weather\").Wind\nlocal kite = Scene.FindByName(\"Kite\")\nreturn wind.Strength == 12 and kite:GetScript(\"Kite\").Raises == 0"
+		},
+		{
+			"Tick": 239,
+			"Luau": "local wind = Scene.FindByName(\"Weather\").Wind\nlocal kite = Scene.FindByName(\"Kite\")\nlocal moved = vector.magnitude(kite.Transform.WorldPosition - vector.create(0, 3.5, 1))\nreturn wind.Strength == 28 and kite:GetScript(\"Kite\").Raises == 2 and moved > 0.5"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "4c712749f17652c1"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "eb1f919c139a76f7"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "b4475f69fcbebce7"
+		}
+	],
+	"FinalTick": 240,
+	"FinalStateHash": "cf47e089a2af79d1"
+}
