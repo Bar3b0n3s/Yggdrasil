@@ -21,6 +21,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -142,8 +143,8 @@ namespace Engine {
 	};
 
 	// M43: a face's static draws, Draws[FirstDraw, FirstDraw + DrawCount) of its StaticShadowSet, and the signature of its
-	// visible static casters (FinishShadowSignature of their signatures in draw order; 0 without one), which M29's cache hashes
-	// after the face's dynamic draws.
+	// visible static casters (FinishShadowSignature of their signatures in draw order; 0 without one, and for a cascade, whose
+	// maps M29's cache does not hold), which M29's cache hashes after the face's dynamic draws.
 	struct StaticShadowFace
 	{
 		uint32_t FirstDraw = 0;
@@ -159,6 +160,15 @@ namespace Engine {
 		std::array<StaticShadowFace, MaxShadowCascades> Cascades{};
 		std::array<StaticShadowFace, MaxSpotShadowLights> Spots{};
 		std::array<std::array<StaticShadowFace, PointShadowFaceCount>, MaxPointShadowLights> Points{};
+	};
+
+	// M43: ShadowPass::PrepareStaticFaces' working buckets: for each StaticShadowKey, the records and M29 signatures of the
+	// face's visible casters of that key, and the keys the face touched, in the order they first appear. Empty between calls;
+	// the renderer keeps them from render to render, so an unchanged frame's faces reuse their storage.
+	struct StaticShadowBuckets
+	{
+		std::vector<std::vector<std::pair<uint32_t, uint64_t>>> Keys{}; // per key: (record, signature)
+		std::vector<uint32_t> Touched{};
 	};
 
 	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): the static shadow cache, per-view renderer state that
@@ -298,10 +308,11 @@ namespace Engine {
 		// face by its frustum (with the directional maps' pancake when `depthClamp`), a cell whose inflated box is outside
 		// skipped whole and one inside taken whole (ClassifyStaticCellLight, ClassifyStaticCellShadow); its visible casters'
 		// record indices are appended to `indices` grouped by key, in the order the keys first appear in the cells (cell
-		// order, then item order) and, within a key, in cell order then item order: one StaticShadowDraw per key and face. Pure
-		// but for `indices`.
+		// order, then item order) and, within a key, in cell order then item order: one StaticShadowDraw per key and face. Only
+		// a spot tile's and a point face's signatures are hashed (M29's cache holds no cascade). `buckets` is the caller's
+		// working storage, grown to `keyCount` keys and left empty. Pure but for `buckets` and `indices`.
 		[[nodiscard]] static StaticShadowSet PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
-			const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, std::vector<InstanceIndex>& indices);
+			const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices);
 
 		// Culls the prepared casters per face and records shadow passes only (M43: each face's dynamic draws as before, then its
 		// static draws, one indexed draw each of DrawConstantsStaticInstances). All inputs borrowed for this call;

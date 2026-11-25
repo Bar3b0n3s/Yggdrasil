@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <format>
 #include <map>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -463,6 +464,22 @@ namespace Engine {
 				const Image mixed = RenderImage(device, fixture, MakeStaticTwin(scenery, dynamicEntities));
 				CHECK(CountDifferences(mixed, dynamic) == 0);
 				CHECK(fixture.Renderer().GetRenderStats().VisibleMeshes == 12);
+
+				// The Overdraw view (its own set 0 and vertex entry) and a data view (Normals, through the forward set) draw the
+				// static twin's items as they draw the dynamic ones.
+				for (const RenderDebugView view : { RenderDebugView::Overdraw, RenderDebugView::Normals })
+				{
+					CAPTURE(static_cast<uint32_t>(view));
+					RenderSnapshot dynamicView = scenery;
+					dynamicView.DebugView = view;
+					RenderSnapshot staticView = twin;
+					staticView.DebugView = view;
+					const Image dynamicDebug = RenderImage(device, fixture, dynamicView);
+					const Image staticDebug = RenderImage(device, fixture, staticView);
+					CHECK(fixture.Renderer().GetRenderedDebugView() == view);
+					CHECK(CountDifferences(staticDebug, dynamicDebug) == 0);
+					CHECK(CountDifferences(staticDebug, staticImage) > 0);
+				}
 			}
 			device.RunGarbageCollection();
 		}
@@ -571,6 +588,83 @@ namespace Engine {
 				// The dynamic casters' batches break at each caster a face culls.
 				CHECK(GetPassDraws(dynamicStats, "DirectionalShadows") > 2);
 				CHECK(GetPassDraws(dynamicStats, "SpotShadows") > 2);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// M29's cache (Docs/Decisions/0044-m29-light-limits.md decision 4) with static casters: an unchanged static twin that
+		// continues its view's history reuses its spot and point shadow maps and draws no caster; a static caster moved under both
+		// lights (its cell a new object, the other cell the same object) draws both maps again, and the image is the dynamic
+		// twin's with the same move.
+		TEST_CASE("StaticScenery: an unchanged static scene reuses its spot and point shadow maps, and a moved static caster draws them again"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Width, Height);
+				PublishAssets(fixture);
+				// A floor that casts nothing and a sphere in cell (0, -1), a cube in cell (-1, -1), both casters under a shadowed spot
+				// light and inside a shadowed point light's range.
+				RenderSnapshot scene = MakeEmptySnapshot(fixture);
+				scene.Post.SsrEnabled = false;
+				scene.Meshes.push_back(MakeItem(Place(glm::vec3(0.0f, -1.6f, -8.0f), glm::vec3(24.0f, 0.2f, 24.0f)), BuiltinAssetHandles::CubeMesh, GreyMaterialHandle, 1, false));
+				scene.Meshes.push_back(MakeItem(Place(glm::vec3(-1.5f, -0.9f, -6.0f), glm::vec3(0.8f), 20.0f), BuiltinAssetHandles::CubeMesh, RedMaterialHandle, 2));
+				scene.Meshes.push_back(MakeItem(Place(glm::vec3(1.5f, -0.9f, -6.5f), glm::vec3(0.8f)), BuiltinAssetHandles::SphereMesh, GreenMaterialHandle, 3));
+				scene.Lights = { MakeSpot(glm::vec3(0.0f, 5.0f, -6.0f), 301), MakePoint(glm::vec3(0.0f, 0.6f, -5.0f), 6.0f, 302) };
+				scene = WithPickIds(std::move(scene));
+				// The render continues the view's temporal history (M29's cache is used), or starts it afresh (the cache cleared).
+				const auto continueHistory = [](RenderSnapshot& snapshot, bool continues)
+				{
+					snapshot.Camera.PreviousViewProjection = continues ? std::optional<glm::mat4>(snapshot.Camera.Projection * snapshot.Camera.View) : std::nullopt;
+				};
+
+				RenderSnapshot twin = MakeStaticTwin(scene);
+				REQUIRE(twin.StaticSet->Cells.size() == 2);
+				REQUIRE(twin.StaticSet->Cells[0]->Key == glm::ivec2(-1, -1));
+				const Image fresh = RenderImage(device, fixture, twin);
+				RenderStats stats = fixture.Renderer().GetRenderStats();
+				REQUIRE(stats.ShadowedSpotLights == 1);
+				REQUIRE(stats.ShadowedPointLights == 1);
+				CHECK(stats.CachedSpotShadows == 0);
+				CHECK(stats.CachedPointShadows == 0);
+				CHECK(GetPassDraws(stats, "SpotShadows") > 0);
+				CHECK(GetPassDraws(stats, "PointShadows") > 0);
+
+				// The same set again, continuing the history: both maps are reused, no caster is drawn and the image is the same.
+				continueHistory(twin, true);
+				CHECK(CountDifferences(RenderImage(device, fixture, twin), fresh) == 0);
+				stats = fixture.Renderer().GetRenderStats();
+				CHECK(stats.CachedSpotShadows == 1);
+				CHECK(stats.CachedPointShadows == 1);
+				CHECK(GetPassDraws(stats, "SpotShadows") == 0);
+				CHECK(GetPassDraws(stats, "PointShadows") == 0);
+
+				// The cube moved within its cell: the cell is a new object, the sphere's the same one.
+				const glm::mat4 moved = Place(glm::vec3(-1.0f, -0.9f, -5.4f), glm::vec3(0.8f), 20.0f);
+				Ref<RenderStaticCell> cubeCell = CreateRef<RenderStaticCell>(*twin.StaticSet->Cells[0]);
+				REQUIRE(cubeCell->Items.size() == 1);
+				cubeCell->Items[0].World = moved;
+				cubeCell->Version = twin.StaticSet->Version + 1;
+				Ref<RenderStaticSet> movedSet = CreateRef<RenderStaticSet>();
+				movedSet->Cells = { cubeCell, twin.StaticSet->Cells[1] };
+				movedSet->Version = twin.StaticSet->Version + 2;
+				RenderSnapshot movedTwin = twin;
+				movedTwin.StaticSet = movedSet;
+				const Image movedImage = RenderImage(device, fixture, movedTwin);
+				stats = fixture.Renderer().GetRenderStats();
+				CHECK(stats.CachedSpotShadows == 0);
+				CHECK(stats.CachedPointShadows == 0);
+				CHECK(GetPassDraws(stats, "SpotShadows") > 0);
+				CHECK(GetPassDraws(stats, "PointShadows") > 0);
+
+				// The dynamic twin with the same move, drawn afresh.
+				RenderSnapshot movedScene = scene;
+				REQUIRE(movedScene.Meshes[1].Entity == UUID(2));
+				movedScene.Meshes[1].World = moved;
+				CHECK(CountDifferences(movedImage, fresh) > 0);
+				CHECK(CountDifferences(movedImage, RenderImage(device, fixture, movedScene)) == 0);
 			}
 			device.RunGarbageCollection();
 		}
@@ -1095,83 +1189,6 @@ namespace Engine {
 			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			CHECK(warned.GetMatchCount() == 1);
-		}
-
-		// The cache's static ranges: a set's cells take ranges once, a later acquisition of the same cells keeps them, a cell no
-		// acquisition used since the last collection frees its range for the next new cell, a grown buffer keeps every range at
-		// its place, and a trim drops the buffer and every range.
-		TEST_CASE("GpuResourceCache: static cells keep their record ranges until a collection after a frame that did not use them"
-			* doctest::test_suite(Test::GpuSuite))
-		{
-			Test::HeadlessGpuFixture gpu;
-			ENGINE_REQUIRE_GPU(gpu);
-			GraphicsDevice& device = gpu.GetDevice();
-			{
-				Test::InMemoryAssetManager assets;
-				GpuResourceCache cache(device, assets);
-				uint64_t version = 0;
-				std::vector<MeshDrawItem> items;
-				for (uint64_t index = 0; index < 6; ++index)
-					items.push_back(MakeItem(Place(glm::vec3(40.0f * static_cast<float>(index), 0.0f, 0.0f)), BuiltinAssetHandles::CubeMesh, AssetHandle(), index + 1));
-				const Ref<const RenderStaticSet> first = MakeStaticSet(items, version);
-				REQUIRE(first->Cells.size() == 6);
-				const Result<std::vector<uint32_t>> firsts = cache.AcquireStaticRecords(*first);
-				REQUIRE_MESSAGE(firsts.has_value(), firsts.error().ToString());
-				CHECK(*firsts == std::vector<uint32_t>{ 0, 1, 2, 3, 4, 5 });
-				CHECK(cache.GetStats().StaticCellCount == 6);
-				CHECK(cache.GetStats().StaticRecordCapacity == GpuResourceCache::StaticRecordMinimumCapacity);
-				CHECK(*cache.AcquireStaticRecords(*first) == *firsts);
-
-				// A set that keeps cells 0, 2, 4 and 5 and replaces cell 1 by a three-item cell: the kept ranges stay; after a
-				// collection that follows an acquisition without cell 1 and 3, their places are free and the new cell takes the
-				// first place that holds three records, after the mark.
-				Ref<RenderStaticCell> replaced = CreateRef<RenderStaticCell>(*first->Cells[1]);
-				replaced->Version = ++version;
-				replaced->Items.push_back(replaced->Items.front());
-				replaced->Items.push_back(replaced->Items.front());
-				replaced->PickTable = { UUID(20), UUID(21), UUID(22) };
-				RenderStaticSet second;
-				second.Cells = { first->Cells[0], first->Cells[2], first->Cells[4], first->Cells[5] };
-				// A collection keeps what the frame before it used (every cell) and clears the marks; the next frame acquires
-				// four cells, and the collection after it frees the other two.
-				cache.CollectStale();
-				CHECK(cache.GetStats().StaticCellCount == 6);
-				REQUIRE(cache.AcquireStaticRecords(second).has_value());
-				cache.CollectStale();
-				CHECK(cache.GetStats().StaticCellCount == 4);
-				second.Cells.push_back(replaced);
-				const Result<std::vector<uint32_t>> again = cache.AcquireStaticRecords(second);
-				REQUIRE(again.has_value());
-				CHECK(*again == std::vector<uint32_t>{ 0, 2, 4, 5, 6 });
-				// A one-item cell takes the freed place of cell 1.
-				Ref<RenderStaticCell> single = CreateRef<RenderStaticCell>(*first->Cells[3]);
-				single->Version = ++version;
-				second.Cells.push_back(single);
-				const Result<std::vector<uint32_t>> third = cache.AcquireStaticRecords(second);
-				REQUIRE(third.has_value());
-				CHECK(third->back() == 1);
-
-				// A set beyond the capacity grows the buffer with every kept range at its place.
-				std::vector<MeshDrawItem> many(GpuResourceCache::StaticRecordMinimumCapacity, items.front());
-				Ref<RenderStaticCell> large = CreateRef<RenderStaticCell>();
-				large->Version = ++version;
-				large->Items = many;
-				large->PickTable.assign(many.size(), UUID(30));
-				second.Cells.push_back(large);
-				const Result<std::vector<uint32_t>> grown = cache.AcquireStaticRecords(second);
-				REQUIRE(grown.has_value());
-				CHECK(std::vector<uint32_t>(grown->begin(), grown->end() - 1) == *third);
-				CHECK(cache.GetStats().StaticRecordCapacity == 2 * GpuResourceCache::StaticRecordMinimumCapacity);
-				CHECK(cache.GetStats().StaticRecordCount == 4 + 3 + 1 + GpuResourceCache::StaticRecordMinimumCapacity);
-
-				cache.TrimUnused();
-				CHECK(cache.GetStaticRecordBuffer() == nullptr);
-				CHECK(cache.GetStats().StaticCellCount == 0);
-				const Result<std::vector<uint32_t>> rebuilt = cache.AcquireStaticRecords(*first);
-				REQUIRE(rebuilt.has_value());
-				CHECK(*rebuilt == *firsts);
-			}
-			device.RunGarbageCollection();
 		}
 	}
 

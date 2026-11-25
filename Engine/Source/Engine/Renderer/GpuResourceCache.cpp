@@ -1007,6 +1007,11 @@ namespace Engine {
 		// only then commits, `firsts` holding each cell's first record. Errors: those of the creations (Gpu), with nothing
 		// changed.
 		[[nodiscard]] Status TryAcquireStaticRecords(const RenderStaticSet& set, std::vector<uint32_t>& firsts);
+		// M43: the held ranges' first records of `set`'s cells into `firsts`, and the indices of the cells with an item that
+		// hold none, in the set's order.
+		[[nodiscard]] std::vector<size_t> FindHeldStaticRecords(const RenderStaticSet& set, std::vector<uint32_t>& firsts) const;
+		// M43: marks the ranges of `set`'s cells that have an item, at `firsts`, used since the last CollectStale.
+		void MarkStaticRecordsUsed(const RenderStaticSet& set, std::span<const uint32_t> firsts);
 		// M43: drops the static record buffer with every range.
 		void ClearStaticRecords();
 		// M43: the records the held static ranges hold.
@@ -1374,6 +1379,13 @@ namespace Engine {
 		if (records >= StaticPickIdBase)
 			return MakeError(ErrorCode::InvalidArgument, "a static set of {} instance records exceeds the {} static pick ids", records, StaticPickIdBase);
 		std::vector<uint32_t> firsts(set.Cells.size(), 0);
+		// A steady set, all of whose cells are held, takes no place and writes nothing: it only marks its ranges used, with no
+		// attempt to retry after a trim.
+		if (state.FindHeldStaticRecords(set, firsts).empty())
+		{
+			state.MarkStaticRecordsUsed(set, firsts);
+			return firsts;
+		}
 		ENGINE_TRY(RetryAfterTrim(*state.Device, std::format("the static set's {} instance records", records), [&state, &set, &firsts]()
 		{
 			return state.TryAcquireStaticRecords(set, firsts);
@@ -1381,14 +1393,8 @@ namespace Engine {
 		return firsts;
 	}
 
-	nvrhi::IBuffer* GpuResourceCache::GetStaticRecordBuffer() const
+	std::vector<size_t> GpuResourceCache::State::FindHeldStaticRecords(const RenderStaticSet& set, std::vector<uint32_t>& firsts) const
 	{
-		return m_State->StaticRecords.Get();
-	}
-
-	Status GpuResourceCache::State::TryAcquireStaticRecords(const RenderStaticSet& set, std::vector<uint32_t>& firsts)
-	{
-		// The held ranges first; a steady set, all of whose cells are held, only marks them used.
 		std::vector<size_t> missing;
 		for (size_t index = 0; index < set.Cells.size(); ++index)
 		{
@@ -1398,6 +1404,27 @@ namespace Engine {
 			else if (!cell.Items.empty()) // no record, no range (a published cell always holds an item)
 				missing.push_back(index);
 		}
+		return missing;
+	}
+
+	void GpuResourceCache::State::MarkStaticRecordsUsed(const RenderStaticSet& set, std::span<const uint32_t> firsts)
+	{
+		for (size_t index = 0; index < set.Cells.size(); ++index)
+		{
+			if (const auto range = StaticRanges.find(firsts[index]); !set.Cells[index]->Items.empty() && range != StaticRanges.end())
+				range->second.Used = true;
+		}
+	}
+
+	nvrhi::IBuffer* GpuResourceCache::GetStaticRecordBuffer() const
+	{
+		return m_State->StaticRecords.Get();
+	}
+
+	Status GpuResourceCache::State::TryAcquireStaticRecords(const RenderStaticSet& set, std::vector<uint32_t>& firsts)
+	{
+		// The held ranges first (a trim before a retry may have dropped them).
+		const std::vector<size_t> missing = FindHeldStaticRecords(set, firsts);
 		// The new ranges, planned on copies of the free places and the mark (first-fit, in the set's order).
 		std::map<uint32_t, uint32_t> free = missing.empty() ? std::map<uint32_t, uint32_t>() : StaticFree;
 		uint32_t end = StaticEnd;
@@ -1473,11 +1500,7 @@ namespace Engine {
 			StaticRanges[first] = StaticRecordRange{ .Cell = set.Cells[index], .Count = static_cast<uint32_t>(set.Cells[index]->Items.size()) };
 			StaticFirst[set.Cells[index].get()] = first;
 		}
-		for (size_t index = 0; index < set.Cells.size(); ++index)
-		{
-			if (const auto range = StaticRanges.find(firsts[index]); !set.Cells[index]->Items.empty() && range != StaticRanges.end())
-				range->second.Used = true;
-		}
+		MarkStaticRecordsUsed(set, firsts);
 		return {};
 	}
 

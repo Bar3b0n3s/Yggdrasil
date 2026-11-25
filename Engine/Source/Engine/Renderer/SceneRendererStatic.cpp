@@ -499,7 +499,7 @@ namespace Engine {
 			return;
 		frame.StaticShadows = ShadowPass::PrepareStaticFaces(frame.StaticShadowCells, StaticCasterKeys.size(), frame.Cascades.Count != 0 ? &frame.Cascades : nullptr,
 			!frame.Spots.Tiles.empty() ? &frame.Spots : nullptr, !frame.Points.Lights.empty() ? &frame.Points : nullptr, Device->GetInfo().DepthClamp,
-			InstanceIndices);
+			StaticFaceBuckets, InstanceIndices);
 	}
 
 	std::vector<MeshDrawItem> SceneRenderer::State::CollectSelectedStaticItems(const Detail::SceneRendererFrame& frame) const

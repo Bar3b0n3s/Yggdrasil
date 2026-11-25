@@ -182,42 +182,38 @@ namespace Engine {
 			StaticCellVisibility Light = StaticCellVisibility::Inside;
 		};
 
-		// M43: one face's visible static casters by key, in the order the keys first appear and, within a key, in visit order;
-		// Finish writes them as the face's draws. The buckets are reused from face to face.
-		struct StaticFaceBuilder
+		// M43: one of a face's visible static casters into `buckets` by key, so the keys keep the order they first appear in
+		// and, within a key, the casters their visit order.
+		static void AddStaticFaceCaster(StaticShadowBuckets& buckets, uint32_t key, uint32_t record, uint64_t signature)
 		{
-			std::vector<std::vector<std::pair<uint32_t, uint64_t>>> Buckets{}; // per key: (record, signature)
-			std::vector<uint32_t> Touched{};
+			if (buckets.Keys[key].empty())
+				buckets.Touched.push_back(key);
+			buckets.Keys[key].emplace_back(record, signature);
+		}
 
-			void Add(uint32_t key, uint32_t record, uint64_t signature)
+		// M43: the face's draws, one per key, appended to `set` with their indices appended to `indices`, and, when `hashed`
+		// (a face M29's cache holds: a spot tile or a point face), its signature; `buckets` is left empty for the next face.
+		[[nodiscard]] static StaticShadowFace FinishStaticFace(StaticShadowBuckets& buckets, bool hashed, StaticShadowSet& set, std::vector<InstanceIndex>& indices)
+		{
+			StaticShadowFace face{ .FirstDraw = static_cast<uint32_t>(set.Draws.size()) };
+			XXH64Hasher signature;
+			for (const uint32_t key : buckets.Touched)
 			{
-				if (Buckets[key].empty())
-					Touched.push_back(key);
-				Buckets[key].emplace_back(record, signature);
-			}
-
-			// The face's draws, one per key, appended to `set` with their indices appended to `indices`, and its signature.
-			[[nodiscard]] StaticShadowFace Finish(StaticShadowSet& set, std::vector<InstanceIndex>& indices)
-			{
-				StaticShadowFace face{ .FirstDraw = static_cast<uint32_t>(set.Draws.size()) };
-				XXH64Hasher signature;
-				for (const uint32_t key : Touched)
+				std::vector<std::pair<uint32_t, uint64_t>>& bucket = buckets.Keys[key];
+				set.Draws.push_back({ .Key = key, .First = static_cast<uint32_t>(indices.size()), .Count = static_cast<uint32_t>(bucket.size()) });
+				for (const auto& [record, casterSignature] : bucket)
 				{
-					std::vector<std::pair<uint32_t, uint64_t>>& bucket = Buckets[key];
-					set.Draws.push_back({ .Key = key, .First = static_cast<uint32_t>(indices.size()), .Count = static_cast<uint32_t>(bucket.size()) });
-					for (const auto& [record, casterSignature] : bucket)
-					{
-						indices.push_back({ .Record = record });
+					indices.push_back({ .Record = record });
+					if (hashed)
 						signature.UpdateU64(casterSignature);
-					}
-					bucket.clear();
 				}
-				face.DrawCount = static_cast<uint32_t>(Touched.size());
-				face.Signature = face.DrawCount != 0 ? FinishShadowSignature(signature) : 0;
-				Touched.clear();
-				return face;
+				bucket.clear();
 			}
-		};
+			face.DrawCount = static_cast<uint32_t>(buckets.Touched.size());
+			face.Signature = hashed && face.DrawCount != 0 ? FinishShadowSignature(signature) : 0;
+			buckets.Touched.clear();
+			return face;
+		}
 
 		// M43: the cells a face of the light box `light` (null: a cascade's, every cell) may draw from: those whose box is not
 		// outside the light's (ClassifyStaticCellLight; an unbounded cell always), in cell order.
@@ -238,11 +234,11 @@ namespace Engine {
 			}
 		}
 
-		// M43: one face's visible static casters into `builder`: of each candidate cell not outside the face's frustum, each
+		// M43: one face's visible static casters into `buckets`: of each candidate cell not outside the face's frustum, each
 		// caster the dynamic path's tests keep (ShadowBoxesOverlap with `light`, then IsOutsideShadow), a test the cell's
 		// classification settles for all its casters skipped.
 		static void CullStaticFace(std::span<const StaticShadowCell> cells, std::span<const StaticFaceCandidate> candidates, const ShadowBox* light,
-			const glm::mat4& viewProjection, bool pancake, StaticFaceBuilder& builder)
+			const glm::mat4& viewProjection, bool pancake, StaticShadowBuckets& buckets)
 		{
 			// The face's frustum's centre bounds the magnitudes its clip coordinates are computed from (InflateStaticCellBox); a
 			// degenerate face's falls back to the origin, so no margin is ever non-finite.
@@ -262,7 +258,7 @@ namespace Engine {
 						continue;
 					if (frustum != StaticCellVisibility::Inside && IsOutsideShadow(caster.Bounds, viewProjection * caster.World, pancake))
 						continue;
-					builder.Add(caster.Key, cell.FirstRecord + caster.Item, caster.Signature);
+					AddStaticFaceCaster(buckets, caster.Key, cell.FirstRecord + caster.Item, caster.Signature);
 				}
 			}
 		}
@@ -631,13 +627,14 @@ namespace Engine {
 	}
 
 	StaticShadowSet ShadowPass::PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
-		const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, std::vector<InstanceIndex>& indices)
+		const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices)
 	{
 		StaticShadowSet set;
 		if (cells.empty())
 			return set;
-		Utils::StaticFaceBuilder builder;
-		builder.Buckets.resize(keyCount);
+		ENGINE_CORE_ASSERT(buckets.Touched.empty(), "the static shadow buckets must be empty between faces");
+		if (buckets.Keys.size() < keyCount)
+			buckets.Keys.resize(keyCount);
 		std::vector<Utils::StaticFaceCandidate> candidates;
 		// A cascade's candidates are every cell, as its dynamic candidates are every caster draw.
 		if (cascades != nullptr)
@@ -646,8 +643,8 @@ namespace Engine {
 			Utils::SelectStaticFaceCandidates(cells, nullptr, candidates);
 			for (uint32_t index = 0; index < cascades->Count; ++index)
 			{
-				Utils::CullStaticFace(cells, candidates, nullptr, cascades->Cascades[index].ViewProjection, depthClamp, builder);
-				set.Cascades[index] = builder.Finish(set, indices);
+				Utils::CullStaticFace(cells, candidates, nullptr, cascades->Cascades[index].ViewProjection, depthClamp, buckets);
+				set.Cascades[index] = Utils::FinishStaticFace(buckets, false, set, indices); // cascades are drawn every frame
 			}
 		}
 		if (spots != nullptr)
@@ -657,8 +654,8 @@ namespace Engine {
 			{
 				const ShadowBox light = Utils::GetShadowFrustumBox(spots->Tiles[index].ViewProjection);
 				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
-				Utils::CullStaticFace(cells, candidates, &light, spots->Tiles[index].ViewProjection, false, builder);
-				set.Spots[index] = builder.Finish(set, indices);
+				Utils::CullStaticFace(cells, candidates, &light, spots->Tiles[index].ViewProjection, false, buckets);
+				set.Spots[index] = Utils::FinishStaticFace(buckets, true, set, indices);
 			}
 		}
 		if (points != nullptr)
@@ -672,8 +669,8 @@ namespace Engine {
 				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
 				for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
 				{
-					Utils::CullStaticFace(cells, candidates, &light, planned.FaceViewProjections[face], false, builder);
-					set.Points[index][face] = builder.Finish(set, indices);
+					Utils::CullStaticFace(cells, candidates, &light, planned.FaceViewProjections[face], false, buckets);
+					set.Points[index][face] = Utils::FinishStaticFace(buckets, true, set, indices);
 				}
 			}
 		}

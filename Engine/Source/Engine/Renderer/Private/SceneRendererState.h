@@ -54,6 +54,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -919,10 +920,11 @@ namespace Engine {
 		// uses lets go of its mirrors' GPU objects (so a scene unload's collection and a trim release them), and the tables
 		// start afresh, every cell prepared again, without a static set or once they hold more than twice the keys in use
 		// (StaticKeysInUse, both tables') and 256 more; the per-view buckets of visible static records by key and the keys
-		// touched; the view's InstanceIndices (written by RecordViewSetup) and its buffer (t22, grown to them, never shrunk; a
-		// device loss's release drops it); the picked image's static cells (AsyncPicker's StaticPickRange); and the entities
-		// whose static mesh morphs by its default weights, which this renderer reported once each (kept across a device loss,
-		// as the other once-per-renderer reports).
+		// touched, and the shadow faces' (ShadowPass::PrepareStaticFaces), each empty between uses; the view's InstanceIndices
+		// (written by RecordViewSetup) and its buffer (t22, grown to them, never shrunk; a device loss's release drops it);
+		// the picked image's static cells (AsyncPicker's StaticPickRange); and the entities whose static mesh morphs by its
+		// default weights, which this renderer reported once each (kept across a device loss, as the other once-per-renderer
+		// reports).
 		std::map<const RenderStaticCell*, Detail::SceneRendererStaticCell> StaticCells{};
 		std::vector<Detail::SceneRendererStaticKey> StaticKeys{};
 		std::map<RenderStaticDrawKey, uint32_t> StaticKeyIndex{};
@@ -933,6 +935,7 @@ namespace Engine {
 		size_t StaticKeysInUse = 0;
 		std::vector<std::vector<uint32_t>> StaticBuckets{};
 		std::vector<uint32_t> StaticTouched{};
+		StaticShadowBuckets StaticFaceBuckets{};
 		std::vector<InstanceIndex> InstanceIndices{};
 		nvrhi::BufferHandle InstanceIndexBuffer{};
 		std::vector<StaticPickRange> ImageStaticPicks{};
