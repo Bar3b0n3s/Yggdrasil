@@ -8,7 +8,7 @@
 	"Parameters": {},
 	"Seed": 1414,
 	"FixedHz": 64,
-	"EngineVersion": "0.8.0",
+	"EngineVersion": "0.9.0",
 	"Config": "Editor",
 	"SaveData": {},
 	"Locale": "fr-CA",
@@ -231,7 +231,7 @@
 				"Handle": "2dbf092f33eb546f",
 				"Path": "Assets/Materials/Water/Rock.material",
 				"Type": "Material",
-				"Hash": "6853871845201290"
+				"Hash": "60cf1da1a4550322"
 			},
 			{
 				"Handle": "5b6b24e0d738d794",
@@ -243,7 +243,7 @@
 				"Handle": "5f7ac2a669149a31",
 				"Path": "Assets/Materials/Water/Hull.material",
 				"Type": "Material",
-				"Hash": "253e8f7805c4812f"
+				"Hash": "b68cff629f2912f3"
 			},
 			{
 				"Handle": "98ff47d5d6208ff8",
@@ -261,7 +261,7 @@
 				"Handle": "cab643436ba4d146",
 				"Path": "Assets/Materials/Water/Deck.material",
 				"Type": "Material",
-				"Hash": "c732f09090084a25"
+				"Hash": "c0b98115ea6b5a7e"
 			}
 		]
 	},

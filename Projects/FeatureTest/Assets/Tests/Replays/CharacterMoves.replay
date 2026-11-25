@@ -8,7 +8,7 @@
 	"Parameters": {},
 	"Seed": 1414,
 	"FixedHz": 64,
-	"EngineVersion": "0.8.0",
+	"EngineVersion": "0.9.0",
 	"Config": "Editor",
 	"SaveData": {},
 	"Locale": "fr-CA",
@@ -313,7 +313,7 @@
 				"Handle": "103291d13c7ad4df",
 				"Path": "Assets/Scenes/Components/Materials/Metal.material",
 				"Type": "Material",
-				"Hash": "45fedfa386929650"
+				"Hash": "39e67b550752db1f"
 			},
 			{
 				"Handle": "2f065a03ca36288c",
@@ -337,13 +337,13 @@
 				"Handle": "9016817dbe7d2c7a",
 				"Path": "Assets/Scenes/Components/Materials/Crate.material",
 				"Type": "Material",
-				"Hash": "a18f6315cf2ebe2f"
+				"Hash": "01c7913bc8815c1c"
 			},
 			{
 				"Handle": "d31facacf6bb6908",
 				"Path": "Assets/Scenes/Components/Materials/Ground.material",
 				"Type": "Material",
-				"Hash": "6c73020cc30c1dd8"
+				"Hash": "57bcf748a76a862a"
 			}
 		]
 	},

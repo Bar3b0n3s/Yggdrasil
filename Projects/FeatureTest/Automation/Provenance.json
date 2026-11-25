@@ -2596,7 +2596,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenWater/Rock.material",
-			"XXH64": "2102d66b85612a9a",
+			"XXH64": "0602fb6150bce351",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2612,7 +2612,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenWater/Sand.material",
-			"XXH64": "311647b2791286bf",
+			"XXH64": "271662407f9739e2",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2868,7 +2868,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Water/Deck.material",
-			"XXH64": "e6d65583a7a1f7ed",
+			"XXH64": "9844ddaf3a9d7686",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2884,7 +2884,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Water/Hull.material",
-			"XXH64": "16e1e0ca9b6ede8e",
+			"XXH64": "4bf9f0a531e90de9",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2900,7 +2900,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Water/Rock.material",
-			"XXH64": "17b2b778910cc304",
+			"XXH64": "d22808828d42242f",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -8260,7 +8260,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Animation.replay",
-			"XXH64": "ba9dfe6a42b18355",
+			"XXH64": "ab9d65ef447300ab",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8276,7 +8276,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/BoneAttachments.replay",
-			"XXH64": "e6b2d0c40665efb8",
+			"XXH64": "b47d9250cda4ec5d",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8292,7 +8292,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/CharacterMoves.replay",
-			"XXH64": "23e3b05c9574d270",
+			"XXH64": "043928ae4fd8e1a9",
 			"Method": "test.run",
 			"RequestId": 4,
 			"Client": "batch",
@@ -8308,7 +8308,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Combined2DUi.replay",
-			"XXH64": "39f28b2c61a50b89",
+			"XXH64": "e581a82c2b06fc77",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8324,7 +8324,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Determinism.replay",
-			"XXH64": "29d87576e4878d8a",
+			"XXH64": "c10a08e3311e9c44",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -8340,7 +8340,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/GameServices.replay",
-			"XXH64": "471a527a2ba60b26",
+			"XXH64": "578e34f581fb26e7",
 			"Method": "input.record",
 			"RequestId": 8,
 			"Client": "batch",
@@ -8356,7 +8356,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/GraphMembers.replay",
-			"XXH64": "645754f878bef239",
+			"XXH64": "81652981667150b8",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8372,7 +8372,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Graphs.replay",
-			"XXH64": "0d8530543d6e1885",
+			"XXH64": "f6f4ba8dc4b00a92",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8388,7 +8388,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Input.replay",
-			"XXH64": "856c2a09e144d8c8",
+			"XXH64": "530326f28f9e3a19",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8404,7 +8404,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/InputAim.replay",
-			"XXH64": "0d64719f6b91ceea",
+			"XXH64": "c376c90dad37cc91",
 			"Method": "input.record",
 			"RequestId": 11,
 			"Client": "batch",
@@ -8420,7 +8420,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Joints.replay",
-			"XXH64": "a9af5e48042890ed",
+			"XXH64": "74ca09a54c5dba13",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8436,7 +8436,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/MaterialParameters.replay",
-			"XXH64": "0940aa3b61eb8a53",
+			"XXH64": "121fd879a23ea2ab",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8452,7 +8452,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/MultiScript.replay",
-			"XXH64": "c7a6dec0abdff32e",
+			"XXH64": "349219ccc2071d4c",
 			"Method": "input.record",
 			"RequestId": 19,
 			"Client": "batch",
@@ -8468,7 +8468,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Music.replay",
-			"XXH64": "0fd0eb5b6beda714",
+			"XXH64": "5ff5bc8d2827dc54",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8484,7 +8484,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Navigation.replay",
-			"XXH64": "6044ab6c6270fe90",
+			"XXH64": "7a8aea788c6d5f30",
 			"Method": "input.record",
 			"RequestId": 8,
 			"Client": "batch",
@@ -8500,7 +8500,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Physics2D.replay",
-			"XXH64": "1b6099e5b570ebfc",
+			"XXH64": "89a9c6895751cc59",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -8516,7 +8516,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/PhysicsSemantics.replay",
-			"XXH64": "42cb9559120b1b1a",
+			"XXH64": "ce3ed41a44b79569",
 			"Method": "input.record",
 			"RequestId": 12,
 			"Client": "batch",
@@ -8532,7 +8532,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/SaveData.replay",
-			"XXH64": "842e1c53c4620279",
+			"XXH64": "be6f38d98f68f726",
 			"Method": "input.record",
 			"RequestId": 9,
 			"Client": "batch",
@@ -8548,7 +8548,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/SessionLocale.replay",
-			"XXH64": "26040c486f92b623",
+			"XXH64": "1913702334ce00e5",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8564,7 +8564,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Sky.replay",
-			"XXH64": "b3027db74420a56a",
+			"XXH64": "5e4fd2e93aa4b8d0",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8580,7 +8580,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Sprites2D.replay",
-			"XXH64": "9a68e3336bb0e0c6",
+			"XXH64": "baf5f515d4d4cb5b",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8596,7 +8596,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/StaticScenery.replay",
-			"XXH64": "0e9ba80fd0421be2",
+			"XXH64": "5433d09ac2cda5e7",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8612,7 +8612,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Surfaces.replay",
-			"XXH64": "eede65687073efb2",
+			"XXH64": "8d0b4c72ac95fc96",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8628,7 +8628,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Terrain.replay",
-			"XXH64": "fec749a0a82167f0",
+			"XXH64": "47b9edf7e478034f",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8644,7 +8644,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/TextInput.replay",
-			"XXH64": "f911c2b536746d01",
+			"XXH64": "54b7539274999b4e",
 			"Method": "test.run",
 			"RequestId": 4,
 			"Client": "batch",
@@ -8660,7 +8660,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Tilemap.replay",
-			"XXH64": "3d281b9897e254c0",
+			"XXH64": "5c7f4fca61b2b70c",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8676,7 +8676,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Ui.replay",
-			"XXH64": "c27885a78431a01f",
+			"XXH64": "7ed71707243ace47",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8692,7 +8692,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/UiWorld.replay",
-			"XXH64": "e80edf0292d36f0b",
+			"XXH64": "91bbe187f279cf89",
 			"Method": "test.run",
 			"RequestId": 13,
 			"Client": "batch",
@@ -8708,7 +8708,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Vehicles.replay",
-			"XXH64": "b39d1648b09da008",
+			"XXH64": "4fb317c376f37ee7",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8724,7 +8724,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Water.replay",
-			"XXH64": "2e3819468d36bea7",
+			"XXH64": "7f393a2bb60bf69f",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8740,7 +8740,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Wind.replay",
-			"XXH64": "98a250d5f0cd5ed4",
+			"XXH64": "5038601d76fd1b52",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8756,7 +8756,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/WorldPause.replay",
-			"XXH64": "48e452a125cdad58",
+			"XXH64": "6ede32e7e9b0770b",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
