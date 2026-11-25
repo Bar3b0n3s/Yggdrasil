@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Physics/Private/PhysicsConversions.h"
+#include "Engine/Physics/Private/PhysicsMassProperties.h"
 #include "Engine/Physics/Private/PhysicsWorldState.h"
 
 #include <Jolt/Physics/Body/Body.h>
@@ -18,6 +19,7 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CompoundShape.h>
+#include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
@@ -464,8 +466,9 @@ namespace Engine {
 		if (!lock.Succeeded())
 			return std::nullopt;
 		const JPH::Body& joltBody = lock.GetBody();
-		const JPH::Shape* joltShape = joltBody.GetShape();
-		if (joltShape->GetType() != JPH::EShapeType::Compound)
+		// M44: a mass override's wrapper is seen through; the compound is the shape inside it.
+		const JPH::Shape& joltShape = Detail::UnwrapBodyShape(*joltBody.GetShape());
+		if (joltShape.GetType() != JPH::EShapeType::Compound)
 		{
 			// One collider: the whole body is it.
 			const std::vector<uint32_t>& colliders = shape->m_State->ColliderUserData;
@@ -474,9 +477,13 @@ namespace Engine {
 			return Detail::ToAabb(joltBody.GetWorldSpaceBounds());
 		}
 
-		// The compound's sub-shapes are placed relative to its centre of mass, which the body's transform carries.
-		const auto& compound = static_cast<const JPH::CompoundShape&>(*joltShape);
-		const JPH::RMat44 centerOfMass = joltBody.GetCenterOfMassTransform();
+		// The compound's sub-shapes are placed relative to its centre of mass, which the body's transform carries. M44: under
+		// a mass override's wrapper, the body's centre of mass is the compound's plus the offset, so the compound's frame is
+		// the body's centre-of-mass transform moved back by the offset.
+		const auto& compound = static_cast<const JPH::CompoundShape&>(joltShape);
+		JPH::RMat44 centerOfMass = joltBody.GetCenterOfMassTransform();
+		if (&joltShape != joltBody.GetShape())
+			centerOfMass = centerOfMass.PreTranslated(-static_cast<const JPH::OffsetCenterOfMassShape&>(*joltBody.GetShape()).GetOffset());
 		Aabb bounds;
 		for (const JPH::CompoundShape::SubShape& subShape : compound.GetSubShapes())
 		{

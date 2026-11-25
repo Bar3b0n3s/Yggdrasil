@@ -29,6 +29,7 @@ Every component of the type registry, in canonical component order: the order of
 | `MeshCollider` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies. |
 | `CharacterController` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Moves the entity as a walking character that climbs steps and slopes and collides with the world. |
 | `ColliderSurface` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them (a conveyor belt). |
+| `MassProperties` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright. |
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
@@ -71,6 +72,8 @@ Every component of the type registry, in canonical component order: the order of
 | `SliderJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking. |
 | `DistanceJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Keeps a point of the body of the RigidBody at or above the entity between a minimum and a maximum distance from a point of another body or of the world, like a rope, a chain link or a rod, with an optional spring and breaking. |
 | `FixedJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break. |
+| `WheeledVehicle` | Vehicles | Serializable, ScriptVisible, EditorVisible, Removable | Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick. |
+| `VehicleWheel` | Vehicles | Serializable, ScriptVisible, EditorVisible, Removable | Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins. |
 
 ## ID
 
@@ -748,6 +751,28 @@ Script members of `ColliderSurface`:
 | `Friction` | proxy field | `number` | read/write | All | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
 | `Restitution` | proxy field | `number` | read/write | All | The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. |
 | `SurfaceVelocity` | proxy field | `vector` | read/write | All | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
+
+## MassProperties
+
+Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright.
+
+- Category: Physics
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`, `RigidBody`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `CenterOfMassOffset` | `Vec3` | `[0,0,0]` | -1e+05 to 1e+05 | m |  | Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it. |
+| `InertiaScale` | `Vec3` | `[1,1,1]` | 0.01 to 100 |  |  | Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less. |
+
+Script members of `MassProperties`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `CenterOfMassOffset` | proxy field | `vector` | read/write | All | Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it. |
+| `InertiaScale` | proxy field | `vector` | read/write | All | Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less. |
 
 ## AudioSource
 
@@ -2127,6 +2152,134 @@ Script members of `FixedJoint`:
 | `GetForce` | method | `(self: FixedJoint) -> number` |  | All | The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. |
 | `GetTorque` | method | `(self: FixedJoint) -> number` |  | All | The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. |
 
+## WheeledVehicle
+
+Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.
+
+- Category: Vehicles
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`, `RigidBody`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Throttle` | `Float` | `0` | -1 to 1 |  |  | The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step. |
+| `Steering` | `Float` | `0` | -1 to 1 |  |  | The steering, from -1 (full left lock) to 1 (full right lock). |
+| `Brake` | `Float` | `0` | 0 to 1 |  |  | The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque. |
+| `HandBrake` | `Float` | `0` | 0 to 1 |  |  | The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque. |
+| `Gear` | `Int32` | `0` | -8 to 8 |  |  | Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has. |
+| `Clutch` | `Float` | `1` | 0 to 1 |  |  | Manual only: the clutch, from 0 (released) to 1 (engaged). |
+| `MaxTorque` | `Float` | `500` | 0 to 1e+06 | N m |  | The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM. |
+| `MinRpm` | `Float` | `1000` | 0 to 1e+05 | rpm |  | The engine's idle RPM, the least it turns at; at most MaxRpm. |
+| `MaxRpm` | `Float` | `6000` | 1 to 1e+05 | rpm |  | The engine's largest RPM, which it never exceeds. |
+| `EngineInertia` | `Float` | `0.5` | 0.001 to 1e+06 | kg m^2 |  | The moment of inertia of the engine's turning parts. |
+| `EngineDamping` | `Float` | `0.2` | 0 to 1000 | 1/s |  | How quickly the engine slows down by itself, per second. |
+| `TorqueCurve` | `Array<VehicleCurveKey>` | `[{"X":0,"Y":0.8},{"X":0.66,"Y":1},{"X":1,"Y":0.8}]` |  |  |  | The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear. |
+| `Transmission` | `VehicleTransmissionMode` | `"Auto"` |  |  |  | Whether the gears change by themselves (Auto) or as Gear says (Manual). |
+| `GearRatios` | `Array<Float>` | `[2.66,1.78,1.3,1,0.74]` |  |  |  | The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears. |
+| `ReverseGearRatios` | `Array<Float>` | `[-2.9]` |  |  |  | The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses. |
+| `SwitchTime` | `Float` | `0.5` | 0 to 100 | s |  | Auto: how long a gear change takes, in seconds. |
+| `ClutchReleaseTime` | `Float` | `0.3` | 0 to 100 | s |  | Auto: how long the clutch takes to engage after a gear change. |
+| `SwitchLatency` | `Float` | `0.5` | 0 to 100 | s |  | Auto: the least time between two gear changes, in seconds. |
+| `ShiftUpRpm` | `Float` | `4000` | 0 to 1e+05 | rpm |  | Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm. |
+| `ShiftDownRpm` | `Float` | `2000` | 0 to 1e+05 | rpm |  | Auto: the RPM below which it shifts down; above 0. |
+| `ClutchStrength` | `Float` | `10` | 0 to 1000 | kg m^2/s |  | How strongly the engaged clutch couples the engine to the wheels, above 0. |
+| `Differentials` | `Array<VehicleDifferential>` | `[]` |  |  |  | The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0. |
+| `DifferentialLimitedSlipRatio` | `Float` | `1.4` | 0 to 1000 |  |  | Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's. |
+| `AntiRollBars` | `Array<VehicleAntiRollBar>` | `[]` |  |  |  | The anti-roll bars between pairs of wheels, at most eight. |
+| `MaxPitchRollAngle` | `Float` | `180` | 0 to 180 | deg |  | How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it. |
+| `WheelCast` | `VehicleWheelCast` | `"Cylinder"` |  |  |  | How the wheels find the ground under them. |
+
+Script members of `WheeledVehicle`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AntiRollBars` | proxy field | `{{LeftWheel: Entity?, RightWheel: Entity?, Stiffness: number}}` | read/write | All | The anti-roll bars between pairs of wheels, at most eight. |
+| `Brake` | proxy field | `number` | read/write | All | The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque. |
+| `Clutch` | proxy field | `number` | read/write | All | Manual only: the clutch, from 0 (released) to 1 (engaged). |
+| `ClutchReleaseTime` | proxy field | `number` | read/write | All | Auto: how long the clutch takes to engage after a gear change. |
+| `ClutchStrength` | proxy field | `number` | read/write | All | How strongly the engaged clutch couples the engine to the wheels, above 0. |
+| `DifferentialLimitedSlipRatio` | proxy field | `number` | read/write | All | Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's. |
+| `Differentials` | proxy field | `{{LeftWheel: Entity?, RightWheel: Entity?, Ratio: number, LeftRightSplit: number, LimitedSlipRatio: number, EngineTorqueRatio: number}}` | read/write | All | The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0. |
+| `EngineDamping` | proxy field | `number` | read/write | All | How quickly the engine slows down by itself, per second. |
+| `EngineInertia` | proxy field | `number` | read/write | All | The moment of inertia of the engine's turning parts. |
+| `Gear` | proxy field | `number` | read/write | All | Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has. |
+| `GearRatios` | proxy field | `{number}` | read/write | All | The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears. |
+| `GetEngineRpm` | method | `(self: WheeledVehicle) -> number` |  | All | The engine's revolutions per minute after the last physics step, between MinRpm and MaxRpm. |
+| `GetGear` | method | `(self: WheeledVehicle) -> number` |  | All | The gear the transmission is in after the last physics step: 1 and up forward, -1 and down reverse, 0 neutral. In Manual it follows Gear (clamped to the ratios); in Auto the transmission chooses it. |
+| `GetSpeed` | method | `(self: WheeledVehicle) -> number` |  | All | The body's speed along its forward (local -Z) in metres per second after the last physics step, negative while it rolls backward. |
+| `HandBrake` | proxy field | `number` | read/write | All | The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque. |
+| `IsShifting` | method | `(self: WheeledVehicle) -> boolean` |  | All | Whether a gear change is in progress after the last physics step (an Auto shift's SwitchTime and ClutchReleaseTime). |
+| `MaxPitchRollAngle` | proxy field | `number` | read/write | All | How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it. |
+| `MaxRpm` | proxy field | `number` | read/write | All | The engine's largest RPM, which it never exceeds. |
+| `MaxTorque` | proxy field | `number` | read/write | All | The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM. |
+| `MinRpm` | proxy field | `number` | read/write | All | The engine's idle RPM, the least it turns at; at most MaxRpm. |
+| `ReverseGearRatios` | proxy field | `{number}` | read/write | All | The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses. |
+| `ShiftDownRpm` | proxy field | `number` | read/write | All | Auto: the RPM below which it shifts down; above 0. |
+| `ShiftUpRpm` | proxy field | `number` | read/write | All | Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm. |
+| `Steering` | proxy field | `number` | read/write | All | The steering, from -1 (full left lock) to 1 (full right lock). |
+| `SwitchLatency` | proxy field | `number` | read/write | All | Auto: the least time between two gear changes, in seconds. |
+| `SwitchTime` | proxy field | `number` | read/write | All | Auto: how long a gear change takes, in seconds. |
+| `Throttle` | proxy field | `number` | read/write | All | The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step. |
+| `TorqueCurve` | proxy field | `{{X: number, Y: number}}` | read/write | All | The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear. |
+| `Transmission` | proxy field | `VehicleTransmissionMode` | read/write | All | Whether the gears change by themselves (Auto) or as Gear says (Manual). |
+| `WheelCast` | proxy field | `VehicleWheelCast` | read/write | All | How the wheels find the ground under them. |
+
+## VehicleWheel
+
+Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.
+
+- Category: Vehicles
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Radius` | `Float` | `0.3` | 0.001 to 100 | m |  | The wheel's radius, in metres (never scaled). |
+| `Width` | `Float` | `0.1` | 0 to 100 | m |  | The wheel's width, in metres (never scaled); a Cylinder cast uses it. |
+| `SuspensionMinLength` | `Float` | `0.3` | 0 to 100 | m |  | The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength. |
+| `SuspensionMaxLength` | `Float` | `0.5` | 0 to 100 | m |  | The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length. |
+| `SuspensionPreload` | `Float` | `0` | 0 to 100 | m |  | How far the spring is compressed at full droop, in metres, so it pushes already there. |
+| `SpringFrequency` | `Float` | `1.5` | 0 to 1000 | Hz |  | The suspension spring's natural frequency, in hertz, above 0: higher is stiffer. |
+| `SpringDamping` | `Float` | `0.5` | 0 to 1000 |  |  | The suspension's damping ratio: 0 bounces, 1 is critically damped. |
+| `MaxSteerAngle` | `Float` | `70` | 0 to 90 | deg |  | The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer. |
+| `MaxBrakeTorque` | `Float` | `1500` | 0 to 1e+06 | N m |  | The brake's torque at a full Brake, in newton metres. |
+| `MaxHandBrakeTorque` | `Float` | `4000` | 0 to 1e+06 | N m |  | The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one. |
+| `Inertia` | `Float` | `0.9` | 0.001 to 1e+06 | kg m^2 |  | The wheel's moment of inertia about its axle. |
+| `AngularDamping` | `Float` | `0.2` | 0 to 1000 | 1/s |  | How quickly the wheel's spin slows down by itself, per second. |
+| `LongitudinalFriction` | `Array<VehicleCurveKey>` | `[{"X":0,"Y":0},{"X":0.06,"Y":1.2},{"X":0.2,"Y":1}]` |  |  |  | The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys. |
+| `LateralFriction` | `Array<VehicleCurveKey>` | `[{"X":0,"Y":0},{"X":3,"Y":1.2},{"X":20,"Y":1}]` |  |  |  | The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys. |
+
+Script members of `VehicleWheel`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AngularDamping` | proxy field | `number` | read/write | All | How quickly the wheel's spin slows down by itself, per second. |
+| `GetAngularVelocity` | method | `(self: VehicleWheel) -> number` |  | All | The wheel's spin speed about its axle in degrees per second after the last physics step, positive rolling forward. |
+| `GetContact` | method | `(self: VehicleWheel) -> (vector?, vector?, Entity?)` |  | All | Where the wheel touched the ground in the last physics step: the world point, the ground's normal and the collider entity (nil when that collider or its body's owner is disabled or destroyed); three nils while the wheel is in the air. Physics.GetSurface reads that collider's friction. |
+| `GetRotation` | method | `(self: VehicleWheel) -> number` |  | All | The wheel's spin about its axle in degrees, in [0, 360), after the last physics step. |
+| `GetSlip` | method | `(self: VehicleWheel) -> (number, number)` |  | All | The tyre's slip in the last physics step, 0 and 0 in the air: the longitudinal slip ratio (how far the tread's speed differs from the ground's, relative to it: 0 rolling freely, larger as the wheel spins or locks) and the lateral slip angle in degrees, in [0, 90], which LongitudinalFriction and LateralFriction turn into grip. |
+| `GetSteerAngle` | method | `(self: VehicleWheel) -> number` |  | All | The wheel's steer angle in degrees after the last physics step, positive to the right as Steering is (Steering times MaxSteerAngle). |
+| `GetSuspensionForce` | method | `(self: VehicleWheel) -> number` |  | All | The force the suspension pushed the body with in the last physics step, in newtons (0 in the air). |
+| `GetSuspensionLength` | method | `(self: VehicleWheel) -> number` |  | All | The suspension's length in metres after the last physics step, from its attachment point to the wheel's centre: SuspensionMaxLength in the air, shorter as the spring compresses, never below SuspensionMinLength. |
+| `Inertia` | proxy field | `number` | read/write | All | The wheel's moment of inertia about its axle. |
+| `IsTouching` | method | `(self: VehicleWheel) -> boolean` |  | All | Whether the wheel's cast found ground within its suspension in the last physics step. |
+| `LateralFriction` | proxy field | `{{X: number, Y: number}}` | read/write | All | The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys. |
+| `LongitudinalFriction` | proxy field | `{{X: number, Y: number}}` | read/write | All | The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys. |
+| `MaxBrakeTorque` | proxy field | `number` | read/write | All | The brake's torque at a full Brake, in newton metres. |
+| `MaxHandBrakeTorque` | proxy field | `number` | read/write | All | The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one. |
+| `MaxSteerAngle` | proxy field | `number` | read/write | All | The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer. |
+| `Radius` | proxy field | `number` | read/write | All | The wheel's radius, in metres (never scaled). |
+| `SpringDamping` | proxy field | `number` | read/write | All | The suspension's damping ratio: 0 bounces, 1 is critically damped. |
+| `SpringFrequency` | proxy field | `number` | read/write | All | The suspension spring's natural frequency, in hertz, above 0: higher is stiffer. |
+| `SuspensionMaxLength` | proxy field | `number` | read/write | All | The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length. |
+| `SuspensionMinLength` | proxy field | `number` | read/write | All | The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength. |
+| `SuspensionPreload` | proxy field | `number` | read/write | All | How far the spring is compressed at full droop, in metres, so it pushes already there. |
+| `Width` | proxy field | `number` | read/write | All | The wheel's width, in metres (never scaled); a Cylinder cast uses it. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -2230,6 +2383,38 @@ The state tints of a canvas's widgets: each multiplies the colour of a widget el
 | `Pressed` | `Color4` | `[0.6,0.6,0.6,1]` | 0 to 1 |  |  | The tint of a widget the pointer presses. |
 | `Focused` | `Color4` | `[0.75,0.85,1,1]` | 0 to 1 |  |  | The tint of the widget that has keyboard and gamepad focus. |
 | `Disabled` | `Color4` | `[0.5,0.5,0.5,0.5]` | 0 to 1 |  |  | The tint of a widget whose Interactable is false. |
+
+### VehicleAntiRollBar
+
+An anti-roll bar between two wheels of a WheeledVehicle, which keeps it from leaning.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `LeftWheel` | `EntityRef` | `null` |  |  |  | A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none. |
+| `RightWheel` | `EntityRef` | `null` |  |  |  | A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none. |
+| `Stiffness` | `Float` | `1000` | 0 to 1e+06 | N/m |  | How strongly the bar pushes the less compressed wheel's suspension down, in newtons per metre of difference. |
+
+### VehicleCurveKey
+
+One key of a vehicle's curve: Y at X, linear between keys and constant beyond the ends.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `X` | `Float` | `0` | -1000 to 1000 |  |  | Where the key is on the curve; a curve's keys have strictly increasing X. |
+| `Y` | `Float` | `0` | 0 to 1000 |  |  | The curve's value at X. |
+
+### VehicleDifferential
+
+A differential through which a WheeledVehicle's engine drives two of its wheels.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `LeftWheel` | `EntityRef` | `null` |  |  |  | A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none. |
+| `RightWheel` | `EntityRef` | `null` |  |  |  | A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none. |
+| `Ratio` | `Float` | `3.42` | 0 to 100 |  |  | The gear box's rotation over the wheels' (the final drive), above 0. |
+| `LeftRightSplit` | `Float` | `0.5` | 0 to 1 |  |  | The engine torque's share of the right wheel: 0 all left, 1 all right. |
+| `LimitedSlipRatio` | `Float` | `1.4` | 0 to 1000 |  |  | 0 for an open differential, else above 1: the largest ratio of the faster side's speed to the slower's before the torque goes to the slower one. |
+| `EngineTorqueRatio` | `Float` | `1` | 0 to 1 |  |  | This differential's share of the engine torque; the shares of a vehicle's differentials that name a wheel sum to 1. |
 
 ## Enums
 
@@ -2548,3 +2733,22 @@ Where a UI text block sits in its element's rectangle.
 | `Top` | The first line starts at the rectangle's top edge. |
 | `Middle` | The block is centred vertically in the rectangle. |
 | `Bottom` | The last line ends at the rectangle's bottom edge. |
+
+### VehicleTransmissionMode
+
+Whether a WheeledVehicle's gears change by themselves.
+
+| Value | Description |
+|---|---|
+| `Auto` | Shifts up above ShiftUpRpm and down below ShiftDownRpm, and into reverse for a negative Throttle, releasing the clutch on its own. |
+| `Manual` | Drives in the component's Gear with its Clutch, as a script or graph sets them. |
+
+### VehicleWheelCast
+
+How a WheeledVehicle's wheels find the ground under them.
+
+| Value | Description |
+|---|---|
+| `Ray` | One ray down each suspension: the cheapest, and a wheel drops into a crack narrower than it. |
+| `Sphere` | A sphere of the vehicle's smallest wheel Radius swept down each suspension. |
+| `Cylinder` | Each wheel's own cylinder, its Radius and Width, swept down its suspension: the wide tyre. |

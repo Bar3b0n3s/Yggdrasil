@@ -103,6 +103,7 @@ Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, Exp
 - **UI** (menus, HUDs, labels in scene pixels): see `skills/game-building/ui`; `ui_tree` shows where every element landed.
 - **Terrain** (heightfields, sculpting and painting, splat layers, the terrain collider): see `skills/game-building/terrain`.
 - **Machines** (doors, trap doors, pistons, chains, welds that break): a `HingeJoint`, `SliderJoint`, `DistanceJoint` or `FixedJoint` on a body's entity joins it to `ConnectedBody` (another body, or null for the world); limits and motors drive it, `BreakForce` and `BreakTorque` break it, and a script mends it with `Broken = false`. A jointed body a character stands on needs the mass and motor force to carry it. See `skills/luau-gameplay/joints`; `physics.jointInfo` and the collider view show each joint (`game-debugging` item 8).
+- **Vehicles** (a buggy, a cart, a trailer): a `WheeledVehicle` on a Dynamic body's entity and a `VehicleWheel` on each wheel child, its `Differentials` naming the driven wheels; a `MassProperties` lowers its centre of mass. See `skills/luau-gameplay/vehicles` and the vehicle prefab recipe in `prefabs-and-levels`; `physics.vehicleInfo` reports it.
 
 ## 4. Scripts
 

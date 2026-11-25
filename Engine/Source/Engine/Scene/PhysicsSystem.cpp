@@ -12,6 +12,7 @@
 #include "Engine/Scene/Components/ColliderSurfaceComponent.h"
 #include "Engine/Scene/Components/DisabledTag.h"
 #include "Engine/Scene/Components/IDComponent.h"
+#include "Engine/Scene/Components/MassPropertiesComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
@@ -23,6 +24,7 @@
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
 #include "Engine/Scene/Private/PhysicsSystemState.h"
 #include "Engine/Scene/Scene.h"
@@ -36,6 +38,7 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <span>
 #include <tuple>
 #include <utility>
 #include <variant>
@@ -295,6 +298,24 @@ namespace Engine {
 			return { transform.Translation, transform.Rotation };
 		}
 
+		// M44: writes each wheel entity's local Translation and Rotation from its wheel's pose (PhysicsSystem.h's M44 paragraph)
+		// directly (a runtime write, §5.1), only where a bit differs, and marks each write (M43's change tracking).
+		static void WriteWheelPoses(Scene& scene, std::span<const PhysicsWheelPose> poses)
+		{
+			for (const PhysicsWheelPose& pose : poses)
+			{
+				Entity wheel = scene.FindEntityByID(pose.Entity);
+				TransformComponent& transform = wheel.GetComponent<TransformComponent>();
+				if (SameBits(transform.Translation, pose.Translation) && SameBits(transform.Rotation, pose.Rotation))
+					continue;
+				transform.Translation = pose.Translation;
+				transform.Rotation = pose.Rotation;
+				// M43 (§5.2): a direct write is marked, so the next update recomputes the wheel's subtree and the world-change
+				// lists and the render static cache see it.
+				scene.MarkTransformWritten(wheel);
+			}
+		}
+
 		// The body settings of `plan` (BodyDescription without its shape, pose and velocities, §9.2 "Body settings").
 		static BodyDescription MakeBodySettings(const PhysicsBodyPlan& plan, ConstEntity owner)
 		{
@@ -321,6 +342,9 @@ namespace Engine {
 				settings.MaxAngularVelocity = body.MaxAngularVelocity;
 				settings.AllowSleeping = body.AllowSleeping;
 				settings.EnhancedInternalEdgeRemoval = body.EnhancedInternalEdgeRemoval;
+				// M44: a Dynamic body's MassProperties (the world ignores it for any other, so it is read for none).
+				if (plan.MotionType == PhysicsMotionType::Dynamic && !plan.IsSensor)
+					settings.MassOverride = GetPhysicsMassOverride(owner);
 			}
 			else if (plan.Origin == PhysicsBodyOrigin::ImplicitStatic && HoldsOwnTerrainCollider(plan.Colliders, plan.Owner))
 			{
@@ -336,10 +360,10 @@ namespace Engine {
 		{
 			return std::tie(a.MotionType, a.Layer, a.IsSensor, a.CollideKinematicVsNonDynamic, a.MotionQuality, a.AllowedDofs, a.Mass, a.Friction,
 					   a.Restitution, a.LinearDamping, a.AngularDamping, a.GravityFactor, a.MaxLinearVelocity, a.MaxAngularVelocity, a.AllowSleeping,
-					   a.EnhancedInternalEdgeRemoval, a.UserData, a.CollisionGroup)
+					   a.EnhancedInternalEdgeRemoval, a.UserData, a.CollisionGroup, a.MassOverride)
 				== std::tie(b.MotionType, b.Layer, b.IsSensor, b.CollideKinematicVsNonDynamic, b.MotionQuality, b.AllowedDofs, b.Mass, b.Friction,
 					b.Restitution, b.LinearDamping, b.AngularDamping, b.GravityFactor, b.MaxLinearVelocity, b.MaxAngularVelocity, b.AllowSleeping,
-					b.EnhancedInternalEdgeRemoval, b.UserData, b.CollisionGroup);
+					b.EnhancedInternalEdgeRemoval, b.UserData, b.CollisionGroup, b.MassOverride);
 		}
 
 		static bool SameGeometry(const PhysicsShapeGeometry& a, const PhysicsShapeGeometry& b)
@@ -518,12 +542,16 @@ namespace Engine {
 		Utils::ConnectComponentSignals<TerrainComponent, &State::OnComponentChanged>(registry, *this);
 		// M36: a surface never recomposes the scene (PhysicsSystemSurfaces.cpp).
 		Utils::ConnectComponentSignals<ColliderSurfaceComponent, &State::OnSurfaceChanged>(registry, *this);
+		// M44: a mass override is a body setting, as a RigidBody field is.
+		Utils::ConnectComponentSignals<MassPropertiesComponent, &State::OnComponentChanged>(registry, *this);
 		registry.on_construct<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_destroy<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_construct<PendingDestroyTag>().connect<&State::OnEntityLeavingPlay>(*this);
 		registry.on_construct<HierarchyDisabledTag>().connect<&State::OnEntityLeavingPlay>(*this);
 		// M37: the joint components mark the joints, never the bodies (PhysicsSystemJoints.cpp).
 		ConnectJointSignals(registry);
+		// M44: the vehicle components mark the vehicles, never the bodies (PhysicsSystemVehicles.cpp).
+		ConnectVehicleSignals(registry);
 	}
 
 	void PhysicsSystem::State::DisconnectSignals()
@@ -539,11 +567,13 @@ namespace Engine {
 		Utils::DisconnectComponentSignals<TerrainColliderComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<TerrainComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<ColliderSurfaceComponent>(registry, *this);
+		Utils::DisconnectComponentSignals<MassPropertiesComponent>(registry, *this);
 		registry.on_construct<DisabledTag>().disconnect(this);
 		registry.on_destroy<DisabledTag>().disconnect(this);
 		registry.on_construct<PendingDestroyTag>().disconnect(this);
 		registry.on_construct<HierarchyDisabledTag>().disconnect(this);
 		DisconnectJointSignals(registry);
+		DisconnectVehicleSignals(registry);
 	}
 
 	void PhysicsSystem::State::OnComponentChanged(entt::registry& registry, entt::entity entity)
@@ -612,7 +642,7 @@ namespace Engine {
 		PendingListenerDiagnostics.push_back(std::move(diagnostic));
 	}
 
-	void PhysicsSystem::State::RaiseBodyError(const PhysicsBodyPlan& plan, const Error& error, std::string_view field)
+	void PhysicsSystem::State::RaiseBodyError(const PhysicsBodyPlan& plan, const Error& error, std::string_view field, std::string_view fieldComponent)
 	{
 		const Scene& scene = *Specification.RuntimeScene;
 		std::string_view code = GetPhysicsDiagnosticCode(error);
@@ -628,6 +658,8 @@ namespace Engine {
 		std::string component;
 		if (plan.Origin == PhysicsBodyOrigin::Character)
 			component = "CharacterController";
+		else if (plan.Origin == PhysicsBodyOrigin::RigidBody && !fieldComponent.empty())
+			component = std::string(fieldComponent);
 		else if (plan.Origin == PhysicsBodyOrigin::RigidBody && (code != PhysicsInvalidShapeCode || !carriesCode || !field.empty()))
 			component = "RigidBody";
 		if (component.empty() && code == PhysicsInvalidShapeCode)
@@ -661,6 +693,16 @@ namespace Engine {
 		if (code == PhysicsLimitExceededCode)
 			diagnostic.Subject = "bodies";
 		RaiseDiagnostic(std::move(diagnostic));
+	}
+
+	void PhysicsSystem::State::RaiseDynamicBodyError(const PhysicsBodyPlan& plan, const PhysicsShape& shape, const BodyDescription& settings, const Error& error)
+	{
+		// M44: a refusal that only the MassProperties' override causes names it, with a hint to change it.
+		const Utils::DynamicBodyFault fault = Utils::GetDynamicBodyFault(shape, settings.Mass, settings.AllowedDofs, settings.MassOverride, error);
+		if (fault.Hint.empty())
+			RaiseBodyError(plan, error, fault.Field, fault.Component);
+		else
+			RaiseBodyError(plan, Error(error).WithHint(std::string(fault.Hint)), fault.Field, fault.Component);
 	}
 
 	void PhysicsSystem::State::DeliverPendingDiagnostics()
@@ -1156,9 +1198,9 @@ namespace Engine {
 		if (plan.MotionType == PhysicsMotionType::Dynamic)
 		{
 			// The world checks the same; checked here, the refusal names the RigidBody's field.
-			if (const Status checked = (*shape)->CheckDynamicBody(body.Mass, body.AllowedDofs); !checked)
+			if (const Status checked = (*shape)->CheckDynamicBody(body.Mass, body.AllowedDofs, body.MassOverride); !checked)
 			{
-				RaiseBodyError(plan, checked.error(), Utils::GetDynamicBodyField(checked.error()));
+				RaiseDynamicBodyError(plan, **shape, body, checked.error());
 				return false;
 			}
 		}
@@ -1200,8 +1242,10 @@ namespace Engine {
 		AssignPlan(created, plan);
 		// M36: the new body's collider surfaces (PhysicsSystemSurfaces.cpp).
 		SendSurfaces(created);
-		// M37: a new body may complete a joint.
+		// M37: a new body may complete a joint; M44: or a vehicle.
 		JointsChanged = true;
+		VehiclesChanged = true;
+		VehicleBodiesChanged = true;
 		return true;
 	}
 
@@ -1301,7 +1345,8 @@ namespace Engine {
 			return;
 		const PhysicsBodyEntry& entry = found->second;
 		PurgeBodyContacts(handle, woken);
-		// M37: its joints before the body (a Jolt constraint holds raw body pointers).
+		// M44: its vehicle, then (M37) its joints before the body (a Jolt constraint holds raw body pointers).
+		RemoveBodyVehicles(entry.Handle);
 		RemoveBodyJoints(entry.Handle);
 		World->DestroyBody(entry.Handle);
 		BodiesByOwner.erase({ entry.Owner, entry.Origin });
@@ -1338,9 +1383,9 @@ namespace Engine {
 			}
 			if (plan.MotionType == PhysicsMotionType::Dynamic)
 			{
-				if (const Status checked = (*shape)->CheckDynamicBody(entry.Settings.Mass, entry.Settings.AllowedDofs); !checked)
+				if (const Status checked = (*shape)->CheckDynamicBody(entry.Settings.Mass, entry.Settings.AllowedDofs, entry.Settings.MassOverride); !checked)
 				{
-					RaiseBodyError(plan, checked.error(), Utils::GetDynamicBodyField(checked.error()));
+					RaiseDynamicBodyError(plan, **shape, entry.Settings, checked.error());
 					RemoveBody(handle, woken);
 					return false;
 				}
@@ -1520,8 +1565,10 @@ namespace Engine {
 		}
 		MeshShapes.Prune();
 
-		// M37: the joints after every body of the pass, over this composition (PhysicsSystemJoints.cpp).
+		// M37: the joints after every body of the pass, over this composition (PhysicsSystemJoints.cpp); M44: then the vehicles
+		// (PhysicsSystemVehicles.cpp).
 		SynchronizeJointsAfterRebuild(composition);
+		SynchronizeVehiclesAfterRebuild();
 	}
 
 	void PhysicsSystem::State::RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken)
@@ -1555,11 +1602,12 @@ namespace Engine {
 			state.DisconnectSignals();
 			state.Specification.RuntimeScene->CloseWorldChangeList(state.WorldChanges);
 		}
-		// Characters first (their inner bodies live in the world), then (M37) the joints, then the bodies, then the world; no
-		// events.
+		// Characters first (their inner bodies live in the world), then (M44) the vehicles and (M37) the joints, then the
+		// bodies, then the world; no events.
 		state.Characters.clear();
 		if (state.World != nullptr)
 		{
+			state.DestroyAllVehicles();
 			state.DestroyAllJoints();
 			for (const auto& [handle, entry] : state.Bodies)
 				state.World->DestroyBody(entry.Handle);
@@ -1639,8 +1687,10 @@ namespace Engine {
 		state.ChangedEntities.clear();
 		// M36: the collider surfaces written since the last PreStep (PhysicsSystemSurfaces.cpp).
 		state.RefreshSurfaces();
-		// M37: the joints, when a joint component changed or a body was created or removed (a rebuild did it already).
+		// M37: the joints, when a joint component changed or a body was created or removed (a rebuild did it already); M44: then
+		// the vehicles.
 		state.SynchronizeJoints();
+		state.SynchronizeVehicles();
 
 		// 3-4. Kinematic moves and teleports, in canonical order of the owners; entities pending destruction or disabled keep
 		// their bodies as they are until FlushDestroyed. M43: the kinematic bodies' owners and the owners whose transforms
@@ -1754,6 +1804,9 @@ namespace Engine {
 		}
 		state.WakeOwners(woken);
 
+		// 4b. M44: the vehicles' driver input, in canonical order of the vehicles (PhysicsSystemVehicles.cpp).
+		state.ApplyVehicleInput();
+
 		// 5. Characters: a Transform write teleports them, then each runs its update with the velocity of its last
 		// MoveCharacter, which the update consumes.
 		const glm::vec3 gravity = state.World->GetGravity();
@@ -1811,7 +1864,7 @@ namespace Engine {
 	{
 		State& state = *m_State;
 		ENGINE_CORE_ASSERT(!state.Dispatching, "PhysicsSystem::SynchronizeBodies was called from a physics listener callback");
-		if (!state.ComponentsChanged && !state.JointsChanged)
+		if (!state.ComponentsChanged && !state.JointsChanged && !state.VehiclesChanged)
 			return;
 		// PreStep's items 1 and 2: a hierarchy change seen here is consumed with the rebuild, as PreStep consumes it.
 		std::set<UUID> woken;
@@ -1819,8 +1872,9 @@ namespace Engine {
 			state.Rebuild(state.HasHierarchyChanged(), woken);
 		state.ComponentsChanged = false;
 		state.ChangedEntities.clear();
-		// M37: a joint change alone is synchronized here too (a rebuild did it already).
+		// M37: a joint change alone is synchronized here too (a rebuild did it already); M44: and a vehicle change.
 		state.SynchronizeJoints();
+		state.SynchronizeVehicles();
 		state.WakeOwners(woken);
 		state.DeliverPendingDiagnostics();
 	}
@@ -1898,6 +1952,8 @@ namespace Engine {
 				std::tie(entry.WrittenTranslation, entry.WrittenRotation) = Utils::WriteWorldPose(entity, entry.Controller->GetPose());
 			}
 		}
+		// M44: the wheels' poses, after their vehicles' write-back (PhysicsSystemVehicles.cpp).
+		Utils::WriteWheelPoses(scene, state.CollectWheelPoses());
 
 		// §9.4 steps 1 to 4: map, collapse into pairs, sort, dispatch.
 		const auto resolve = [&state](BodyHandle handle, uint32_t collider) -> std::optional<ResolvedBody>
@@ -2321,7 +2377,8 @@ namespace Engine {
 			std::vector<UUID> gone;
 			const std::set<UUID> candidates = std::move(state.FlushCandidates);
 			state.FlushCandidates.clear();
-			// M37: the joints of entities that left play go now; a body's go with it below (RemoveBody).
+			// M44 and M37: the vehicles and joints of entities that left play go now; a body's go with it below (RemoveBody).
+			state.RemoveLeavingVehicles(candidates);
 			state.RemoveLeavingJoints(candidates);
 			for (const UUID candidate : candidates)
 			{
@@ -2649,6 +2706,7 @@ namespace Engine {
 			report.AngularVelocity = state.World->GetAngularVelocity(entry->Handle);
 			report.IsSleeping = state.World->IsSleeping(entry->Handle);
 			report.Bounds = state.World->GetBodyBounds(entry->Handle).value_or(Aabb{});
+			report.CenterOfMass = state.World->GetCenterOfMassPosition(entry->Handle);
 		}
 		else
 		{
@@ -2659,6 +2717,8 @@ namespace Engine {
 			report.LinearVelocity = character->Controller->GetVelocity();
 			report.Bounds = state.World->GetBodyBounds(character->Controller->GetInnerBody()).value_or(Aabb{});
 			report.Character = state.MakeCharacterState(*character->Controller);
+			if (state.World->IsBodyValid(character->Controller->GetInnerBody()))
+				report.CenterOfMass = state.World->GetCenterOfMassPosition(character->Controller->GetInnerBody());
 		}
 		report.LayerName = report.Layer < state.Layers.GetLayerCount() ? state.Layers.GetName(report.Layer) : std::string();
 		if (const auto owned = state.PairsByOwner.find(report.Owner); owned != state.PairsByOwner.end())
@@ -2709,8 +2769,9 @@ namespace Engine {
 	void PhysicsSystem::AppendStateHash(XXH64Hasher& hasher) const
 	{
 		const State& state = *m_State;
-		// M37: kept joint frames outlive their bodies while an entity is disabled, so they alone keep the block.
-		if (state.Bodies.empty() && state.Characters.empty() && !state.HasKeptJointFrames())
+		// M37: kept joint frames outlive their bodies while an entity is disabled, so they alone keep the block; M44: kept wheel
+		// frames too.
+		if (state.Bodies.empty() && state.Characters.empty() && !state.HasKeptJointFrames() && !state.HasKeptVehicleFrames())
 			return;
 
 		const Scene& scene = *state.Specification.RuntimeScene;
@@ -2760,8 +2821,9 @@ namespace Engine {
 				append(id, controller.GetPose(), controller.GetVelocity(), glm::vec3(0.0f), false);
 			}
 		}
-		// M37: the joint part, after the bodies and characters.
+		// M37: the joint part, after the bodies and characters; M44: the vehicle part after it.
 		state.AppendJointHash(bytes);
+		state.AppendVehicleHash(bytes);
 		hasher.Update(bytes);
 	}
 

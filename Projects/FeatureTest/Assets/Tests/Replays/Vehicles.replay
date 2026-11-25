@@ -1,0 +1,375 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "155b358ccf80a60b",
+		"Path": "Assets/Scenes/Vehicles.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.8.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "122a4138802aa1a3",
+				"Path": "/Cart/FR",
+				"Hash": "5595a03bc92956d7",
+				"Components": {
+					"Transform": "a1315fc5d8e33b95",
+					"VehicleWheel": "b8908ee08f6ac7fc"
+				}
+			},
+			{
+				"Id": "151ef48ae0a90f10",
+				"Path": "/Track/Rough",
+				"Hash": "84810d19e44a21be",
+				"Components": {
+					"Transform": "0451af3363a4072f",
+					"BoxCollider": "d00ff7ebaa0dfd13",
+					"ColliderSurface": "db0d97634380930f"
+				}
+			},
+			{
+				"Id": "21374cfc5755c2ce",
+				"Path": "/Cart/FL",
+				"Hash": "a5e6bc1890f483bd",
+				"Components": {
+					"Transform": "f8ca34988b2d9e78",
+					"VehicleWheel": "b8908ee08f6ac7fc"
+				}
+			},
+			{
+				"Id": "22006b2abbe05d83",
+				"Path": "/Rig/RL",
+				"Hash": "6575957618832891",
+				"Components": {
+					"Transform": "1a50881fd591e840",
+					"VehicleWheel": "4346b49d8eee042b"
+				}
+			},
+			{
+				"Id": "3b5dbffc2b33c0d5",
+				"Path": "/Track",
+				"Hash": "602c91fbf75f3d75",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"RigidBody": "cea9cf4aa5bfe949"
+				}
+			},
+			{
+				"Id": "3b719222ad4823ce",
+				"Path": "/Buggy/RR",
+				"Hash": "c6a4cde75f40f733",
+				"Components": {
+					"Transform": "bfa833e2cd28b024",
+					"VehicleWheel": "5c3eea4f87f2e8fb"
+				}
+			},
+			{
+				"Id": "3ea66ee7353ffd16",
+				"Path": "/Rig/RR",
+				"Hash": "8a898b26d1f9d673",
+				"Components": {
+					"Transform": "eb9f8827bc9f877a",
+					"VehicleWheel": "4346b49d8eee042b"
+				}
+			},
+			{
+				"Id": "4626f77aeead90ab",
+				"Path": "/Track/Ledge",
+				"Hash": "18556f245ce7a7cb",
+				"Components": {
+					"Transform": "3bb868a7c6f2446a",
+					"BoxCollider": "f66f75d23048ab51"
+				}
+			},
+			{
+				"Id": "4e9d9f4f94cb50ca",
+				"Path": "/Buggy",
+				"Hash": "e9f76928e48a569d",
+				"Components": {
+					"Transform": "f13edd8f3a5b27a7",
+					"RigidBody": "beb7953f1f004bf9",
+					"BoxCollider": "57d67819a9b73813",
+					"MassProperties": "c1e41dac951e69b9",
+					"Script": "434ef0c8f558c82a",
+					"WheeledVehicle": "fc51518c6c9ba9c5"
+				}
+			},
+			{
+				"Id": "520be0376fcfe761",
+				"Path": "/Rig",
+				"Hash": "3e056372e05014e8",
+				"Components": {
+					"Transform": "65f82c547d49ec65",
+					"RigidBody": "36e557d57de98784",
+					"BoxCollider": "f79ce252c2f01134",
+					"WheeledVehicle": "0291e2ef43074b23"
+				}
+			},
+			{
+				"Id": "52acdd57823e8cf4",
+				"Path": "/Hill",
+				"Hash": "bdd55e6cc51f53dd",
+				"Components": {
+					"Transform": "3b797e12da3f2522",
+					"Terrain": "800b9d06b4b15f31",
+					"TerrainCollider": "c9dd08ca8b0042e3"
+				}
+			},
+			{
+				"Id": "6a7457693d589939",
+				"Path": "/Camera",
+				"Hash": "dcb678df330c1fce",
+				"Components": {
+					"Transform": "f07064c2dea377ef",
+					"Camera": "298c6683e88adb27"
+				}
+			},
+			{
+				"Id": "6eb95cadb02b1e81",
+				"Path": "/Track/Slick",
+				"Hash": "3071e851597c9808",
+				"Components": {
+					"Transform": "1d5bb39236f5687c",
+					"BoxCollider": "d00ff7ebaa0dfd13",
+					"ColliderSurface": "3a35ed94b35f6c22"
+				}
+			},
+			{
+				"Id": "77ab9799851f9e14",
+				"Path": "/Cart/RL",
+				"Hash": "3d79af77518aeb89",
+				"Components": {
+					"Transform": "80ecd38e716b913e",
+					"VehicleWheel": "4796f1a8fb4b64f7"
+				}
+			},
+			{
+				"Id": "83dfb643e285d7cf",
+				"Path": "/Buggy/FL",
+				"Hash": "0f0f6754c5505a28",
+				"Components": {
+					"Transform": "cf2d05262e60a242",
+					"VehicleWheel": "68e7c74dc3606d76"
+				}
+			},
+			{
+				"Id": "971b7b5f6e9838de",
+				"Path": "/Cart/RR",
+				"Hash": "003938bf10d493e2",
+				"Components": {
+					"Transform": "da39dfdcca4cfed8",
+					"VehicleWheel": "4796f1a8fb4b64f7"
+				}
+			},
+			{
+				"Id": "a51be1aa16e54f27",
+				"Path": "/Cart",
+				"Hash": "040d81e2bd310ded",
+				"Components": {
+					"Transform": "c6d160376581c4c1",
+					"RigidBody": "1d10dbf478da3bca",
+					"BoxCollider": "925c5139c6857c4a",
+					"WheeledVehicle": "5699010fd0baf0b5"
+				}
+			},
+			{
+				"Id": "ab75750cd9a9f453",
+				"Path": "/Buggy/FR",
+				"Hash": "8886dda1355dc179",
+				"Components": {
+					"Transform": "df0de4f2482832fb",
+					"VehicleWheel": "68e7c74dc3606d76"
+				}
+			},
+			{
+				"Id": "b2225fd448d32754",
+				"Path": "/Rig/FR",
+				"Hash": "ab99fbbbca8177a8",
+				"Components": {
+					"Transform": "3956cd9378d7e7a5",
+					"VehicleWheel": "efdcdb66572c903f"
+				}
+			},
+			{
+				"Id": "c397adca5f214d86",
+				"Path": "/Sun",
+				"Hash": "dd25554696dc5943",
+				"Components": {
+					"Transform": "b12cf37696743467",
+					"DirectionalLight": "60bab90e2cb40d0e"
+				}
+			},
+			{
+				"Id": "caaf8cd0315ad2b6",
+				"Path": "/Track/Ground",
+				"Hash": "e4b4d1a7caf91b9d",
+				"Components": {
+					"Transform": "cda1f12644e52a82",
+					"BoxCollider": "d1c23d7d0ce3a03c"
+				}
+			},
+			{
+				"Id": "e66cfcc52e19d5f6",
+				"Path": "/Buggy/RL",
+				"Hash": "f90b1c3450d17e85",
+				"Components": {
+					"Transform": "40a68452d89206f0",
+					"VehicleWheel": "5c3eea4f87f2e8fb"
+				}
+			},
+			{
+				"Id": "ea8ba82923526dc9",
+				"Path": "/Rig/FL",
+				"Hash": "7da43aca1c88ff53",
+				"Components": {
+					"Transform": "35adb5268c451360",
+					"VehicleWheel": "efdcdb66572c903f"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "4565fe6c6b485421",
+				"Path": "Assets/Heightfields/Vehicles/Hill.heightfield",
+				"Type": "Heightfield",
+				"Hash": "2420503b067db06c"
+			},
+			{
+				"Handle": "7f470cb14293e378",
+				"Path": "Assets/Scripts/Vehicles/VehicleDriver.luau",
+				"Type": "Script",
+				"Hash": "820cca24b5ac2651"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 30,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "W"
+		},
+		{
+			"Tick": 300,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "D"
+		},
+		{
+			"Tick": 400,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "D"
+		},
+		{
+			"Tick": 560,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "W"
+		},
+		{
+			"Tick": 570,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "S"
+		},
+		{
+			"Tick": 690,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "S"
+		},
+		{
+			"Tick": 700,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Space"
+		},
+		{
+			"Tick": 890,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Space"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 260,
+			"Luau": "local buggy = Scene.FindByPath(\"/Buggy\")\nreturn buggy.Transform.WorldPosition.y < 1.2 and buggy.WheeledVehicle:GetSpeed() > 5"
+		},
+		{
+			"Tick": 420,
+			"Luau": "local buggy = Scene.FindByPath(\"/Buggy\")\nreturn buggy.Transform:Forward().z > -0.87 and buggy.Transform:TransformDirection(vector.create(0, 1, 0)).y > 0.9"
+		},
+		{
+			"Tick": 900,
+			"Luau": "local buggy = Scene.FindByPath(\"/Buggy\")\nlocal driver = buggy:GetScript(\"VehicleDriver\")\nreturn math.abs(buggy.WheeledVehicle:GetSpeed()) < 1 and driver.TopSpeed > 10 and driver.DrivenTicks > 500"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "ca44669930c9da39"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "c87671fc8737d747"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "d1bafed6ea2019a8"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "5539051566c4d75f"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "130a43337e25b28d"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "cdfbe5ae595e7ba0"
+		},
+		{
+			"Tick": 420,
+			"StateHash": "8430a92ee635248c"
+		},
+		{
+			"Tick": 480,
+			"StateHash": "50439c5947dbe64c"
+		},
+		{
+			"Tick": 540,
+			"StateHash": "0078889af6289a5b"
+		},
+		{
+			"Tick": 600,
+			"StateHash": "465a9961c2c9959e"
+		},
+		{
+			"Tick": 660,
+			"StateHash": "0e6e10dd66306c03"
+		},
+		{
+			"Tick": 720,
+			"StateHash": "e840f61d738b86a4"
+		},
+		{
+			"Tick": 780,
+			"StateHash": "f30bc0b8157ceda6"
+		},
+		{
+			"Tick": 840,
+			"StateHash": "25a01e16c83ca2d0"
+		}
+	],
+	"FinalTick": 900,
+	"FinalStateHash": "0771bb2efe384432"
+}

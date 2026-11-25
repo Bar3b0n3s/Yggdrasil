@@ -40,9 +40,10 @@ namespace Engine {
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
 			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, M37's four joints (Docs/Decisions/0054-m37-joints.md
 			// decision 1) 62, M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63, and M42's
-			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64, and M43's Static
-			// (Docs/Decisions/0061-m43-static-scenery.md decision 3) 65.
-			static_assert(BuiltinComponents::Size == 65);
+			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64; phase 8's in train order: M43's Static
+			// (Docs/Decisions/0061-m43-static-scenery.md decision 3) 65, then M44's MassProperties
+			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3) 66 and its WheeledVehicle and VehicleWheel 68.
+			static_assert(BuiltinComponents::Size == 68);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -684,6 +685,8 @@ namespace Engine {
 				"CharacterController",
 				// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 1): in Physics, after CharacterController.
 				"ColliderSurface",
+				// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): in Physics, after ColliderSurface.
+				"MassProperties",
 				"AudioSource",
 				"AudioListener",
 				"Script",
@@ -740,6 +743,10 @@ namespace Engine {
 				"SliderJoint",
 				"DistanceJoint",
 				"FixedJoint",
+				// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): ADR 0060's phase-8 ledger's Vehicles category after
+				// Joints.
+				"WheeledVehicle",
+				"VehicleWheel",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -751,7 +758,7 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints", "Vehicles" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,

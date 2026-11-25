@@ -57,6 +57,8 @@ namespace Engine {
 		void RunNavigationBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joint proxies' methods (Bindings/JointsTests.cpp).
 		void RunJointsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the vehicle proxies' methods (Bindings/VehiclesTests.cpp).
+		void RunVehiclesBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 	}
 
@@ -182,7 +184,8 @@ namespace Engine {
 				&Test::RunTerrainBindingsCoverage,
 				&Test::RunSaveDataBindingsCoverage,
 				&Test::RunNavigationBindingsCoverage,
-				&Test::RunJointsBindingsCoverage
+				&Test::RunJointsBindingsCoverage,
+				&Test::RunVehiclesBindingsCoverage
 			};
 			Test::ScriptTestFixture catalog;
 			REQUIRE(catalog.Start());

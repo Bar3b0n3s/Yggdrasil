@@ -74,6 +74,7 @@ COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "Static", "MeshRenderer",
     "Camera", "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody",
     "BoxCollider", "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface",
+    "MassProperties",
     "AudioSource", "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
@@ -81,7 +82,8 @@ COMPONENT_ORDER = [
     "Animator", "SkinnedMesh", "BoneAttachment", "ParticleEmitter", "ParticleLook", "IrradianceVolume",
     "ReflectionProbe", "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation",
     "NavModifier",
-    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
+    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "WheeledVehicle", "VehicleWheel", "ValidatorTarget",
+    "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -1066,6 +1068,22 @@ return Script.Define("Jumper", Jumper)
     item = fixture("SCENE_STATIC_MOVES")
     item.entities.append(entity("e000000000000043", "Scenery", {"Transform": transform(0, 0, -20), "Static": {}}))
     item.entities.append(body("e000000000000044", "Crate", 0, "Dynamic", parent="e000000000000043"))
+
+    # M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a lowered centre of mass on a Static wall, which no
+    # Dynamic body uses.
+    item = fixture("PHYSICS_MASS_UNUSED")
+    wall = body("e000000000000042", "Wall", 0, "Static")
+    wall["Components"]["MassProperties"] = {"CenterOfMassOffset": [0, -0.25, 0], "InertiaScale": [1, 1, 1]}
+    wall["Components"] = {key: wall["Components"][key] for key in COMPONENT_ORDER if key in wall["Components"]}
+    item.entities.append(wall)
+
+    # M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a sled, a Dynamic body with a WheeledVehicle and no
+    # VehicleWheel below it.
+    item = fixture("PHYSICS_VEHICLE_INVALID")
+    sled = body("e000000000000042", "Sled", 0, "Dynamic")
+    sled["Components"]["WheeledVehicle"] = {}
+    sled["Components"] = {key: sled["Components"][key] for key in COMPONENT_ORDER if key in sled["Components"]}
+    item.entities.append(sled)
 
     return fixtures
 

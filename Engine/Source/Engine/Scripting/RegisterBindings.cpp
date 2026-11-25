@@ -55,6 +55,9 @@ namespace Engine {
 			// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joint proxies' methods, after M30's RegisterNavigation (ADR
 			// 0052's ledger: the only new line).
 			ENGINE_TRY(ScriptBindings::RegisterJoints(api));
+			// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the WheeledVehicle and VehicleWheel proxies' methods,
+			// after M37's RegisterJoints (ADR 0060's phase 8 ledger: the first of the phase's three lines).
+			ENGINE_TRY(ScriptBindings::RegisterVehicles(api));
 			return {};
 		}
 

@@ -3,6 +3,7 @@
 #include "Engine/Physics/PhysicsWorld.h"
 
 #include "Engine/Core/Hash.h"
+#include "Engine/Physics/CharacterController.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsEngine.h"
 #include "Support/DeathTest.h"
@@ -1380,6 +1381,214 @@ namespace Engine {
 			CHECK_FALSE(world->IsSleeping(sleeper));
 			StepWorld(*world, 60);
 			CHECK(world->GetLinearVelocity(sleeper).z == doctest::Approx(3.0f).epsilon(0.02));
+		}
+
+		// --- Mass overrides (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3) ------------------------------------
+
+		TEST_CASE("PhysicsWorld: a centre-of-mass offset moves the body's centre of mass and keeps its origin's pose")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			const BoxShapeGeometry box{ .HalfExtents = glm::vec3(0.5f) };
+			// A quarter turn about Y: the offset is in the body's axes, so its X becomes world -Z.
+			const glm::quat turn = glm::normalize(glm::quat(1.0f, 0.0f, 1.0f, 0.0f));
+			const PhysicsMassOverride lowered{ .CenterOfMassOffset = glm::vec3(0.25f, -0.375f, 0.0f) };
+			const BodyHandle body = CreateDynamic(*world, box, glm::vec3(0.0f, 10.0f, 0.0f),
+				{ .Pose = { .Rotation = turn }, .Mass = 2.0f, .GravityFactor = 0.0f, .MassOverride = lowered });
+			const BodyHandle plain = CreateDynamic(*world, box, glm::vec3(5.0f, 10.0f, 0.0f), { .Pose = { .Rotation = turn }, .Mass = 2.0f, .GravityFactor = 0.0f });
+
+			// The origin is where it was placed and the colliders around it; only the centre of mass moved.
+			const PhysicsPose pose = world->GetPose(body);
+			CHECK(pose.Position == glm::vec3(0.0f, 10.0f, 0.0f));
+			const glm::vec3 center = world->GetCenterOfMassPosition(body);
+			CHECK(center.x == doctest::Approx(0.0f).epsilon(1.0e-5));
+			CHECK(center.y == doctest::Approx(9.625f).epsilon(1.0e-5));
+			CHECK(center.z == doctest::Approx(-0.25f).epsilon(1.0e-5));
+			CHECK(world->GetCenterOfMassPosition(plain) == glm::vec3(5.0f, 10.0f, 0.0f));
+			const std::optional<Aabb> bounds = world->GetBodyBounds(body);
+			REQUIRE(bounds.has_value());
+			CHECK(bounds->Min.y == doctest::Approx(9.5f).epsilon(1.0e-4));
+			CHECK(bounds->Max.y == doctest::Approx(10.5f).epsilon(1.0e-4));
+
+			// The mass is still 2 kg, and a push at the origin turns the body about its moved centre of mass.
+			world->AddImpulse(body, glm::vec3(4.0f, 0.0f, 0.0f));
+			CHECK(world->GetLinearVelocity(body).x == doctest::Approx(2.0f));
+			world->AddForceAtPosition(body, glm::vec3(0.0f, 0.0f, 600.0f), pose.Position);
+			world->AddForceAtPosition(plain, glm::vec3(0.0f, 0.0f, 600.0f), world->GetPose(plain).Position);
+			StepWorld(*world, 1);
+			CHECK(glm::length(world->GetAngularVelocity(body)) > 1.0f);
+			CHECK(glm::length(world->GetAngularVelocity(plain)) < 1.0e-5f);
+
+			// InertiaScale: a cube's inertia is the same about every axis, so a scale of 4 about Y quarters the spin an angular
+			// impulse about Y gives it.
+			const BodyHandle unit = CreateDynamic(*world, box, glm::vec3(-5.0f, 10.0f, 0.0f), { .GravityFactor = 0.0f });
+			const BodyHandle stiff = CreateDynamic(*world, box, glm::vec3(-10.0f, 10.0f, 0.0f),
+				{ .GravityFactor = 0.0f, .MassOverride = { .InertiaScale = glm::vec3(1.0f, 4.0f, 1.0f) } });
+			world->AddAngularImpulse(unit, glm::vec3(0.0f, 0.1f, 0.0f));
+			world->AddAngularImpulse(stiff, glm::vec3(0.0f, 0.1f, 0.0f));
+			CHECK(world->GetAngularVelocity(stiff).y == doctest::Approx(world->GetAngularVelocity(unit).y * 0.25f).epsilon(1.0e-4));
+			CHECK(world->GetCenterOfMassPosition(stiff) == glm::vec3(-10.0f, 10.0f, 0.0f));
+
+			// Static and Kinematic bodies ignore it.
+			Result<BodyHandle> kinematic = world->CreateBody({ .Shape = CreateShape(box),
+				.MotionType = PhysicsMotionType::Kinematic,
+				.Pose = { .Position = glm::vec3(0.0f, 20.0f, 0.0f) },
+				.MassOverride = { .CenterOfMassOffset = glm::vec3(0.0f, -1.0f, 0.0f), .InertiaScale = glm::vec3(1000.0f) } });
+			REQUIRE(kinematic.has_value());
+			CHECK(world->GetCenterOfMassPosition(*kinematic) == glm::vec3(0.0f, 20.0f, 0.0f));
+
+			// A Dynamic body's override out of range is refused, and nothing is created.
+			const uint32_t before = world->GetStats().BodyCount;
+			const float nan = std::numeric_limits<float>::quiet_NaN();
+			for (const PhysicsMassOverride& refused : { PhysicsMassOverride{ .CenterOfMassOffset = glm::vec3(nan, 0.0f, 0.0f) },
+					 PhysicsMassOverride{ .CenterOfMassOffset = glm::vec3(0.0f, 2.0f * PhysicsShape::MaxColliderSize, 0.0f) },
+					 PhysicsMassOverride{ .InertiaScale = glm::vec3(1.0f, 0.5f * MinPhysicsInertiaScale, 1.0f) },
+					 PhysicsMassOverride{ .InertiaScale = glm::vec3(1.0f, 1.0f, 2.0f * MaxPhysicsInertiaScale) },
+					 PhysicsMassOverride{ .InertiaScale = glm::vec3(nan) } })
+			{
+				const Result<BodyHandle> created = world->CreateBody({ .Shape = CreateShape(box), .MassOverride = refused });
+				REQUIRE_FALSE(created.has_value());
+				CHECK(created.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			CHECK(world->GetStats().BodyCount == before);
+		}
+
+		TEST_CASE("PhysicsWorld: bodies without a mass override simulate bit for bit as before")
+		{
+			// The committed pile, stepped beside a body with an offset centre of mass and a scaled inertia far away: every body
+			// without an override keeps exactly what it did before M44.
+			Scope<PhysicsWorld> world = CreateWorld();
+			const std::vector<BodyHandle> boxes = BuildWorldPile(*world);
+			Result<BodyHandle> pad = world->CreateBody({ .Shape = CreateShape(BoxShapeGeometry{ .HalfExtents = glm::vec3(5.0f, 0.5f, 5.0f) }),
+				.MotionType = PhysicsMotionType::Static,
+				.Pose = { .Position = glm::vec3(500.0f, -0.5f, 500.0f) } });
+			REQUIRE(pad.has_value());
+			const BodyHandle lowered = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }, glm::vec3(500.0f, 2.0f, 500.0f),
+				{ .Pose = { .Rotation = glm::normalize(glm::quat(1.0f, 0.25f, 0.0f, 0.125f)) },
+					.MassOverride = { .CenterOfMassOffset = glm::vec3(0.0f, -0.25f, 0.0f), .InertiaScale = glm::vec3(2.0f, 1.0f, 0.5f) } });
+			StepWorld(*world, WorldPileSteps);
+			CHECK(HashBodies(*world, boxes) == CommittedWorldPileHash);
+			CHECK(world->GetPose(lowered).Position.y < 1.0f);
+
+			// An identity override written out is no override.
+			const auto drop = [](const PhysicsMassOverride& massOverride)
+			{
+				Scope<PhysicsWorld> dropWorld = CreateWorld();
+				static_cast<void>(CreateGround(*dropWorld));
+				const BodyHandle body = CreateDynamic(*dropWorld, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.25f, 0.5f, 0.125f) }, glm::vec3(0.0f, 2.0f, 0.0f),
+					{ .Pose = { .Rotation = glm::normalize(glm::quat(1.0f, 0.25f, 0.5f, 0.125f)) }, .MassOverride = massOverride });
+				StepWorld(*dropWorld, 90);
+				return HashBodies(*dropWorld, { body });
+			};
+			CHECK(drop(PhysicsMassOverride{ .CenterOfMassOffset = glm::vec3(0.0f), .InertiaScale = glm::vec3(1.0f) }) == drop({}));
+			CHECK(drop(PhysicsMassOverride{ .CenterOfMassOffset = glm::vec3(0.0f, -0.25f, 0.0f) }) != drop({}));
+		}
+
+		TEST_CASE("PhysicsWorld: a compound with a centre-of-mass offset names each collider in its contacts, its ground and its sub-shape bounds")
+		{
+			// A heavy Dynamic slab of two colliders, 21 on the left and 22 on the right, whose centre of mass is lowered: the wrapper
+			// passes sub-shape IDs through, so every reading must see the compound inside it (without that, each names 21 or none).
+			const auto makeSlab = [](PhysicsWorld& world)
+			{
+				const BoxShapeGeometry half{ .HalfExtents = glm::vec3(0.5f, 0.25f, 0.5f) };
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = {
+																				   ColliderShapeDescription{ .Geometry = half, .Position = glm::vec3(-0.5f, 0.0f, 0.0f), .UserData = 21 },
+																				   ColliderShapeDescription{ .Geometry = half, .Position = glm::vec3(0.5f, 0.0f, 0.0f), .UserData = 22 } } });
+				REQUIRE(shape.has_value());
+				Result<BodyHandle> slab = world.CreateBody({ .Shape = *shape,
+					.Pose = { .Position = glm::vec3(0.0f, 0.25f, 0.0f) },
+					.Mass = 1000.0f,
+					.MassOverride = { .CenterOfMassOffset = glm::vec3(0.0f, -0.2f, 0.0f) } });
+				REQUIRE(slab.has_value());
+				return *slab;
+			};
+
+			// Sub-shape bounds: collider 22 where its body holds it, its frame the centre of mass moved back by the offset.
+			{
+				Scope<PhysicsWorld> world = CreateWorld();
+				const BodyHandle slab = makeSlab(*world);
+				const std::optional<Aabb> right = world->GetSubShapeBounds(slab, 22);
+				REQUIRE(right.has_value());
+				CHECK(right->Min.x == doctest::Approx(0.0f).epsilon(1.0e-5));
+				CHECK(right->Min.y == doctest::Approx(0.0f).epsilon(1.0e-5));
+				CHECK(right->Max.x == doctest::Approx(1.0f).epsilon(1.0e-5));
+				CHECK(right->Max.y == doctest::Approx(0.5f).epsilon(1.0e-5));
+				const std::optional<Aabb> left = world->GetSubShapeBounds(slab, 21);
+				REQUIRE(left.has_value());
+				CHECK(left->Max.x == doctest::Approx(0.0f).epsilon(1.0e-5));
+				CHECK_FALSE(world->GetSubShapeBounds(slab, 23).has_value());
+			}
+
+			// Contacts: a box dropped on the right half touches collider 22.
+			{
+				Scope<PhysicsWorld> world = CreateWorld();
+				static_cast<void>(CreateGround(*world));
+				const BodyHandle slab = makeSlab(*world);
+				const BodyHandle box = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.1f) }, glm::vec3(0.5f, 1.0f, 0.0f));
+				StepWorld(*world, 60);
+				const std::optional<ContactEvent> added = FindContact(world->DrainContactEvents(), ContactEventKind::Added, slab, box);
+				REQUIRE(added.has_value());
+				CHECK((added->BodyA == slab ? added->ColliderA : added->ColliderB) == 22);
+				CHECK(world->GetSubShapeCollider(slab, added->BodyA == slab ? added->SubShapeA : added->SubShapeB) == 22);
+			}
+
+			// A character's ground: standing on the right half, it names collider 22.
+			{
+				Scope<PhysicsWorld> world = CreateWorld();
+				static_cast<void>(CreateGround(*world));
+				const BodyHandle slab = makeSlab(*world);
+				Result<Scope<CharacterController>> character = CharacterController::Create(*world,
+					{ .Height = 1.0f, .Radius = 0.2f, .Pose = { .Position = glm::vec3(0.5f, 0.6f, 0.0f) } });
+				REQUIRE(character.has_value());
+				for (uint32_t step = 0; step < 60; ++step)
+				{
+					(*character)->Update(FixedDelta, glm::vec3(0.0f), world->GetGravity());
+					REQUIRE(world->Step(FixedDelta, 1).has_value());
+				}
+				const CharacterGroundState ground = (*character)->GetGroundState();
+				REQUIRE(ground.IsGrounded);
+				CHECK(ground.GroundBody == slab);
+				CHECK(ground.GroundCollider == 22);
+			}
+		}
+
+		TEST_CASE("PhysicsWorld: SetShape keeps a body's mass override and tells its joints the wrapped centres of mass")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			const glm::vec3 offset(0.0f, -0.5f, 0.25f);
+			const BodyHandle body = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }, glm::vec3(0.0f, 10.0f, 0.0f),
+				{ .Mass = 2.0f, .GravityFactor = 0.0f, .MassOverride = { .CenterOfMassOffset = offset } });
+			Result<JointHandle> joint = world->CreateJoint({ .Type = PhysicsJointType::Fixed,
+				.Body = body,
+				.Frame = { .Point = glm::vec3(1.0f, 0.0f, 0.0f) },
+				.ConnectedFrame = { .Point = glm::vec3(1.0f, 10.0f, 0.0f) } });
+			REQUIRE(joint.has_value());
+			StepWorld(*world, 1);
+			const glm::vec3 before = world->GetJointState(*joint).Point;
+
+			// A compound whose own centre of mass is 1 m along X from the box's: the body's moves by that, and the joint's point
+			// stays on the body where it was.
+			Result<Ref<const PhysicsShape>> moved = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{
+																			   .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }, .Position = glm::vec3(1.0f, 0.0f, 0.0f) } } });
+			REQUIRE(moved.has_value());
+			REQUIRE(world->SetShape(body, *moved).has_value());
+			const glm::vec3 center = world->GetCenterOfMassPosition(body);
+			CHECK(center.x == doctest::Approx(1.0f).epsilon(1.0e-5));
+			CHECK(center.y == doctest::Approx(9.5f).epsilon(1.0e-5));
+			CHECK(center.z == doctest::Approx(0.25f).epsilon(1.0e-5));
+			const glm::vec3 after = world->GetJointState(*joint).Point;
+			CHECK(glm::length(after - before) < 1.0e-4f);
+			// Still 2 kg.
+			world->AddImpulse(body, glm::vec3(0.0f, 4.0f, 0.0f));
+			CHECK(world->GetLinearVelocity(body).y == doctest::Approx(2.0f));
+
+			// A shape the override cannot apply to is refused with nothing changed: the heaviest body's offset inertia overflows.
+			const BodyHandle heavy = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }, glm::vec3(20.0f, 10.0f, 0.0f),
+				{ .Mass = MaxPhysicsMass, .GravityFactor = 0.0f, .MassOverride = { .CenterOfMassOffset = glm::vec3(0.0f, 1.0e4f, 0.0f) } });
+			const Ref<const PhysicsShape> kept = world->GetShape(heavy);
+			const Status refused = world->SetShape(heavy, CreateShape(BoxShapeGeometry{ .HalfExtents = glm::vec3(5.0e4f) }));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(GetPhysicsDiagnosticCode(refused.error()) == PhysicsInvalidShapeCode);
+			CHECK(world->GetShape(heavy) == kept);
 		}
 	}
 

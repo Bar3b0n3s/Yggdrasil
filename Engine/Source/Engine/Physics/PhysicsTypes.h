@@ -15,7 +15,9 @@
 // and the world's limits, in engine types. Jolt's own types never appear in a public header (§3 rule 3); the Physics module
 // converts at its boundary (Physics/Private/). Plain value types; thread-compatible.
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 2).
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 2). M44 appends PhysicsMassOverride and its
+// inertia scale bounds (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), reviewed as a change to a frozen
+// interface.
 
 namespace Engine {
 
@@ -169,6 +171,26 @@ namespace Engine {
 		uint32_t MaxBodyPairs = DefaultMaxBodyPairs;
 		uint32_t MaxContactConstraints = DefaultMaxContactConstraints;
 		size_t TempAllocatorBytes = DefaultTempAllocatorBytes;
+	};
+
+	// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; Architecture §9.2 "Body settings"): the bounds of a
+	// PhysicsMassOverride's InertiaScale, per axis. Its CenterOfMassOffset's components are bounded by
+	// PhysicsShape::MaxColliderSize.
+	inline constexpr float MinPhysicsInertiaScale = 0.01f;
+	inline constexpr float MaxPhysicsInertiaScale = 100.0f;
+
+	// M44: what a Dynamic body's mass properties are changed by after its shape gives them (BodyDescription::MassOverride,
+	// Scene's MassPropertiesComponent). Every float finite. The default changes nothing.
+	struct PhysicsMassOverride
+	{
+		// Metres in body space (the body origin's axes), added to the shape's centre of mass; each component at most
+		// PhysicsShape::MaxColliderSize in magnitude.
+		glm::vec3 CenterOfMassOffset = glm::vec3(0.0f);
+		// Per body axis, each in [MinPhysicsInertiaScale, MaxPhysicsInertiaScale]: the body-space inertia I becomes
+		// S^1/2 I S^1/2 with S = diag(InertiaScale), which keeps it symmetric and positive definite.
+		glm::vec3 InertiaScale = glm::vec3(1.0f);
+
+		bool operator==(const PhysicsMassOverride&) const = default;
 	};
 
 	// "Static", "Kinematic" or "Dynamic".

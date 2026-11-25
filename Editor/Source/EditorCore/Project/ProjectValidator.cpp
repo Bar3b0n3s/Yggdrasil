@@ -60,9 +60,12 @@
 #include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/PhysicsComposition.h"
 #include "Engine/Scene/PhysicsJoints.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
+#include "Engine/Scene/PhysicsVehicles.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -227,6 +230,12 @@ namespace Engine {
 			// train order (ADR 0060's ledger: after M42's RENDER_REFLECTION_INVALID), an array of its own
 			// (StaticSceneryDiagnosticCodes).
 			SceneStaticMovesCode,
+			// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), appended in train order
+			// (ADR 0060's phase-8 ledger: after M43's SCENE_STATIC_MOVES), an array of its own (PhysicsMassDiagnosticCodes).
+			PhysicsMassUnusedCode,
+			// M44 (Scene/PhysicsVehicles.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), after its mass code, an array of
+			// its own (PhysicsVehicleDiagnosticCodes).
+			PhysicsVehicleInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -507,6 +516,19 @@ namespace Engine {
 				"RigidBody, a CharacterController, a BoneAttachment or an Animator whose RootMotion is Apply. It moves correctly, but rebuilds its "
 				"static cell each tick and renders without interpolation.",
 				"Move the moving entity out of the static subtree, or give it (or the root of its moving part) a Static with Scope NotStatic." },
+			ValidationCodeInfo{ PhysicsMassUnusedCode, "Warning", false,
+				"A MassProperties changes no body: its entity's RigidBody makes no Dynamic body (it is Static or Kinematic, its colliders are "
+				"triggers, or the scene creates no body for it), so its centre-of-mass offset and inertia scale are not used.",
+				"Set the RigidBody's Type to Dynamic and give the entity a solid collider, or remove the MassProperties." },
+			ValidationCodeInfo{ PhysicsVehicleInvalidCode, "Error", false,
+				"A WheeledVehicle cannot be made: its RigidBody makes no Dynamic body, it has no VehicleWheel below it or more than sixteen, a wheel "
+				"is on the vehicle's own entity or under another RigidBody or a CharacterController, a solid collider is on or below a wheel, or "
+				"its fields contradict each other (a suspension, the engine's RPM, the gears and shift points, a differential or anti-roll bar "
+				"naming a wheel that is not the vehicle's, torque shares that do not sum to 1, or a curve whose X does not increase); the "
+				"vehicle is not created and its body moves as a plain body.",
+				"Correct what the finding's Subject names: a Dynamic RigidBody with a solid chassis collider (body), a child entity with a "
+				"VehicleWheel per wheel (wheels, wheel), no collider on a wheel (collider), or the field the finding names (suspension, engine, "
+				"transmission, differential, bar, curve)." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1266,9 +1288,18 @@ namespace Engine {
 			std::vector<PhysicsDiagnostic> surfaces = ValidateSceneSurfaces(*checked.Target, *checked.Layers);
 			found.insert(found.end(), std::make_move_iterator(surfaces.begin()), std::make_move_iterator(surfaces.end()));
 			// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9): PHYSICS_JOINT_INVALID, from the joint
-			// composition over the scene's bodies, as the play session's PhysicsSystem raises it.
-			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, ComposePhysicsBodies(*checked.Target, *checked.Layers));
+			// composition over the scene's bodies, as the play session's PhysicsSystem raises it. The bodies are composed once, for
+			// the joints and (M44) the vehicles.
+			const PhysicsComposition bodies = ComposePhysicsBodies(*checked.Target, *checked.Layers);
+			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, bodies);
 			found.insert(found.end(), std::make_move_iterator(joints.Diagnostics.begin()), std::make_move_iterator(joints.Diagnostics.end()));
+			// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): PHYSICS_MASS_UNUSED.
+			std::vector<PhysicsDiagnostic> masses = ValidateSceneMassProperties(*checked.Target, *checked.Layers);
+			found.insert(found.end(), std::make_move_iterator(masses.begin()), std::make_move_iterator(masses.end()));
+			// M44 (Scene/PhysicsVehicles.h): PHYSICS_VEHICLE_INVALID, from the vehicle composition over the scene's bodies, as the
+			// play session's PhysicsSystem raises it.
+			PhysicsVehicleComposition vehicles = ComposePhysicsVehicles(*checked.Target, bodies);
+			found.insert(found.end(), std::make_move_iterator(vehicles.Diagnostics.begin()), std::make_move_iterator(vehicles.Diagnostics.end()));
 			for (const PhysicsDiagnostic& physics : found)
 			{
 				DiagnosticSite site;

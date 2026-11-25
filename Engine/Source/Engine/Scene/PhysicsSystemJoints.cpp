@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <bit>
 #include <format>
-#include <map>
 #include <utility>
 #include <vector>
 
@@ -96,18 +95,6 @@ namespace Engine {
 				.Axis = fields.Axis,
 				.ConnectedAnchor = fields.ConnectedAnchor,
 				.Chain = GetJointChain(entity, plan.Body) };
-		}
-
-		// §9.10: each joint in force solves at its entity's rank in UUID order among them (`joints` is ordered by UUID), so
-		// the solver's order does not depend on the order the joints were made in.
-		static void RankJoints(const std::map<UUID, PhysicsJointEntry>& joints, PhysicsWorld& world)
-		{
-			uint32_t rank = 0;
-			for (const auto& [id, entry] : joints)
-			{
-				if (entry.Handle.IsValid())
-					world.SetJointPriority(entry.Handle, rank++);
-			}
 		}
 
 		static void AppendJointFloat(std::vector<std::byte>& bytes, float value)
@@ -381,8 +368,10 @@ namespace Engine {
 			inForceChanged = true;
 		}
 
+		// §9.10: each joint in force solves at its entity's rank in UUID order among them, so the solver's order does not depend
+		// on the order the joints were made in (M44: the vehicles' ranks follow, PhysicsSystemVehicles.cpp).
 		if (inForceChanged)
-			Utils::RankJoints(Joints, *World);
+			RankConstraints();
 	}
 
 	void PhysicsSystem::State::SynchronizeJointsAfterRebuild(const PhysicsComposition& composition)
@@ -443,7 +432,7 @@ namespace Engine {
 			broke = true;
 		}
 		if (broke)
-			Utils::RankJoints(Joints, *World);
+			RankConstraints();
 	}
 
 	void PhysicsSystem::State::DispatchJointBreaks()

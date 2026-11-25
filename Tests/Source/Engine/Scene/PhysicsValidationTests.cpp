@@ -3,8 +3,10 @@
 #include "Engine/Scene/PhysicsValidation.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/MassPropertiesComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Scene.h"
@@ -167,6 +169,46 @@ namespace Engine {
 			CHECK(invalid[0].Field == "Mass");
 			CHECK(invalid[0].Severity == DiagnosticSeverity::Error);
 			CHECK_FALSE(invalid[0].Hint.empty());
+		}
+
+		TEST_CASE("PhysicsValidation: a Dynamic body that only its MassProperties makes too large for Jolt is reported on the MassProperties")
+		{
+			// The W44.1 review's nit 7: the heaviest body with its centre of mass as far off as the range allows has a parallel-axis
+			// inertia Jolt cannot take, though the same body without the offset is valid; the finding names the offset.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity heavy = Test::AddBoxBody(scene, "Heavy", glm::vec3(0.0f), glm::vec3(0.5f), BodyType::Dynamic);
+			Test::PatchRigidBody(heavy, [](RigidBodyComponent& body)
+			{
+				body.Mass = MaxPhysicsMass;
+			});
+			heavy.AddComponent<MassPropertiesComponent>(MassPropertiesComponent{ .CenterOfMassOffset = glm::vec3(0.0f, PhysicsShape::MaxColliderSize, 0.0f) });
+			const std::vector<PhysicsDiagnostic> invalid = WithCode(ValidateScenePhysics(scene, PhysicsLayerTable(), nullptr), PhysicsInvalidShapeCode);
+			REQUIRE(invalid.size() == 1);
+			CHECK(invalid[0].Entity == heavy.GetUUID());
+			CHECK(invalid[0].Component == "MassProperties");
+			CHECK(invalid[0].Field == "CenterOfMassOffset");
+			CHECK_FALSE(invalid[0].Hint.empty());
+		}
+
+		TEST_CASE("PhysicsValidation: a Dynamic body that only its MassProperties' InertiaScale makes too large for Jolt is reported on the InertiaScale")
+		{
+			// The W44.2 review's nit 9: the heaviest body, 40 km across, has an inertia of about 2.7e17 kg m^2, within the world's
+			// limit (1e18); scaled by 100 it is not, though its offset alone (none) passes. The finding names the scale.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity heavy = Test::AddBoxBody(scene, "Heavy", glm::vec3(0.0f), glm::vec3(20000.0f), BodyType::Dynamic);
+			Test::PatchRigidBody(heavy, [](RigidBodyComponent& body)
+			{
+				body.Mass = MaxPhysicsMass;
+			});
+			REQUIRE(WithCode(ValidateScenePhysics(scene, PhysicsLayerTable(), nullptr), PhysicsInvalidShapeCode).empty());
+			heavy.AddComponent<MassPropertiesComponent>(MassPropertiesComponent{ .InertiaScale = glm::vec3(MaxPhysicsInertiaScale) });
+			const std::vector<PhysicsDiagnostic> invalid = WithCode(ValidateScenePhysics(scene, PhysicsLayerTable(), nullptr), PhysicsInvalidShapeCode);
+			REQUIRE(invalid.size() == 1);
+			CHECK(invalid[0].Component == "MassProperties");
+			CHECK(invalid[0].Field == "InertiaScale");
+			CHECK(invalid[0].Hint.find("InertiaScale") != std::string::npos);
 		}
 
 		TEST_CASE("PhysicsValidation: mesh colliders load their meshes through the asset manager")
