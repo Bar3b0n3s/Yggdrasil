@@ -7,12 +7,14 @@
 #include "Engine/Physics/PhysicsWorld.h"
 #include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
+#include "Support/PhysicsTestScene.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <format>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -176,6 +178,166 @@ namespace Engine {
 			Walk(world, **character, glm::vec3(0.0f), 30);
 			REQUIRE((*character)->GetGroundState().IsGrounded);
 			return std::move(*character);
+		}
+
+		// M48 W48.2: the height of the top face of the box `body` (half its height `halfHeight`), extended as a plane, above
+		// (at.x, at.z) now.
+		float GetBoxTopHeight(const PhysicsWorld& world, BodyHandle body, float halfHeight, const glm::vec3& at)
+		{
+			const PhysicsPose pose = world.GetPose(body);
+			const glm::vec3 normal = pose.Rotation * glm::vec3(0.0f, 1.0f, 0.0f);
+			const glm::vec3 top = pose.Position + pose.Rotation * glm::vec3(0.0f, halfHeight, 0.0f);
+			return top.y - (normal.x * (at.x - top.x) + normal.z * (at.z - top.z)) / normal.y;
+		}
+
+		// M48 W48.2 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md, the W48.2 record; Skerries'
+		// brief S19, Ridgeback's rope bridge): thirteen 25 kg box planks 0.9 m long, 1.2 m wide and 0.1 m thick, hinged end to
+		// end along their top edges, the end planks hinged to the world at the edges of two static rims whose tops are level
+		// with the deck's ends at y 0. The deck hangs as authored: the first plank 15 degrees down, each next one 2.5 degrees
+		// less, the last 15 degrees up, an 11.6 m span that sags 1.05 m at the middle. The deck's left end is at x 0, 8 cm from
+		// its rim's edge.
+		class RopeBridge
+		{
+		public:
+			static constexpr size_t PlankCount = 13;
+			static constexpr float PlankLength = 0.9f;
+			static constexpr float PlankThickness = 0.1f;
+			static constexpr float PlankMass = 25.0f;
+			// The gap between a rim and the deck's end, so the end plank's lower edge clears the rim as it swings.
+			static constexpr float RimGap = 0.08f;
+
+			explicit RopeBridge(PhysicsWorld& world)
+				: m_World(&world)
+			{
+				const glm::vec3 axis(0.0f, 0.0f, 1.0f);
+				const glm::vec3 up(0.0f, 1.0f, 0.0f);
+				// The hinge points along the deck's top edge, from the left end at the origin.
+				std::vector<glm::vec3> points{ glm::vec3(0.0f) };
+				std::vector<glm::quat> turns;
+				for (size_t index = 0; index < PlankCount; ++index)
+				{
+					const float slope = 2.5f * (6.0f - static_cast<float>(index));
+					turns.push_back(glm::angleAxis(glm::radians(-slope), axis));
+					points.push_back(points.back() + turns.back() * glm::vec3(PlankLength, 0.0f, 0.0f));
+				}
+				m_RightEnd = points.back().x;
+				static_cast<void>(CreateBlock(world, glm::vec3(-RimGap - 2.0f, 0.0f, 0.0f), glm::vec3(2.0f, 0.5f, 1.5f)));
+				static_cast<void>(CreateBlock(world, glm::vec3(m_RightEnd + RimGap + 2.0f, points.back().y, 0.0f), glm::vec3(2.0f, 0.5f, 1.5f)));
+
+				const glm::vec3 halfExtents(0.5f * PlankLength, 0.5f * PlankThickness, 0.6f);
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = halfExtents } } } });
+				REQUIRE(shape.has_value());
+				for (size_t index = 0; index < PlankCount; ++index)
+				{
+					const glm::vec3 center = 0.5f * (points[index] + points[index + 1]) + turns[index] * glm::vec3(0.0f, -halfExtents.y, 0.0f);
+					Result<BodyHandle> plank = world.CreateBody(
+						{ .Shape = *shape, .MotionType = PhysicsMotionType::Dynamic, .Pose = { .Position = center, .Rotation = turns[index] }, .Mass = PlankMass });
+					REQUIRE_MESSAGE(plank.has_value(), plank.error().ToString());
+					m_Planks.push_back(*plank);
+				}
+				// Each hinge turns about Z through its top edge, at angle 0 as authored.
+				const glm::vec3 leftEdge(-halfExtents.x, halfExtents.y, 0.0f);
+				const glm::vec3 rightEdge(halfExtents.x, halfExtents.y, 0.0f);
+				const auto frame = [&axis, &up, &turns](size_t plank, const glm::vec3& point)
+				{
+					return PhysicsJointFrame{ .Point = point, .Axis = axis, .Normal = glm::inverse(turns[plank]) * up };
+				};
+				for (size_t index = 0; index <= PlankCount; ++index)
+				{
+					PhysicsJointDescription joint{ .Type = PhysicsJointType::Hinge, .Priority = static_cast<uint32_t>(index) };
+					if (index == 0)
+					{
+						joint.Body = m_Planks.front();
+						joint.Frame = frame(0, leftEdge);
+						joint.ConnectedFrame = PhysicsJointFrame{ .Point = points.front(), .Axis = axis, .Normal = up };
+					}
+					else if (index == PlankCount)
+					{
+						joint.Body = m_Planks.back();
+						joint.Frame = frame(PlankCount - 1, rightEdge);
+						joint.ConnectedFrame = PhysicsJointFrame{ .Point = points.back(), .Axis = axis, .Normal = up };
+					}
+					else
+					{
+						joint.Body = m_Planks[index];
+						joint.ConnectedBody = m_Planks[index - 1];
+						joint.Frame = frame(index, leftEdge);
+						joint.ConnectedFrame = frame(index - 1, rightEdge);
+					}
+					Result<JointHandle> created = world.CreateJoint(joint);
+					REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				}
+			}
+
+			// The x of the left rim's edge and of the right rim's.
+			[[nodiscard]] float GetLeftRim() const { return -RimGap; }
+			[[nodiscard]] float GetRightRim() const { return m_RightEnd + RimGap; }
+			[[nodiscard]] const std::vector<BodyHandle>& GetPlanks() const { return m_Planks; }
+
+			// The index of the plank `body` is, or nullopt.
+			[[nodiscard]] std::optional<size_t> FindPlank(BodyHandle body) const
+			{
+				const auto found = std::find(m_Planks.begin(), m_Planks.end(), body);
+				return found != m_Planks.end() ? std::optional<size_t>(static_cast<size_t>(found - m_Planks.begin())) : std::nullopt;
+			}
+
+			// The height of plank `index`'s top face, extended as a plane, above (at.x, at.z) now.
+			[[nodiscard]] float GetTopHeight(size_t index, const glm::vec3& at) const
+			{
+				return GetBoxTopHeight(*m_World, m_Planks[index], 0.5f * PlankThickness, at);
+			}
+
+			// Each plank's centre height now.
+			[[nodiscard]] std::vector<float> GetHeights() const
+			{
+				std::vector<float> heights;
+				for (const BodyHandle plank : m_Planks)
+					heights.push_back(m_World->GetPose(plank).Position.y);
+				return heights;
+			}
+		private:
+			// A documented back-reference: the world outlives the bridge (both live in one test case).
+			PhysicsWorld* m_World = nullptr;
+			std::vector<BodyHandle> m_Planks;
+			float m_RightEnd = 0.0f;
+		};
+
+		// What one crossing of a RopeBridge measured (CrossBridge).
+		struct BridgeCrossing
+		{
+			bool Reached = false;
+			uint32_t Ticks = 0;
+			// Where the character ended: on the far rim when it got there, else where the tick budget ran out.
+			glm::vec3 End = glm::vec3(0.0f);
+			// The deepest the character's base went under the top of the plank it stood on.
+			float DeepestSink = -std::numeric_limits<float>::infinity();
+			// The lowest the plank under the character sat below its unloaded height.
+			float LowestUnderfoot = std::numeric_limits<float>::infinity();
+		};
+
+		// The character walks across `bridge` at 4.2 m/s, towards +X when `forwards`, until its base is 0.5 m onto the far
+		// rim or `budget` ticks have passed.
+		BridgeCrossing CrossBridge(PhysicsWorld& world, CharacterController& character, const RopeBridge& bridge, bool forwards,
+			const std::vector<float>& unloaded, uint32_t budget)
+		{
+			const float direction = forwards ? 1.0f : -1.0f;
+			const float goal = forwards ? bridge.GetRightRim() + 0.5f : bridge.GetLeftRim() - 0.5f;
+			BridgeCrossing crossing;
+			while (crossing.Ticks < budget && (goal - character.GetPose().Position.x) * direction > 0.0f)
+			{
+				Walk(world, character, glm::vec3(4.2f * direction, 0.0f, 0.0f), 1);
+				++crossing.Ticks;
+				const CharacterGroundState ground = character.GetGroundState();
+				const std::optional<size_t> plank = ground.IsGrounded ? bridge.FindPlank(ground.GroundBody) : std::nullopt;
+				if (!plank.has_value())
+					continue;
+				const glm::vec3 base = character.GetPose().Position;
+				crossing.DeepestSink = std::max(crossing.DeepestSink, bridge.GetTopHeight(*plank, base) - base.y);
+				crossing.LowestUnderfoot = std::min(crossing.LowestUnderfoot, world.GetPose(bridge.GetPlanks()[*plank]).Position.y - unloaded[*plank]);
+			}
+			crossing.End = character.GetPose().Position;
+			crossing.Reached = (goal - crossing.End.x) * direction <= 0.0f;
+			return crossing;
 		}
 
 	}
@@ -893,9 +1055,8 @@ namespace Engine {
 			CHECK(glm::length(character->GetPose().Position - standing) < 0.01f);
 		}
 
-		// M34 decision 2: a light body cannot push the character, so a light platform driven up under it rises through it
-		// rather than lifting it.
-		TEST_CASE("CharacterController: a light Dynamic platform rising under a character passes up through it")
+		// M34's case, rewritten by decision 3: before M48 the plate rose up through the character, which it could not push.
+		TEST_CASE("CharacterController: a light Dynamic platform rising under a character lifts it on its surface and gives it none of its velocity")
 		{
 			Scope<PhysicsWorld> world = CreateCharacterWorld();
 			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
@@ -904,16 +1065,32 @@ namespace Engine {
 			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.12f, 0.0f));
 			Walk(*world, *character, glm::vec3(0.0f), 20);
 			REQUIRE(character->GetGroundState().IsGrounded);
-			// The plate is driven up at 1.5 m/s for two seconds, past the top of the 1.8 m capsule.
-			float highest = -std::numeric_limits<float>::infinity();
+			// The plate is driven up at 1.5 m/s for two seconds, then its velocity is zeroed in every tick, so it stops rising.
+			float farthest = 0.0f;
+			float fastestUp = -std::numeric_limits<float>::infinity();
 			for (uint32_t tick = 0; tick < 120; ++tick)
 			{
 				world->SetLinearVelocity(plate, glm::vec3(0.0f, 1.5f, 0.0f));
 				Walk(*world, *character, glm::vec3(0.0f), 1);
-				highest = std::max(highest, character->GetPose().Position.y);
+				const float top = world->GetPose(plate).Position.y + 0.05f;
+				farthest = std::max(farthest, std::abs(character->GetPose().Position.y - top));
+				fastestUp = std::max(fastestUp, character->GetVelocity().y);
 			}
-			CHECK(highest < 0.25f);
 			CHECK(world->GetPose(plate).Position.y > 2.0f);
+			CHECK(farthest < 0.03f);
+			CHECK(fastestUp < 0.1f);
+			CHECK(character->GetGroundState().GroundBody == plate);
+			// The character stops rising with it and stays on its top.
+			const float stopped = character->GetPose().Position.y;
+			for (uint32_t tick = 0; tick < 30; ++tick)
+			{
+				world->SetLinearVelocity(plate, glm::vec3(0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 1);
+				fastestUp = std::max(fastestUp, character->GetVelocity().y);
+			}
+			CHECK(character->GetPose().Position.y - stopped < 0.01f);
+			CHECK(std::abs(character->GetPose().Position.y - (world->GetPose(plate).Position.y + 0.05f)) < 0.03f);
+			CHECK(fastestUp < 0.1f);
 		}
 
 		// M34 decision 2: the push is CharacterVirtual's, at most Mass * 9.81 N, and the pushed body meets static geometry
@@ -1327,6 +1504,442 @@ namespace Engine {
 				CHECK(character->GetPose().Position.x < 1.75f);
 				CHECK(character->GetPose().Position.x > -4.1f);
 			}
+		}
+
+		// --- Free moves (M48 W48.1, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3) -----
+
+		// Skerries' brief S17: before M48 a script could not give a character in the air a vertical velocity, so it could not
+		// swim, climb or glide.
+		TEST_CASE("CharacterController: a free move in the air takes the whole velocity asked, and no gravity acts")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 20.0f, 0.0f));
+			// Falling first, so the free move replaces a velocity of its own.
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			REQUIRE(character->GetVelocity().y < -4.0f);
+			CHECK(character->GetLastMove() == CharacterMoveMode::Walk);
+			const glm::vec3 asked(2.0f, 3.0f, -1.0f);
+			const glm::vec3 start = character->GetPose().Position;
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				character->Update(FixedDelta, asked, Gravity, CharacterMoveMode::Free);
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				CHECK(character->GetVelocity() == asked);
+				CHECK(character->GetLastMove() == CharacterMoveMode::Free);
+			}
+			// A second at the velocity asked: no gravity bent the path.
+			CHECK(Test::ApproxEqual(character->GetPose().Position - start, asked, 1.0e-3f));
+			CHECK_FALSE(character->GetGroundState().IsGrounded);
+		}
+
+		TEST_CASE("CharacterController: a free move while grounded is a Move")
+		{
+			// Two identical worlds: one character walks, the other free-moves with the same velocities, a walk and then a
+			// jump, both on the ground. Every update of the free mover is the walker's, bit for bit.
+			Scope<PhysicsWorld> walkWorld = CreateCharacterWorld();
+			Scope<PhysicsWorld> freeWorld = CreateCharacterWorld();
+			for (PhysicsWorld* world : { walkWorld.get(), freeWorld.get() })
+			{
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				static_cast<void>(CreateBlock(*world, glm::vec3(3.0f, 0.2f, 0.0f), glm::vec3(1.0f, 0.1f, 2.0f)));
+			}
+			Scope<CharacterController> walker = CreateCharacter(*walkWorld, glm::vec3(0.0f, 0.05f, 0.0f));
+			Scope<CharacterController> mover = CreateCharacter(*freeWorld, glm::vec3(0.0f, 0.05f, 0.0f));
+			Walk(*walkWorld, *walker, glm::vec3(0.0f), 30);
+			Walk(*freeWorld, *mover, glm::vec3(0.0f), 30);
+			REQUIRE(mover->GetGroundState().IsGrounded);
+			// Up onto a 0.2 m step at 2 m/s (stairs and floor sticking as a walk has them), then a jump.
+			std::vector<glm::vec3> velocities(60, glm::vec3(2.0f, 0.0f, 0.0f));
+			velocities.push_back(glm::vec3(0.0f, 5.0f, 0.0f));
+			for (const glm::vec3& velocity : velocities)
+			{
+				walker->Update(FixedDelta, velocity, Gravity);
+				mover->Update(FixedDelta, velocity, Gravity, CharacterMoveMode::Free);
+				REQUIRE(walkWorld->Step(FixedDelta, 1).has_value());
+				REQUIRE(freeWorld->Step(FixedDelta, 1).has_value());
+				CHECK(mover->GetPose().Position == walker->GetPose().Position);
+				CHECK(mover->GetVelocity() == walker->GetVelocity());
+				CHECK(mover->GetLastMove() == CharacterMoveMode::Walk);
+			}
+			CHECK(mover->GetPose().Position.y > 0.15f);
+			CHECK(mover->GetVelocity().y == doctest::Approx(5.0f).epsilon(1.0e-3));
+			CHECK_FALSE(mover->GetGroundState().IsGrounded);
+		}
+
+		TEST_CASE("CharacterController: a free move in the air is not stuck to the floor")
+		{
+			// A character in the air that leans on a 60 degree slope (a steep contact supports it without its being grounded)
+			// and then moves off it level, with the floor 0.2 m below its feet: within StepHeight, where floor sticking pulls
+			// a character down the moment it loses its support. A free move keeps its height; a walk in the same place is
+			// stuck to the floor at once.
+			for (const CharacterMoveMode mode : { CharacterMoveMode::Free, CharacterMoveMode::Walk })
+			{
+				CAPTURE(static_cast<int>(mode));
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				// The slope's toe at x 0 on the floor, rising at 60 degrees to 1.73 m at x 1.
+				const std::vector<glm::vec3> points = { glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(0.0f, 0.0f, 2.0f), glm::vec3(1.0f, 0.0f, -2.0f),
+					glm::vec3(1.0f, 0.0f, 2.0f), glm::vec3(1.0f, 1.7320508f, -2.0f), glm::vec3(1.0f, 1.7320508f, 2.0f) };
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = ConvexHullShapeGeometry{ .Points = points } } } });
+				REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+				REQUIRE(world->CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Static }).has_value());
+				// Hovering 0.2 m above the floor, then drifting into the slope at 0.6 m/s.
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-0.2f, 0.2f, 0.0f));
+				for (uint32_t tick = 0; tick < 30; ++tick)
+				{
+					character->Update(FixedDelta, glm::vec3(0.6f, 0.0f, 0.0f), Gravity, CharacterMoveMode::Free);
+					REQUIRE(world->Step(FixedDelta, 1).has_value());
+				}
+				const float height = character->GetPose().Position.y;
+				REQUIRE(height > 0.15f);
+				REQUIRE(height < 0.3f);
+				REQUIRE_FALSE(character->GetGroundState().IsGrounded);
+				// Off the slope, level.
+				character->Update(FixedDelta, glm::vec3(-6.0f, 0.0f, 0.0f), Gravity, mode);
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				if (mode == CharacterMoveMode::Free)
+				{
+					CHECK(character->GetPose().Position.y == doctest::Approx(height).epsilon(1.0e-5));
+					CHECK_FALSE(character->GetGroundState().IsGrounded);
+					CHECK(character->GetLastMove() == CharacterMoveMode::Free);
+				}
+				else
+				{
+					CHECK(character->GetPose().Position.y < 0.05f);
+				}
+			}
+		}
+
+		TEST_CASE("CharacterController: a character free-moved toward a moving target height follows it within 1 mm")
+		{
+			// S17's swimmer held at a depth under a swell: each tick asks for the vertical velocity that reaches the target
+			// height of the next tick, while it swims 20 m along X.
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			Scope<CharacterController> swimmer = CreateCharacter(*world, glm::vec3(0.0f, 10.0f, 0.0f));
+			const auto target = [](uint32_t tick)
+			{
+				const double seconds = static_cast<double>(tick) * static_cast<double>(FixedDelta);
+				return static_cast<float>(10.0 + 0.5 * std::sin(seconds * 1.5));
+			};
+			float worst = 0.0f;
+			for (uint32_t tick = 0; tick < 600; ++tick)
+			{
+				const float vertical = (target(tick + 1) - swimmer->GetPose().Position.y) / FixedDelta;
+				swimmer->Update(FixedDelta, glm::vec3(2.0f, vertical, 0.0f), Gravity, CharacterMoveMode::Free);
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				worst = std::max(worst, std::abs(swimmer->GetPose().Position.y - target(tick + 1)));
+			}
+			CHECK(worst < 1.0e-3f);
+			CHECK(swimmer->GetPose().Position.x == doctest::Approx(20.0f).epsilon(1.0e-3));
+		}
+
+		TEST_CASE("CharacterController: a climber free-moved along a wall rises along it and steps off at the top onto the floor")
+		{
+			// S17's ladder: a 6 m wall whose face is at x 1 and whose top is the floor of a platform. The climber presses into
+			// it and rises at 2 m/s with free moves, then walks off forwards at the top and lands on the platform.
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			static_cast<void>(CreateBlock(*world, glm::vec3(3.0f, 6.0f, 0.0f), glm::vec3(2.0f, 3.0f, 2.0f)));
+			Scope<CharacterController> climber = CreateCharacter(*world, glm::vec3(0.68f, 0.05f, 0.0f));
+			Walk(*world, *climber, glm::vec3(0.0f), 30);
+			REQUIRE(climber->GetGroundState().IsGrounded);
+			float nearest = -std::numeric_limits<float>::infinity();
+			float farthest = std::numeric_limits<float>::infinity();
+			bool climbedFree = true;
+			bool atTop = false;
+			uint32_t ticks = 0;
+			for (; ticks < 300; ++ticks)
+			{
+				const glm::vec3 base = climber->GetPose().Position;
+				// Up until the feet are above the top, then forwards until it stands on the platform.
+				atTop = atTop || base.y > 6.05f;
+				if (atTop && base.x > 1.5f && climber->GetGroundState().IsGrounded)
+					break;
+				if (!atTop)
+				{
+					climber->Update(FixedDelta, glm::vec3(0.5f, 2.0f, 0.0f), Gravity, CharacterMoveMode::Free);
+					// After the first update, which leaves the floor as a jump does, the climb is a free move.
+					climbedFree = climbedFree && (ticks == 0 || climber->GetLastMove() == CharacterMoveMode::Free);
+					// Along the wall's face, below its top edge.
+					if (climber->GetPose().Position.y < 5.5f)
+					{
+						nearest = std::max(nearest, climber->GetPose().Position.x);
+						farthest = std::min(farthest, climber->GetPose().Position.x);
+					}
+				}
+				else
+				{
+					climber->Update(FixedDelta, glm::vec3(2.0f, 0.0f, 0.0f), Gravity);
+				}
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+			}
+			// Six metres at 2 m/s, then a short walk: well within five seconds.
+			CHECK(ticks < 300);
+			CHECK(climbedFree);
+			// Pressed against the wall all the way up, never into it.
+			CHECK(nearest < 1.0f - 0.3f);
+			CHECK(farthest > 1.0f - 0.35f);
+			CHECK(climber->GetGroundState().IsGrounded);
+			CHECK(climber->GetPose().Position.y == doctest::Approx(6.0f).epsilon(0.01));
+			CHECK(climber->GetLastMove() == CharacterMoveMode::Walk);
+		}
+
+		TEST_CASE("CharacterController: a Move in the air after a free move continues from its velocity plus gravity")
+		{
+			// A swimmer surging out of the water keeps rising briefly once it moves as a walker again.
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 10.0f, 0.0f));
+			character->Update(FixedDelta, glm::vec3(1.0f, 3.0f, 0.0f), Gravity, CharacterMoveMode::Free);
+			REQUIRE(world->Step(FixedDelta, 1).has_value());
+			REQUIRE(character->GetVelocity() == glm::vec3(1.0f, 3.0f, 0.0f));
+			// The walk's own vertical part is ignored in the air, as ever; its horizontal part steers.
+			const float before = character->GetPose().Position.y;
+			character->Update(FixedDelta, glm::vec3(0.0f, 50.0f, 0.0f), Gravity);
+			REQUIRE(world->Step(FixedDelta, 1).has_value());
+			CHECK(character->GetLastMove() == CharacterMoveMode::Walk);
+			CHECK(character->GetVelocity().y == doctest::Approx(3.0f + Gravity.y * FixedDelta).epsilon(1.0e-5));
+			CHECK(character->GetVelocity().x == doctest::Approx(0.0f));
+			CHECK(character->GetPose().Position.y - before == doctest::Approx((3.0f + Gravity.y * FixedDelta) * FixedDelta).epsilon(1.0e-3));
+			// It rises to v^2 / 2g above, then falls.
+			float apex = character->GetPose().Position.y;
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				Walk(*world, *character, glm::vec3(0.0f), 1);
+				apex = std::max(apex, character->GetPose().Position.y);
+			}
+			CHECK(apex - before > 0.4f);
+			CHECK(apex - before < 0.5f);
+			CHECK(character->GetVelocity().y < 0.0f);
+		}
+
+		// --- Light bodies that support (M48 W48.2, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md
+		// decisions 3 and 4) ------------------------------------------------------------------------------------------------
+
+		// Skerries' brief S19. Before M48 the first crossing of a light deck left it swinging; at each joint where the deck
+		// climbs, the next plank's top was a wall to the character's slide until it stood on it, and while it was held there
+		// the planks rose into it (a light body could not push it), so it sank up to 0.22 m into the deck and stalled for good
+		// on the third crossing. A clean walk of a crossing takes about 187 ticks; the bound of 200 holds only while the next
+		// plank of a light deck is walked onto as ground is (decision 4).
+		TEST_CASE("CharacterController: a character crosses a bridge of thirteen hinged 25 kg planks four times, each onto the far rim, and never sinks into a plank")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			const RopeBridge bridge(*world);
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-1.0f, 0.05f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 120);
+			REQUIRE(character->GetGroundState().IsGrounded);
+			const std::vector<float> unloaded = bridge.GetHeights();
+			for (uint32_t index = 0; index < 4; ++index)
+			{
+				CAPTURE(index);
+				const BridgeCrossing crossing = CrossBridge(*world, *character, bridge, index % 2 == 0, unloaded, 200);
+				CAPTURE(crossing.End.x);
+				CAPTURE(crossing.End.y);
+				CHECK(crossing.Reached);
+				CHECK(crossing.DeepestSink < 0.03f);
+				// The deck still gives: the plank underfoot sat at least 3 cm below where it hung unloaded.
+				CHECK(crossing.LowestUnderfoot < -0.03f);
+			}
+		}
+
+		// A plank hinged to the world at one end and driven up about the hinge by its motor lifts a character standing near
+		// its free end along its surface; the character's velocity never takes the plank's, so it is not thrown when the
+		// plank stops.
+		TEST_CASE("CharacterController: a character on a light Dynamic plank that swings up under it rides its surface and keeps none of its velocity")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A 25 kg plank 4 m long, its top at y 0, hinged about Z at its left end (x 0); a block under its free end holds it
+			// level until the motor lifts it.
+			static_cast<void>(CreateBlock(*world, glm::vec3(3.5f, -0.1f, 0.0f), glm::vec3(0.5f, 0.45f, 1.0f)));
+			const BodyHandle plank = CreateCrate(*world, glm::vec3(2.0f, -0.1f, 0.0f), glm::vec3(2.0f, 0.05f, 0.75f), 25.0f);
+			PhysicsJointDescription hinge{ .Type = PhysicsJointType::Hinge,
+				.Body = plank,
+				.Frame = { .Point = glm::vec3(-2.0f, 0.05f, 0.0f), .Axis = glm::vec3(0.0f, 0.0f, 1.0f) },
+				.ConnectedFrame = { .Point = glm::vec3(0.0f), .Axis = glm::vec3(0.0f, 0.0f, 1.0f) } };
+			Result<JointHandle> joint = world->CreateJoint(hinge);
+			REQUIRE_MESSAGE(joint.has_value(), joint.error().ToString());
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(3.0f, 0.05f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			REQUIRE(character->GetGroundState().IsGrounded);
+			REQUIRE(character->GetGroundState().GroundBody == plank);
+			const float start = character->GetPose().Position.y;
+
+			// Up at 0.5 rad/s for half a second (the free end rises at about 1.5 m/s under the character), then held.
+			PhysicsJointSettings settings{ .Motor = PhysicsJointMotor::Velocity, .MotorTargetVelocity = 0.5f, .MotorMaxForce = 1.0e5f };
+			REQUIRE(world->SetJointSettings(*joint, settings).has_value());
+			float deepest = -std::numeric_limits<float>::infinity();
+			float fastestUp = -std::numeric_limits<float>::infinity();
+			float fastestPlank = 0.0f;
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				if (tick == 30)
+				{
+					settings.MotorTargetVelocity = 0.0f;
+					REQUIRE(world->SetJointSettings(*joint, settings).has_value());
+				}
+				Walk(*world, *character, glm::vec3(0.0f), 1);
+				const glm::vec3 base = character->GetPose().Position;
+				deepest = std::max(deepest, GetBoxTopHeight(*world, plank, 0.05f, base) - base.y);
+				fastestUp = std::max(fastestUp, character->GetVelocity().y);
+				fastestPlank = std::max(fastestPlank, world->GetLinearVelocity(plank).y);
+				CHECK(character->GetGroundState().IsGrounded);
+			}
+			REQUIRE(fastestPlank > 0.5f);
+			// Lifted with the plank's top, never into it, at no velocity of its own.
+			CHECK(character->GetPose().Position.y - start > 0.5f);
+			CHECK(deepest < 0.03f);
+			CHECK(fastestUp < 0.1f);
+			// Once the plank holds, the character stands on it where it was lifted to.
+			const float held = character->GetPose().Position.y;
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			CHECK(std::abs(character->GetPose().Position.y - held) < 0.05f);
+			CHECK(character->GetGroundState().GroundBody == plank);
+		}
+
+		// Decision 3's per-face rule: a light body supports a character standing on it only through its walkable surface (the
+		// contacts whose normal is within MaxSlopeAngle); its steep faces, and every other light body, never push it. A light
+		// trough, a floor with a wall at its left end, 30 kg in all, carries a character on its floor.
+		TEST_CASE("CharacterController: only the walkable surface of the light body a character stands on supports it, and no light body pushes it sideways")
+		{
+			const auto standOnTrough = [](PhysicsWorld& world)
+			{
+				static_cast<void>(CreateBlock(world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				const BodyShapeDescription troughShape{ .Colliders = {
+															ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(1.5f, 0.05f, 1.0f) },
+																.Position = glm::vec3(0.0f, 0.05f, 0.0f) },
+															ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(0.1f, 0.5f, 1.0f) },
+																.Position = glm::vec3(-1.4f, 0.5f, 0.0f) } } };
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create(troughShape);
+				REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+				Result<BodyHandle> trough = world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Dynamic, .Mass = 30.0f, .Friction = 0.0f });
+				REQUIRE_MESSAGE(trough.has_value(), trough.error().ToString());
+				return *trough;
+			};
+
+			// The trough slides along +X at 1 m/s: its floor slides away under the character, which it does not carry, and its
+			// wall (1 m to the left of the capsule) comes into the character after a second.
+			{
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				const BodyHandle trough = standOnTrough(*world);
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.12f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().IsGrounded);
+				REQUIRE(character->GetGroundState().GroundBody == trough);
+				const glm::vec3 standing = character->GetPose().Position;
+				for (uint32_t tick = 0; tick < 75; ++tick)
+				{
+					world->SetLinearVelocity(trough, glm::vec3(1.0f, 0.0f, 0.0f));
+					Walk(*world, *character, glm::vec3(0.0f), 1);
+				}
+				// The wall's face (at the trough's x less 1.3 m) went more than 0.1 m into the capsule rather than shove it, and the
+				// floor still holds the character up.
+				REQUIRE(world->GetPose(trough).Position.x > 1.1f);
+				CHECK(std::abs(character->GetPose().Position.x - standing.x) < 0.01f);
+				CHECK(std::abs(character->GetPose().Position.z - standing.z) < 0.01f);
+				CHECK(std::abs(character->GetPose().Position.y - standing.y) < 0.01f);
+				CHECK(character->GetGroundState().IsGrounded);
+			}
+
+			// A light crate thrown at a character standing on the light trough is stopped by its push and never pushes it.
+			{
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				const BodyHandle trough = standOnTrough(*world);
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.12f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().GroundBody == trough);
+				const glm::vec3 standing = character->GetPose().Position;
+				const BodyHandle crate = CreateCrate(*world, standing + glm::vec3(2.0f, 0.7f, 0.0f), glm::vec3(0.1f), 0.35f);
+				world->SetLinearVelocity(crate, glm::vec3(-6.0f, 0.0f, 0.0f));
+				float nearest = std::numeric_limits<float>::infinity();
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					Walk(*world, *character, glm::vec3(0.0f), 1);
+					nearest = std::min(nearest, world->GetPose(crate).Position.x);
+				}
+				REQUIRE(nearest < standing.x + 0.6f);
+				CHECK(glm::length(glm::vec2(character->GetPose().Position.x - standing.x, character->GetPose().Position.z - standing.z)) < 0.01f);
+			}
+
+			// The W48.2 review's finding 3 (a): from a light ground, only another light body's walkable face is walked onto. A
+			// 0.35 kg box 0.25 m high, held by a static stop, is a wall to a character walking into it from the light trough's
+			// floor: the box's top edge meets the capsule with a steep normal, so the character never slides up onto it.
+			{
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				const BodyHandle trough = standOnTrough(*world);
+				static_cast<void>(CreateBlock(*world, glm::vec3(1.55f, 0.6f, 0.0f), glm::vec3(0.05f, 0.3f, 0.5f)));
+				static_cast<void>(CreateCrate(*world, glm::vec3(1.25f, 0.1f, 0.0f), glm::vec3(0.25f, 0.125f, 0.4f), 0.35f));
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.12f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().GroundBody == trough);
+				const float floor = character->GetPose().Position.y;
+				float highest = -std::numeric_limits<float>::infinity();
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					world->SetLinearVelocity(trough, glm::vec3(0.0f));
+					Walk(*world, *character, glm::vec3(2.0f, 0.0f, 0.0f), 1);
+					highest = std::max(highest, character->GetPose().Position.y);
+				}
+				REQUIRE(character->GetPose().Position.x > 0.5f);
+				CHECK(highest - floor < 0.05f);
+			}
+
+			// The W48.2 review's finding 3 (b): only the light body the character stands on supports it. A 2 kg board 6 cm thick
+			// is driven along X at 1 m/s under the feet of a character standing on the static floor, which stays its ground
+			// (the earlier body of two equally flat ones). The board's top meets the capsule with a straight-up walkable normal
+			// (no wall to the slide), and still neither lifts nor carries the character: it passes into the capsule.
+			{
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				const BodyHandle board = CreateCrate(*world, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.4f, 0.03f, 0.5f), 2.0f);
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().IsGrounded);
+				const glm::vec3 standing = character->GetPose().Position;
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					world->SetLinearVelocity(board, glm::vec3(1.0f, 0.0f, 0.0f));
+					Walk(*world, *character, glm::vec3(0.0f), 1);
+				}
+				// The board lies under the character's base.
+				REQUIRE(std::abs(world->GetPose(board).Position.x) < 0.3f);
+				CHECK(character->GetPose().Position.y - standing.y < 0.01f);
+				CHECK(glm::length(glm::vec2(character->GetPose().Position.x - standing.x, character->GetPose().Position.z - standing.z)) < 0.01f);
+			}
+		}
+
+		// The bridge's simulation, the character's support on the light deck included, is the same whatever Jolt's thread count
+		// (§9.1).
+		TEST_CASE("CharacterController: four bridge crossings end at one pose at Jolt thread counts 0, 1 and 8")
+		{
+			const auto run = [](uint32_t threads)
+			{
+				const Test::ScopedWorkerThreadCount scoped(threads);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				const RopeBridge bridge(*world);
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-1.0f, 0.05f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 120);
+				const std::vector<float> unloaded = bridge.GetHeights();
+				for (uint32_t index = 0; index < 4; ++index)
+					static_cast<void>(CrossBridge(*world, *character, bridge, index % 2 == 0, unloaded, 200));
+				std::vector<PhysicsPose> poses{ character->GetPose() };
+				for (const BodyHandle plank : bridge.GetPlanks())
+					poses.push_back(world->GetPose(plank));
+				return poses;
+			};
+			const std::vector<PhysicsPose> none = run(0);
+			const std::vector<PhysicsPose> one = run(1);
+			const std::vector<PhysicsPose> eight = run(8);
+			REQUIRE(none.size() == RopeBridge::PlankCount + 1);
+			for (size_t index = 0; index < none.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(one[index].Position == none[index].Position);
+				CHECK(one[index].Rotation == none[index].Rotation);
+				CHECK(eight[index].Position == none[index].Position);
+				CHECK(eight[index].Rotation == none[index].Rotation);
+			}
+			// It crossed: four crossings end back on the left rim.
+			CHECK(none.front().Position.x < -0.5f);
 		}
 	}
 

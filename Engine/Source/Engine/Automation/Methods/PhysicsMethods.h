@@ -87,6 +87,10 @@ namespace Engine {
 		// Buoyancy, {water, submergedVolume, totalVolume} (PhysicsBodyReport::Buoyancy, water as {id, name, path} or null);
 		// null for any other body.
 		VariantValue Buoyancy{};
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): how a character's last
+		// update moved it (PhysicsCharacterState::LastMove), "Walk" or "Free" (a free move, made while the character was not
+		// grounded as the update began); empty for other bodies.
+		std::string LastMove{};
 		uint32_t Tick = 0; // the session's tick when read
 	};
 

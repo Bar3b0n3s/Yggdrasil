@@ -18,17 +18,22 @@
 // body receive collision events with the same sorting and exit rules as bodies (§9.4).
 //
 // Characters and Dynamic bodies (M34, Docs/Decisions/0049-m34-characters-input.md decisions 1 to 3, World Tree's brief
-// 11). The inner body's object layer has the Character kind (PhysicsLayers.h), so the solver never resolves a contact
-// between it and another body but a sensor: placed rather than swept, it would push a Dynamic body with infinite mass. A
-// character pushes Dynamic bodies only through CharacterVirtual's own contacts, with at most Mass * 9.81 N, and a Dynamic
-// body lighter than its Mass never moves it: it cannot push the character or carry it up a surface of its own (but the
-// one the character stands on, which it walks across), gives it none of its velocity as its ground (so standing on one
-// never launches it), is never a stair (the character pushes it along instead of climbing it) and carries at most its own
-// weight from the character. Characters still block each other through their inner bodies. What that leaves (§9.6,
-// Docs/Backlog.md §6): a light body moving into a character is stopped by the character's push, and passes into the
-// capsule only when it outruns the character's look-ahead within one tick or is driven harder than the push; a light
-// platform never lifts or carries a character; a heavy body shoves the character, and overlaps it only when it is pinned
-// or under the body.
+// 11; M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decisions 3 and 4, Skerries' brief
+// S19). The inner body's object layer has the Character kind (PhysicsLayers.h), so the solver never resolves a contact
+// between it and another body but a sensor: placed rather than swept, it would push a Dynamic body with infinite mass.
+// A character pushes Dynamic bodies only through CharacterVirtual's own contacts, with at most Mass * 9.81 N. A Dynamic
+// body lighter than its Mass supports the character standing on it: the walkable surface of the character's ground
+// holds it on top, lifting it as the body rises and pushing an overlap out within the update, a displacement that never
+// becomes the character's velocity. Otherwise such a body never moves the character: it cannot push it (its steep faces
+// included) or carry it up a surface of its own (but the one the character stands on, which it walks across, and, while
+// the character stands on a light body, another light body's walkable surface, which it walks onto), gives it none of
+// its velocity as its ground (so standing on one never launches or carries it), is never a stair (the character pushes
+// it along instead of climbing it) and carries at most its own weight from the character. Characters still block each
+// other through their inner bodies. What that leaves (§9.6, Docs/Backlog.md §6): a light body moving into a character
+// is stopped by the character's push, and passes into the capsule only when it outruns the character's look-ahead
+// within one tick or is driven harder than the push; a light body that is not yet the character's ground (one it steps
+// onto, or one rising into it from below while it stands elsewhere) passes into the capsule until an update stands on
+// it; a heavy body shoves the character, and overlaps it only when it is pinned or under the body.
 //
 // ECS-agnostic, like PhysicsWorld; Scene/PhysicsSystem owns one per CharacterControllerComponent and drives it from
 // PreStep. Main thread only. Determinism: the same calls in the same order give the same results; the inner body is
@@ -52,9 +57,17 @@
 // update, the body's push this step would leave it more than CharacterSqueezeTolerance inside the character's padded
 // capsule (GetSqueeze). The engine makes no escape and deals no damage: the game decides.
 //
+// Free moves (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3; Skerries' brief
+// S17). An Update in CharacterMoveMode::Free gives a character in the air the whole desired velocity, its vertical part
+// included, with no gravity and no floor sticking, so a script swims, climbs, glides or holds a ledge by asking for it
+// every fixed step; on the ground it is a Walk update, so a swimmer reaching the bottom stands and a climber steps off
+// at the top.
+//
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8); M34 changes what it documents of Mass,
 // Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1); M36 adds the ground's body,
-// collider and surface velocity and the squeeze, reviewed as such a change too (ADR 0053 decisions 4 and 12).
+// collider and surface velocity and the squeeze, reviewed as such a change too (ADR 0053 decisions 4 and 12); M48 adds
+// CharacterMoveMode, Update's mode and GetLastMove and changes what it documents of light bodies, reviewed as such a
+// change too (ADR 0066 decisions 3 and 4 and its W48.1 record).
 
 namespace Engine {
 
@@ -72,6 +85,14 @@ namespace Engine {
 	// millimetre).
 	inline constexpr float CharacterSqueezeTolerance = 0.01f;
 
+	// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): how an Update moves the
+	// character (see Update).
+	enum class CharacterMoveMode : uint8_t
+	{
+		Walk, // every update before M48: in the air the desired vertical part is ignored and gravity acts
+		Free  // a free move: in the air the whole desired velocity, with no gravity and no floor sticking; Walk on the ground
+	};
+
 	// What a controller is created with (CharacterControllerComponent, §5.3). Every float finite.
 	struct CharacterControllerDescription
 	{
@@ -84,9 +105,9 @@ namespace Engine {
 		// The highest step climbed without jumping (ExtendedUpdate's walk-stairs step up), metres >= 0.
 		float StepHeight = 0.3f;
 		// Kilograms in (0, MaxPhysicsMass]: how hard the character pushes Dynamic bodies (at most Mass * 9.81 N, M34), which
-		// Dynamic bodies are light for it (a mass below Mass: they never move the character, see the file comment), and the
-		// weight it puts on a Dynamic body it stands on (at most that body's own weight, and capped per update so no body's
-		// velocity can overflow, see Update).
+		// Dynamic bodies are light for it (a mass below Mass: they support the character standing on them, M48, and never
+		// push, launch or carry it, see the file comment), and the weight it puts on a Dynamic body it stands on (at most that
+		// body's own weight, and capped per update so no body's velocity can overflow, see Update).
 		float Mass = 70.0f;
 		// The project layer of the character and its inner body (< the world's layer count).
 		uint32_t Layer = 0;
@@ -170,7 +191,8 @@ namespace Engine {
 		// InheritGroundVelocity says, so a conveyor belt carries the character; that velocity is clamped to MaxCharacterSpeed.
 		// "Grounded" is Jolt's OnGround while the character does not move away from the ground faster than 0.1 m/s (else
 		// the step after a jump would cancel it); the ground's velocity is none when the ground is a Dynamic body lighter than
-		// the character (M34). Then ExtendedUpdate with stick-to-floor (down to StepHeight) and ExtendedUpdate's walk-stairs
+		// the character (M34), whose walkable surface holds the character on top through its contacts instead (M48, see the
+		// file comment). Then ExtendedUpdate with stick-to-floor (down to StepHeight) and ExtendedUpdate's walk-stairs
 		// step (up to StepHeight), never onto a Dynamic body lighter than the character, over `deltaTime` seconds, which
 		// moves the character and its inner body and records its contacts; its body filter ignores the inner body and every
 		// body of the character's CollisionGroup. The weight the update puts on a Dynamic body the character stands on
@@ -179,7 +201,13 @@ namespace Engine {
 		// beyond MaxPhysicsCoordinate leaves it where it was with no velocity (a warning is logged once per controller), so
 		// the character always stays where the world places bodies. `deltaTime` > 0 and every vector finite (asserted;
 		// Scene/PhysicsSystem validates script input first).
-		void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity);
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): `mode` Walk is all of the
+		// above. A Free update that is not grounded (as above) is a free move: the step's velocity is the whole of
+		// `desiredVelocity`, its vertical part included, clamped to MaxCharacterSpeed, with no gravity and with stick-to-floor
+		// off for the update; the walk-stairs step stays. The velocity is then the one asked for, so a Walk update in the air
+		// after it continues from it plus gravity. A grounded Free update is exactly a Walk one (an upward part leaves the
+		// ground as a jump does).
+		void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity, CharacterMoveMode mode = CharacterMoveMode::Walk);
 
 		// The character's base position and rotation.
 		[[nodiscard]] PhysicsPose GetPose() const;
@@ -203,6 +231,11 @@ namespace Engine {
 		// character's capsule against the pushing bodies alone, only in an update that met one. A teleport keeps the last
 		// update's value.
 		[[nodiscard]] CharacterSqueeze GetSqueeze() const;
+		// M48: how the last Update moved the character: Free for a free move (a Free update while the character was not
+		// grounded as the update began: on walkable ground and not leaving it faster than 0.1 m/s, see Update), Walk otherwise;
+		// Walk before the first update. GetGroundState is the ground after the update, so the update in which a free mover
+		// lands reads Free beside a grounded state. A teleport keeps it.
+		[[nodiscard]] CharacterMoveMode GetLastMove() const;
 		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see; its object layer has the Character kind
 		// (M34), so no other body meets it in the solver.
 		[[nodiscard]] BodyHandle GetInnerBody() const;

@@ -691,6 +691,16 @@
 			]
 		},
 		{
+			"File": "CharacterMoves.jsonl",
+			"IdSeed": 4501,
+			"Renderer": "none"
+		},
+		{
+			"File": "CharacterMovesReplay.jsonl",
+			"IdSeed": 4502,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

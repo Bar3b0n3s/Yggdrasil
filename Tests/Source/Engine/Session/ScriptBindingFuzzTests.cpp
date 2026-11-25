@@ -98,6 +98,7 @@ namespace Engine {
 			AddFuzzFamily(cases, "Physics.SampleWater", "Physics.SampleWater(vector.zero, @)", invalidTimes, finiteTimes);
 			AddFuzzFamily(cases, "Water:SampleHeight", "water:SampleHeight(@)", invalidVectors, finiteVectors);
 			AddFuzzFamily(cases, "Water:IsUnderwater", "water:IsUnderwater(vector.zero, @)", invalidTimes, finiteTimes);
+			AddFuzzFamily(cases, "CharacterController:MoveFree", "character:MoveFree(@)", invalidVectors, finiteVectors);
 			AddFuzzFamily(cases, "Time.SetTimeScale", "Time.SetTimeScale(@); assert(Time.GetTimeScale() == @)", invalidNumbers, durations);
 			AddFuzzFamily(cases, "Task.Delay", "local task = Task.Delay(@, function() end); Task.Cancel(task)", invalidNumbers, durations);
 			AddFuzzFamily(cases, "Input.IsGamepadConnected", "Input.IsGamepadConnected(@)", invalidNumbers, durations);

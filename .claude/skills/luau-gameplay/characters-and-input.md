@@ -1,14 +1,60 @@
 # Characters, Dynamic bodies and input
 
-A reference page of the `luau-gameplay` skill (`skills/luau-gameplay`): how a `CharacterController` meets Dynamic bodies (M34, World Tree's brief 11), what it stands on and the surfaces that carry it, Kinematic bodies that push it and the squeeze (`IsSqueezed`, `GetSqueezingBody`) (M36, World Tree's briefs 15 and 16), triggers as buttons and aiming in the fixed step (World Tree's brief 10). The signatures are in `reference/ScriptAPI` (sections `CharacterController`, `Physics`, `Camera` and `Input`); the rules are Architecture §9.2's, §9.6's and §4.3's.
+A reference page of the `luau-gameplay` skill (`skills/luau-gameplay`): how a `CharacterController` meets Dynamic bodies (M34, World Tree's brief 11; M48's light bodies that support it, Skerries' brief S19), swimming, climbing and gliding with free moves (M48, Skerries' brief S17), what it stands on and the surfaces that carry it, Kinematic bodies that push it and the squeeze (`IsSqueezed`, `GetSqueezingBody`) (M36, World Tree's briefs 15 and 16), triggers as buttons and aiming in the fixed step (World Tree's brief 10). The signatures are in `reference/ScriptAPI` (sections `CharacterController`, `Physics`, `Camera` and `Input`); the rules are Architecture §9.2's, §9.6's and §4.3's.
 
 ## Characters and Dynamic bodies
 
 - **A character pushes, it is not a wall.** A character pushes the Dynamic bodies its move runs into with at most `Mass` × 9.81 N (the force of its weight; there is no separate push-strength field), so an 80 kg character kicks 0.35 kg debris aside at about its own speed and leans into a heavy crate. Its inner body, the kinematic capsule that raycasts, overlaps and triggers see, never takes part in the solver's contacts, so what stops a Dynamic body moving into a character is the character's own push: a light body thrown at a standing character is stopped by it, but passes into the capsule when it outruns the character's look-ahead (0.1 m) within one tick or something drives it harder than the push, and a body heavier than the character shoves it aside, overlapping it only when the character is pinned against a wall or under the body. A projectile that must hit a character is a trigger or a cast (`Physics.SphereCast`, `Physics.Raycast`), which see the inner body.
-- **Light bodies never move a character.** A Dynamic body whose mass is below the character's `Mass` cannot push it or carry it up its own slopes and edges (a character already standing on one walks across it, up a tilted plank too), gives it none of its velocity when the character stands on it (so a shard under the character's feet never launches it, and a light platform never lifts or carries a character: make a moving platform Kinematic, or heavier than its riders), is never a stair (the character pushes a light box below its `StepHeight` instead of climbing it) and carries at most its own weight from the character, so it is never driven through the floor. A Dynamic body at least as heavy as the character pushes it, carries the character standing on it (up and down, and along with `InheritGroundVelocity`), is climbed like a step and takes the character's full weight.
+- **Light bodies hold a character up, and never move it otherwise.** A Dynamic body whose mass is below the character's `Mass` supports a character standing on it (M48): its walkable surface holds the character on top, so a rope bridge, a raft or a jetty of light planks holds it up, rising and sinking with the deck without the character sinking into it, and the deck still gives under it. It gives the character none of its velocity (so a shard under its feet never launches it, and a light platform lifts but never carries a character along: make a moving platform Kinematic, or heavier than its riders, for that), cannot push it with its steep faces or when it is not what the character stands on, does not carry it up its own slopes and edges from the floor (a character already on a light body walks across it, up a tilted plank too, and onto the next light plank of a bridge), is never a stair (the character pushes a light box below its `StepHeight` instead of climbing it) and carries at most its own weight from the character, so it is never driven through the floor. A light body the character steps onto passes into the capsule until the next update stands on it, which then lifts it onto the top. A Dynamic body at least as heavy as the character pushes it, carries the character standing on it (up and down, and along with `InheritGroundVelocity`), is climbed like a step and takes the character's full weight.
 - **Tune it with `Mass`.** `Mass` decides both how hard the character pushes and which bodies are light for it: raise it for a character that should shoulder through heavier props, lower it for one that should climb crates rather than push them. Debris that a character must walk through without climbing stays below the character's mass.
 - **Collision events** between a character and a Dynamic body come from the character's own contacts: `OnCollisionEnter` reaches both when the character's move runs into the body or it stands on it.
 - **Layers.** Put debris on a layer of its own and the characters' layer–debris pair in the collision matrix (`Physics.Collisions`); the pushing above needs the pair, and a character on a layer that does not collide with the debris walks through it untouched.
+
+## Off the ground: swimming, climbing and gliding
+
+- **`CharacterController:MoveFree(velocity)`** (M48) is `Move` for a character off the ground: in the air the next fixed update takes the whole velocity, its vertical part included, with no gravity and no floor sticking; while the character is grounded as the update begins (on walkable ground and not leaving it faster than 0.1 m/s) it is exactly `Move`, so a swimmer that reaches the bottom stands, and an upward part leaves the ground as a jump does. `IsGrounded()` reads the ground after the last update, so in the update in which a free mover lands, or the one after a jump, it can differ from what decides the next `MoveFree`; `physics.bodyInfo`'s `lastMove` says which the last update was. Call it in every `OnFixedUpdate` you want it, as `Move`: the last `Move` or `MoveFree` of a tick wins, also in a tick whose field write (`Height`, `Radius`) creates the character again, and a character that stops calling it in the air falls from its last velocity, which a `Move` continues with gravity (a swimmer surging out of the water keeps rising briefly). A new character (at the scene's start, a spawn, or a `Height` or `Radius` write that creates it again) is not grounded in its first update, so a `MoveFree` there is free even on the floor, and a ledge hold keeps it where it was created. A climber that holds while it is not grounded starts off its ladder, or calls `Move` in its first tick.
+- **Swim:** the target height is the surface less the depth to hold; ask for the vertical velocity that reaches it in one step, `(target - y) / dt`, clamped, with the horizontal swim beside it. Free moves track it exactly, so the engine adds no oscillation. Where the bottom is higher than the target (the shallows), the character stands and walks with `Move`.
+- **Climb:** a trigger marks the ladder; on it, `MoveFree(intoWall * 0.5 + up * climbSpeed)` presses the character to the wall and rises or comes down; at the top a forward `Move` steps off onto the floor. **Ledge hold:** `MoveFree(vector.zero)`. **Glide:** `MoveFree` with the sink rate you choose.
+- A light Dynamic body (below the character's `Mass`) holds a character standing on it, so a raft, a rope bridge or a jetty of light planks holds it up, pressed with at most the body's own weight: a 25 kg raft under a 70 kg character is pressed as by 25 kg, not 70 ("Characters and Dynamic bodies" above).
+
+```luau path=Assets/Scripts/Swimmer.luau
+--!strict
+export type Swimmer = ScriptInstance & {
+	Depth: number,
+	Speed: number,
+}
+
+local Swimmer = {}
+
+Swimmer.Fields = {
+	Depth = Field.Number(1.3, { Min = 0 }),
+	Speed = Field.Number(4, { Min = 0 }),
+}
+
+-- The sea's surface: a swell about y 0 here, the water's height where the game has water.
+local function surface(ticks: number): number
+	return 0.15 * math.sin(ticks * Time.GetFixedDeltaTime() * 0.9)
+end
+
+function Swimmer.OnFixedUpdate(self: Swimmer, dt: number)
+	local controller = self.Entity.CharacterController
+	if not controller then
+		return
+	end
+	local horizontal = vector.create(Input.GetAxis("MoveX"), 0, -Input.GetAxis("MoveY")) * self.Speed
+	local target = surface(Time.GetSessionTick() + 1) - self.Depth
+	local y = self.Entity.Transform.WorldPosition.y
+	if controller:IsGrounded() and y >= target then
+		-- The bottom is higher than the depth held: stand and walk.
+		controller:Move(horizontal)
+		return
+	end
+	local rise = math.clamp((target - y) / dt, -3, 3)
+	controller:MoveFree(horizontal + vector.create(0, rise, 0))
+end
+
+return Script.Define("Swimmer", Swimmer)
+```
 
 ## What a character stands on: surfaces and belts
 

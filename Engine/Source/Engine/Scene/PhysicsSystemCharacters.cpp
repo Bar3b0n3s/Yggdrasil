@@ -8,9 +8,9 @@
 #include <cmath>
 
 // The script-facing character functions of the play session (Architecture §9.6; §11.5 CharacterController:Move,
-// IsGrounded, GetGroundNormal, GetVelocity, and M36's GetGroundCollider, IsSqueezed and GetSqueezingBody). The characters'
-// lifecycle (creation in canonical order among the bodies, rebuilds, teleports, updates and write-back) belongs to the step
-// phases in PhysicsSystem.cpp.
+// IsGrounded, GetGroundNormal, GetVelocity, M36's GetGroundCollider, IsSqueezed and GetSqueezingBody, and M48's
+// MoveFree). The characters' lifecycle (creation in canonical order among the bodies, rebuilds, teleports, updates and
+// write-back) belongs to the step phases in PhysicsSystem.cpp.
 
 namespace Engine {
 
@@ -20,7 +20,7 @@ namespace Engine {
 		return found != InnerBodies.end() ? found->second : UUID();
 	}
 
-	Status PhysicsSystem::MoveCharacter(UUID entity, const glm::vec3& velocity)
+	Status PhysicsSystem::MoveCharacter(UUID entity, const glm::vec3& velocity, CharacterMoveMode mode)
 	{
 		const auto found = m_State->Characters.find(entity);
 		if (found == m_State->Characters.end() || !m_State->IsPresent(entity))
@@ -32,14 +32,17 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "the velocity ({}, {}, {}) is out of range: each component must be at most {} m/s", velocity.x,
 				velocity.y, velocity.z, MaxCharacterSpeed);
 		}
-		found->second.DesiredVelocity = velocity;
+		m_State->PendingMoves[entity] = PhysicsCharacterMove{ .Velocity = velocity, .Mode = mode };
 		return {};
 	}
 
 	PhysicsCharacterState PhysicsSystem::State::MakeCharacterState(const CharacterController& controller) const
 	{
 		const CharacterGroundState ground = controller.GetGroundState();
-		PhysicsCharacterState state{ .IsGrounded = ground.IsGrounded, .GroundNormal = ground.GroundNormal, .Velocity = controller.GetVelocity() };
+		PhysicsCharacterState state{ .IsGrounded = ground.IsGrounded,
+			.GroundNormal = ground.GroundNormal,
+			.Velocity = controller.GetVelocity(),
+			.LastMove = controller.GetLastMove() };
 		// M36: the collider entity of the ground, resolved as a query hit on it is (a character's inner body names the
 		// character; a disabled or destroyed ground names none).
 		if (ground.IsGrounded && ground.GroundBody.IsValid())

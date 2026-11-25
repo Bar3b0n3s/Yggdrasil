@@ -1,0 +1,466 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "1bb18272eac1e836",
+		"Path": "Assets/Scenes/CharacterMoves.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.8.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "022f3b0a1eafb778",
+				"Path": "/Plank07",
+				"Hash": "e098af4fb5f3a247",
+				"Components": {
+					"Transform": "8be17023f07720a4",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "4589093f29c8d8bc"
+				}
+			},
+			{
+				"Id": "026a58becc85a376",
+				"Path": "/Plank04",
+				"Hash": "522c246de33ac853",
+				"Components": {
+					"Transform": "3d362b9d76e6ac02",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "53ccb4376e9a7909"
+				}
+			},
+			{
+				"Id": "02b11eb76bc92d1e",
+				"Path": "/Plank02",
+				"Hash": "c10b3fc45b7a33d1",
+				"Components": {
+					"Transform": "303c7ed299d1435c",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "beb0099b0c441f02"
+				}
+			},
+			{
+				"Id": "0e643e71dd1d2dec",
+				"Path": "/Plank09",
+				"Hash": "06157bb82d49787a",
+				"Components": {
+					"Transform": "d66a1f1042f6b7f9",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "906dff133d612880"
+				}
+			},
+			{
+				"Id": "1208a3f29597ffa1",
+				"Path": "/Plank06",
+				"Hash": "57131760486a05ac",
+				"Components": {
+					"Transform": "69d2694192ca65d0",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "5181bb5ea5cd6722"
+				}
+			},
+			{
+				"Id": "158b4767cc063bb0",
+				"Path": "/Plank08",
+				"Hash": "ab52eabfc8f8611d",
+				"Components": {
+					"Transform": "81cf3038f1a7243c",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "db2aa5a5ab547c0c"
+				}
+			},
+			{
+				"Id": "176f68f43dbf5761",
+				"Path": "/Plank05",
+				"Hash": "9b3c431700b2de3a",
+				"Components": {
+					"Transform": "1860dfca04d0399b",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "4afaa3a2a519005d"
+				}
+			},
+			{
+				"Id": "2f0c2ae995f6482e",
+				"Path": "/Pit",
+				"Hash": "d8ef4c6c96dafeac",
+				"Components": {
+					"Transform": "f5859fbff9bf11fa",
+					"MeshRenderer": "818cf11abdba0624",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "3c35782665dc9eb7",
+				"Path": "/Plank12",
+				"Hash": "808b141852020a94",
+				"Components": {
+					"Transform": "b0b751430cd573cb",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "31654adbc484a156"
+				}
+			},
+			{
+				"Id": "3cbe846849ce4468",
+				"Path": "/Walker",
+				"Hash": "1db5a186521b513c",
+				"Components": {
+					"Transform": "ebb7eca525ca7ebe",
+					"CharacterController": "ef82fcf96ed4251a",
+					"Script": "687ba6bd25ec899b"
+				}
+			},
+			{
+				"Id": "427327ab41966a8f",
+				"Path": "/Swimmer",
+				"Hash": "507b650cfc66e230",
+				"Components": {
+					"Transform": "d620d2fa81d4e30a",
+					"CharacterController": "ef82fcf96ed4251a",
+					"Script": "e900bc044b078693"
+				}
+			},
+			{
+				"Id": "535c31209384c1a3",
+				"Path": "/Plank01",
+				"Hash": "e77b711d64d01126",
+				"Components": {
+					"Transform": "cab11fd68f76d61c",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "99b351f6e89a0d4e"
+				}
+			},
+			{
+				"Id": "605b4ae5dd790fc6",
+				"Path": "/Plank13",
+				"Hash": "f4ab23f31180b8d7",
+				"Components": {
+					"Transform": "435559b9cfe7797d",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "c60da05c34cf27d3"
+				}
+			},
+			{
+				"Id": "66f0d805d9d25e30",
+				"Path": "/LeftRim",
+				"Hash": "a39959e0cd3440eb",
+				"Components": {
+					"Transform": "a7149b242c6f98bc",
+					"MeshRenderer": "818cf11abdba0624",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "80821bad92393259",
+				"Path": "/Plank10",
+				"Hash": "7c5e1ee319bb679c",
+				"Components": {
+					"Transform": "75b55669ee4e0297",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "0e75917ebe3a3e58"
+				}
+			},
+			{
+				"Id": "8d80620a1810a3a5",
+				"Path": "/Tower",
+				"Hash": "ddf83b499c627486",
+				"Components": {
+					"Transform": "1a5eac9746dcbe2c",
+					"MeshRenderer": "7f736706d0daeab0",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "9238b6ddff95eb63",
+				"Path": "/LadderFloor",
+				"Hash": "1dfd4ffb0811c6ee",
+				"Components": {
+					"Transform": "5ddfa4f479a41082",
+					"MeshRenderer": "818cf11abdba0624",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "b757ff33cd428935",
+				"Path": "/RightRim",
+				"Hash": "62509e436edf0e6c",
+				"Components": {
+					"Transform": "776e5ed6052cddb3",
+					"MeshRenderer": "818cf11abdba0624",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "bf3c69675219048a",
+				"Path": "/Sun",
+				"Hash": "fe38349566f3dbee",
+				"Components": {
+					"Transform": "277ec5c0817bbe09",
+					"DirectionalLight": "6c90c620fea1993b"
+				}
+			},
+			{
+				"Id": "c231e1d7b795e57a",
+				"Path": "/Ladder",
+				"Hash": "3f6c220f1eb14011",
+				"Components": {
+					"Transform": "339147cc48b1acbd",
+					"BoxCollider": "9ea809aa1f7dda3e"
+				}
+			},
+			{
+				"Id": "c512bf779a415c17",
+				"Path": "/Camera",
+				"Hash": "7b1bc83f302bf2c3",
+				"Components": {
+					"Transform": "ca6f1044a2a6b0f6",
+					"Camera": "06bc5d3b8e2a9794",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "c6bb1ed64ac9f384",
+				"Path": "/Shelf",
+				"Hash": "d33de29ec7a85cd1",
+				"Components": {
+					"Transform": "dc0e83f36fa4a973",
+					"MeshRenderer": "818cf11abdba0624",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "c74678562e5a4947",
+				"Path": "/Plank03",
+				"Hash": "d10babea3da2cd8d",
+				"Components": {
+					"Transform": "9d1667781dc25e30",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "014a3099ff850993"
+				}
+			},
+			{
+				"Id": "ca8c3426bbc18d98",
+				"Path": "/Ramp",
+				"Hash": "6e3646a2ee3f7800",
+				"Components": {
+					"Transform": "c78b1210002c9f9d",
+					"MeshRenderer": "818cf11abdba0624",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "ed740c97eb37bff1",
+				"Path": "/Climber",
+				"Hash": "989ac1564078def6",
+				"Components": {
+					"Transform": "016a8ebcbb99e130",
+					"CharacterController": "ef82fcf96ed4251a",
+					"Script": "f93a119ac7add6be"
+				}
+			},
+			{
+				"Id": "f723edf9058a36e6",
+				"Path": "/Plank11",
+				"Hash": "76f02591ac8d0a17",
+				"Components": {
+					"Transform": "996a447f9bae7ca2",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"RigidBody": "87c3090d62ed3f7b",
+					"BoxCollider": "5c8184944c7a623b",
+					"HingeJoint": "612d87063bfd1946"
+				}
+			},
+			{
+				"Id": "fe3ae84a81dc238f",
+				"Path": "/Plank13/End",
+				"Hash": "8bb46109c55ecd66",
+				"Components": {
+					"Transform": "387b722ad652c670",
+					"HingeJoint": "c93bf6198dd5691f"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "103291d13c7ad4df",
+				"Path": "Assets/Scenes/Components/Materials/Metal.material",
+				"Type": "Material",
+				"Hash": "45fedfa386929650"
+			},
+			{
+				"Handle": "2f065a03ca36288c",
+				"Path": "Assets/Scripts/CharacterMoves/Climber.luau",
+				"Type": "Script",
+				"Hash": "f766c4b4c7e1191b"
+			},
+			{
+				"Handle": "3762c0d1e16aaa83",
+				"Path": "Assets/Scripts/CharacterMoves/Swimmer.luau",
+				"Type": "Script",
+				"Hash": "d01c260db31390b7"
+			},
+			{
+				"Handle": "83c3f54e878ffc81",
+				"Path": "Assets/Scripts/CharacterMoves/BridgeWalker.luau",
+				"Type": "Script",
+				"Hash": "eb541e1fd4fd458f"
+			},
+			{
+				"Handle": "9016817dbe7d2c7a",
+				"Path": "Assets/Scenes/Components/Materials/Crate.material",
+				"Type": "Material",
+				"Hash": "a18f6315cf2ebe2f"
+			},
+			{
+				"Handle": "d31facacf6bb6908",
+				"Path": "Assets/Scenes/Components/Materials/Ground.material",
+				"Type": "Material",
+				"Hash": "6c73020cc30c1dd8"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 17,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "A"
+		},
+		{
+			"Tick": 17,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "E"
+		},
+		{
+			"Tick": 17,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "L"
+		},
+		{
+			"Tick": 41,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "E"
+		},
+		{
+			"Tick": 41,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "W"
+		},
+		{
+			"Tick": 224,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "L"
+		},
+		{
+			"Tick": 232,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "E"
+		},
+		{
+			"Tick": 257,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "E"
+		},
+		{
+			"Tick": 257,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "W"
+		},
+		{
+			"Tick": 275,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "A"
+		},
+		{
+			"Tick": 275,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "D"
+		},
+		{
+			"Tick": 480,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "D"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 480,
+			"Luau": "local swimmer = Scene.FindByName(\"Swimmer\")\nlocal climber = Scene.FindByName(\"Climber\")\nlocal walker = Scene.FindByName(\"Walker\")\nreturn swimmer.Transform.WorldPosition.x > -16 and math.abs(swimmer.Transform.WorldPosition.y + 1) < 0.02\n\tand math.abs(climber.Transform.WorldPosition.y - 6) < 0.02 and climber.Transform.WorldPosition.x > 1.5\n\tand walker.Transform.WorldPosition.x > 11.62"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "9351c4acf5222e36"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "15d44763c6158aa0"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "904b221647c71d1e"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "d2731c5675d71440"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "51001bf66438ffa0"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "298943ddcd2d40f0"
+		},
+		{
+			"Tick": 420,
+			"StateHash": "39bc5b1351aef649"
+		},
+		{
+			"Tick": 480,
+			"StateHash": "8340fdd16f257a18"
+		}
+	],
+	"FinalTick": 488,
+	"FinalStateHash": "57aaced8d5030613"
+}

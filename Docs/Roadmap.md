@@ -1346,6 +1346,7 @@ Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
   - **The interfaces.** `CharacterController::Update` takes a `CharacterMoveMode` (Walk by default), a reviewed change to the frozen `CharacterController.h`. No field is added, so M55's `RideGround` stays the next one.
 - **Characters on light bodies.** A Dynamic body lighter than the character's `Mass` supports the character standing on it. Its walkable surface lifts the character as it rises, and an overlap is pushed out within the update, so the character never sinks into it.
   - **No launch.** Its velocity never becomes the character's.
+  - **From light body to light body** (ADR 0066 decision 4, question 8, from W48.2's investigation): while the character stands on a light body, another light body's walkable face is walked onto as any ground, so the next plank of a bridge where the deck climbs is no wall.
   - **What stays M34's.** Its other faces and every other light body still never push the character. A light body is never a stair and never squeezes. It takes at most its own weight. The walk pushes it with at most `Mass` × 9.81 N.
   - **The changed test.** M34's "passes up through it" case becomes "lifts it on its surface and gives it none of its velocity".
   - **Outcome (b) is not taken.** No validation code is added.

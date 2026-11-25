@@ -50,6 +50,10 @@
 // (IsLighterThanCharacter) never moves it: it cannot push it or carry it up a surface of its own (the recorder), it gives
 // it none of its velocity as its ground (Update), it is never a stair (WalkStairs, Jolt's step without light bodies) and
 // it carries at most its own weight from the character (PushGround, which replaces CharacterVirtual's weight impulse).
+// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decisions 3 and 4): the recorder lets
+// the walkable surface of the light body the character stands on push it, so Jolt's contact plane and penetration
+// recovery hold the character on top within ExtendedUpdate; the lift moves the character and never becomes its
+// velocity, which Update sets before the move as for any ground.
 //
 // Contacts. A CharacterContactRecorder records the character's contacts during ExtendedUpdate; Update then appends each as
 // a ContactEvent with FromCharacter, BodyA the inner body, ColliderA 0 (the capsule is the character's only collider) and
@@ -67,13 +71,21 @@
 // decision on the W36.2 review, ADR 0053), so a belt whose velocity leaves its surface neither lifts a character nor
 // presses it in. Without a surface the update computes exactly what it did before M36.
 //
-// The squeeze (M36 W36.2, ADR 0053 decision 12). After the update, the contacts of its last pass (GetActiveContacts) name the
-// bodies that push the character: not sensors or discarded, able to push it (CharacterContactSettings::mCanPushCharacter,
-// which the recorder turns off for a light Dynamic body), not Static, and moving towards it (the contact point's velocity
-// along the contact's normal, which points at the character) faster than MinPushSpeed. Their contacts' distances are those
-// of the pass's start, so the controller measures them again where the update left the character: one CheckCollision of the
-// character's capsule against those bodies alone. A body whose push over the step (its speed times the step) would end more
-// than CharacterSqueezeTolerance inside the padded capsule squeezes it; the update could not keep the character ahead of it.
+// The squeeze (M36 W36.2, ADR 0053 decision 12). After the update, the contacts of its last pass (GetActiveContacts)
+// name the bodies that push the character: not sensors or discarded, able to push it
+// (CharacterContactSettings::mCanPushCharacter), not a Dynamic body lighter than the character (whose walkable surface
+// under the character keeps mCanPushCharacter on since M48: a support, not a push, which FindSqueeze leaves out
+// itself), not Static, and moving towards it (the contact point's velocity along the contact's normal, which points at
+// the character) faster than MinPushSpeed. Their contacts' distances are those of the pass's start, so the controller
+// measures them again where the update left the character: one CheckCollision of the character's capsule against those
+// bodies alone. A body whose push over the step (its speed times the step) would end more than
+// CharacterSqueezeTolerance inside the padded capsule squeezes it; the update could not keep the character ahead of it.
+//
+// Free moves (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3). An update in
+// CharacterMoveMode::Free that is not grounded sets the step's velocity to the desired one whole, with no gravity, and
+// turns ExtendedUpdate's stick-to-floor off for that update (a free move gliding past a ledge keeps its height); the
+// controller's own walk-stairs step runs as for any update. A grounded one computes exactly what a Walk update does.
+// GetLastMove reports which of the two the update was.
 //
 // Range. A character never leaves the range physics places bodies in (IsPlaceablePhysicsPose): an update that would
 // carry it beyond MaxPhysicsCoordinate leaves it where it was, with no velocity, and logs a warning once per controller.
@@ -299,6 +311,8 @@ namespace Engine {
 
 		// M36 W36.2: the squeeze of the last update (GetSqueeze).
 		CharacterSqueeze Squeeze{};
+		// M48: how the last update moved the character (GetLastMove).
+		CharacterMoveMode LastMove = CharacterMoveMode::Walk;
 
 		// M36: a collider a character stands on (FindGroundCollider).
 		struct GroundColliderInfo
@@ -610,7 +624,7 @@ namespace Engine {
 		return controller;
 	}
 
-	void CharacterController::Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity)
+	void CharacterController::Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity, CharacterMoveMode mode)
 	{
 		const bool valid = std::isfinite(deltaTime) && deltaTime > 0.0f && Detail::IsFinite(desiredVelocity) && Detail::IsFinite(gravity);
 		ENGINE_CORE_ASSERT(valid, "CharacterController::Update needs a finite delta time > 0 and finite vectors");
@@ -659,14 +673,17 @@ namespace Engine {
 			const JPH::Vec3 surface = Detail::ToJolt(*groundSurface);
 			carried = surface - surface.Dot(up) * up;
 		}
-		const JPH::Vec3 stepVelocity = Utils::ClampSpeed(desired - desiredVertical + carried + vertical);
+		// M48: a free move in the air takes the desired velocity whole (see the file comment).
+		const bool free = mode == CharacterMoveMode::Free && !grounded;
+		const JPH::Vec3 stepVelocity = Utils::ClampSpeed(free ? desired : desired - desiredVertical + carried + vertical);
 		character.SetLinearVelocity(stepVelocity);
+		state.LastMove = free ? CharacterMoveMode::Free : CharacterMoveMode::Walk;
 
-		// Stick to the floor over steps and slopes down to StepHeight; the stairs up to it are the controller's own step
-		// (State::WalkStairs), which leaves light bodies out.
+		// Stick to the floor over steps and slopes down to StepHeight, but in a free move; the stairs up to it are the
+		// controller's own step (State::WalkStairs), which leaves light bodies out.
 		JPH::CharacterVirtual::ExtendedUpdateSettings update;
 		update.mWalkStairsStepUp = JPH::Vec3::sZero();
-		update.mStickToFloorStepDown = -up * state.StepHeight;
+		update.mStickToFloorStepDown = free ? JPH::Vec3::sZero() : -up * state.StepHeight;
 
 		JPH::PhysicsSystem& system = *state.World->m_State->System;
 		const JPH::ObjectLayer layer = MakePhysicsObjectLayer(state.Layer, PhysicsObjectKind::Moving);
@@ -767,6 +784,11 @@ namespace Engine {
 	CharacterSqueeze CharacterController::GetSqueeze() const
 	{
 		return m_State->Squeeze;
+	}
+
+	CharacterMoveMode CharacterController::GetLastMove() const
+	{
+		return m_State->LastMove;
 	}
 
 	BodyHandle CharacterController::GetInnerBody() const

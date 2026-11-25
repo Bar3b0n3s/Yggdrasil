@@ -1691,6 +1691,7 @@ Reports the physics body of an entity of the play scene (the body it owns, or th
 | `squeezedBy` | `EntitySummary` | The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty when it is not squeezed, for other bodies, and when that entity is disabled or destroyed. |
 | `centerOfMass` | `Vec3` | The world position of the body's centre of mass, in metres: its colliders' centre of mass, moved by a MassProperties' CenterOfMassOffset (a character's capsule centre). |
 | `buoyancy` | `Variant` | For a body whose owner holds a Buoyancy, what the physics last floated it with: {water (the Buoyancy's Water when set; else the water whose planes held the most of the submerged volume, null when nothing was submerged; as {id, name, path}), submergedVolume, totalVolume (m^3)}, kept while it sleeps and 0 while it is skipped as invalid; null for any other body. |
+| `lastMove` | `String` | "Free" when a character's last update was a free move (CharacterController:MoveFree while the character was not grounded as the update began: on walkable ground and not leaving it faster than 0.1 m/s), so it can read "Free" beside grounded true in the update that lands; "Walk" otherwise; empty for other bodies. |
 | `tick` | `UInt32` | The play session's tick when the body was read. |
 
 Example: Check whether the ball rests on the ground.

@@ -15,8 +15,8 @@
 #include <limits>
 
 // Characters in the play session (Architecture §9.6: CharacterController:Move, IsGrounded, GetGroundNormal, GetVelocity; the
-// inner body seen by sensors and raycasts; character contacts as events). "Physics: trigger detects a character through its
-// inner body" is a Roadmap M11 acceptance name, used verbatim.
+// inner body seen by sensors and raycasts; character contacts as events; M48's free moves). "Physics: trigger detects a
+// character through its inner body" is a Roadmap M11 acceptance name, used verbatim.
 
 namespace Engine {
 
@@ -445,6 +445,143 @@ namespace Engine {
 			}
 			CHECK(zoneEvents(PhysicsEventType::TriggerEnter) == 1);
 			CHECK(zoneEvents(PhysicsEventType::TriggerExit) == 0);
+		}
+
+		// --- Free moves (M48 W48.1, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3) -----
+
+		TEST_CASE("PhysicsSystem: a free move faster than MaxCharacterSpeed is refused")
+		{
+			Test::SceneTestFixture fixture;
+			static_cast<void>(AddPlayer(fixture.GetScene(), glm::vec3(0.0f, 20.0f, 0.0f)));
+			Scope<PlaySession> session = StartCharacterSession(fixture, nullptr);
+			PhysicsSystem& physics = session->GetPhysics();
+			const UUID player = Test::GetEntityId(session->GetScene(), "/Player");
+			Test::RunTicks(*session, 2);
+			// A free move the next update takes, then refused ones, each leaving it as it was.
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(0.0f, 2.0f, 0.0f), CharacterMoveMode::Free).has_value());
+			CHECK(physics.MoveCharacter(player, glm::vec3(0.0f, MaxCharacterSpeed * 2.0f, 0.0f), CharacterMoveMode::Free).error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(physics.MoveCharacter(player, glm::vec3(std::numeric_limits<float>::max(), 0.0f, 0.0f), CharacterMoveMode::Free).error().GetCode()
+				== ErrorCode::InvalidArgument);
+			CHECK(physics.MoveCharacter(player, glm::vec3(0.0f, std::numeric_limits<float>::quiet_NaN(), 0.0f), CharacterMoveMode::Free).error().GetCode()
+				== ErrorCode::InvalidArgument);
+			CHECK(physics.MoveCharacter(player, glm::vec3(0.0f, -std::numeric_limits<float>::infinity(), 0.0f), CharacterMoveMode::Free).error().GetCode()
+				== ErrorCode::InvalidArgument);
+			// Refused walks leave the free move's mode as they leave its velocity.
+			CHECK(physics.MoveCharacter(player, glm::vec3(0.0f, MaxCharacterSpeed * 2.0f, 0.0f)).error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(physics.MoveCharacter(player, glm::vec3(std::numeric_limits<float>::quiet_NaN())).error().GetCode() == ErrorCode::InvalidArgument);
+			session->Tick();
+			Result<PhysicsCharacterState> state = physics.GetCharacterState(player);
+			REQUIRE(state.has_value());
+			CHECK(state->LastMove == CharacterMoveMode::Free);
+			CHECK(state->Velocity == glm::vec3(0.0f, 2.0f, 0.0f));
+
+			// The mirror: refused free moves leave a walk as it was.
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(1.0f, 0.0f, 0.0f)).has_value());
+			CHECK(physics.MoveCharacter(player, glm::vec3(0.0f, MaxCharacterSpeed * 2.0f, 0.0f), CharacterMoveMode::Free).error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(physics.MoveCharacter(player, glm::vec3(std::numeric_limits<float>::quiet_NaN()), CharacterMoveMode::Free).error().GetCode()
+				== ErrorCode::InvalidArgument);
+			session->Tick();
+			state = physics.GetCharacterState(player);
+			REQUIRE(state.has_value());
+			CHECK(state->LastMove == CharacterMoveMode::Walk);
+			CHECK(state->Velocity.x == doctest::Approx(1.0f));
+			// The largest component allowed is MaxCharacterSpeed itself.
+			CHECK(physics.MoveCharacter(player, glm::vec3(0.0f, -MaxCharacterSpeed, 0.0f), CharacterMoveMode::Free).has_value());
+		}
+
+		// The W48.1 review's finding 2: a Move or MoveFree made in the tick that writes a field creating the character again
+		// (any but GravityFactor and InheritGroundVelocity) reaches the update of the character created again in that tick's
+		// PreStep. Before M48 the rebuild dropped it, and that update walked with no desired velocity.
+		TEST_CASE("PhysicsSystem: a Move or MoveFree survives a field write that creates the character again in the same tick")
+		{
+			for (const CharacterMoveMode mode : { CharacterMoveMode::Free, CharacterMoveMode::Walk })
+			{
+				CAPTURE(static_cast<int>(mode));
+				Test::SceneTestFixture fixture;
+				static_cast<void>(AddPlayer(fixture.GetScene(), glm::vec3(0.0f, 20.0f, 0.0f)));
+				Scope<PlaySession> session = StartCharacterSession(fixture, nullptr);
+				PhysicsSystem& physics = session->GetPhysics();
+				const UUID player = Test::GetEntityId(session->GetScene(), "/Player");
+				Test::RunTicks(*session, 2);
+				const glm::vec3 asked = mode == CharacterMoveMode::Free ? glm::vec3(0.0f, 2.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+				// A shorter capsule, as a swimmer's script switches to entering the water, and the move, in one tick.
+				session->GetScene().FindEntityByPath("/Player").Patch<CharacterControllerComponent>([](CharacterControllerComponent& controller)
+				{
+					controller.Height = 1.2f;
+				});
+				REQUIRE(physics.MoveCharacter(player, asked, mode).has_value());
+				session->Tick();
+				const Result<PhysicsCharacterState> state = physics.GetCharacterState(player);
+				REQUIRE(state.has_value());
+				CHECK(state->LastMove == mode);
+				if (mode == CharacterMoveMode::Free)
+					CHECK(state->Velocity == asked);
+				else
+					CHECK(state->Velocity.x == doctest::Approx(1.0f));
+				// The character was created again: its capsule is the new one.
+				const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(player);
+				REQUIRE(report.has_value());
+				CHECK(report->Bounds.Max.y - report->Bounds.Min.y == doctest::Approx(1.2f).epsilon(0.01));
+			}
+		}
+
+		// The W48.2 review's finding 2: the moves wait apart from the characters, so the move of a character removed in its
+		// tick is dropped at the end of PreStep's item 5 and never reaches a character created on its entity later.
+		TEST_CASE("PhysicsSystem: a Move made before a character is removed does not reach the character created again on its entity")
+		{
+			Test::SceneTestFixture fixture;
+			static_cast<void>(AddPlayer(fixture.GetScene(), glm::vec3(0.0f, 20.0f, 0.0f)));
+			Scope<PlaySession> session = StartCharacterSession(fixture, nullptr);
+			PhysicsSystem& physics = session->GetPhysics();
+			const UUID player = Test::GetEntityId(session->GetScene(), "/Player");
+			Test::RunTicks(*session, 2);
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(1.0f, 0.0f, 0.0f)).has_value());
+			session->GetScene().FindEntityByPath("/Player").RemoveComponent<CharacterControllerComponent>();
+			session->Tick();
+			REQUIRE_FALSE(physics.GetCharacterState(player).has_value());
+			session->GetScene().FindEntityByPath("/Player").AddComponent<CharacterControllerComponent>(CharacterControllerComponent{});
+			session->Tick();
+			const Result<PhysicsCharacterState> state = physics.GetCharacterState(player);
+			REQUIRE(state.has_value());
+			CHECK(state->LastMove == CharacterMoveMode::Walk);
+			CHECK(state->Velocity.x == 0.0f);
+		}
+
+		TEST_CASE("PhysicsSystem: the last Move or MoveFree of a tick decides the next update")
+		{
+			Test::SceneTestFixture fixture;
+			static_cast<void>(AddPlayer(fixture.GetScene(), glm::vec3(0.0f, 20.0f, 0.0f)));
+			Scope<PlaySession> session = StartCharacterSession(fixture, nullptr);
+			PhysicsSystem& physics = session->GetPhysics();
+			const UUID player = Test::GetEntityId(session->GetScene(), "/Player");
+			Test::RunTicks(*session, 2);
+			const auto state = [&physics, player]
+			{
+				Result<PhysicsCharacterState> read = physics.GetCharacterState(player);
+				REQUIRE(read.has_value());
+				return *read;
+			};
+
+			// A free move, then a Move: the update walks, falling from where the character's velocity was.
+			const float falling = state().Velocity.y;
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(0.0f, 2.0f, 0.0f), CharacterMoveMode::Free).has_value());
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(1.0f, 2.0f, 0.0f)).has_value());
+			session->Tick();
+			CHECK(state().LastMove == CharacterMoveMode::Walk);
+			CHECK(state().Velocity.x == doctest::Approx(1.0f));
+			CHECK(state().Velocity.y == doctest::Approx(falling - 9.81f / 60.0f).epsilon(1.0e-4));
+
+			// A Move, then a free move: the update takes the free move whole.
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(1.0f, 0.0f, 0.0f)).has_value());
+			REQUIRE(physics.MoveCharacter(player, glm::vec3(0.0f, 2.0f, 0.0f), CharacterMoveMode::Free).has_value());
+			session->Tick();
+			CHECK(state().LastMove == CharacterMoveMode::Free);
+			CHECK(state().Velocity == glm::vec3(0.0f, 2.0f, 0.0f));
+
+			// A tick without a call walks with no velocity of its own: consumed, the free move does not carry over.
+			session->Tick();
+			CHECK(state().LastMove == CharacterMoveMode::Walk);
+			CHECK(state().Velocity.y == doctest::Approx(2.0f - 9.81f / 60.0f).epsilon(1.0e-4));
 		}
 	}
 

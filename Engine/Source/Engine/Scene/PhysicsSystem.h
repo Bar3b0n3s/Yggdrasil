@@ -5,6 +5,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Core/UUID.h"
+#include "Engine/Physics/CharacterController.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsJoint.h"
 #include "Engine/Physics/PhysicsLayers.h"
@@ -83,7 +84,9 @@
 //          skipped while asleep, keeping its last report; one whose planes changed (waves, a tide, a WaveScale write) or whose
 //          settings changed (a BuoyancyScale or drag write, its water's Density) is woken first. The planes are runtime
 //          state, never hashed, and a scene without a Buoyancy runs nothing.
-//       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes.
+//       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes,
+//          and (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3) that call's
+//          CharacterMoveMode, consumed with it: Walk when the tick made no call.
 //     M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 3): between items 1-2 and 3, the collider surfaces. A
 //     ColliderSurface's signals mark its entity (never ComponentsChanged, so a surface write never recomposes the scene), and
 //     PreStep sends the surfaces of every body holding a marked collider (PhysicsWorld::SetColliderSurfaces, the velocity
@@ -222,8 +225,10 @@
 // phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md); M36 adds the collider surfaces (the
 // step's M36 paragraph), PhysicsCharacterState's GroundCollider, IsSqueezed and SqueezedBy, PhysicsSurfaceInfo and GetSurface
 // (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), M37 appends its joints (the M37 paragraph
-// above), and M44 appends PhysicsBodyReport::CenterOfMass and its vehicles (the M44 paragraph above; Docs/Decisions/
-// 0062-m44-wheeled-vehicles.md decision 3), each reviewed as a change to a frozen interface.
+// above), M44 appends PhysicsBodyReport::CenterOfMass and its vehicles (the M44 paragraph above; Docs/Decisions/
+// 0062-m44-wheeled-vehicles.md decision 3), and M48 adds MoveCharacter's mode and PhysicsCharacterState's LastMove
+// (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3), each reviewed as a change to a
+// frozen interface.
 
 namespace Engine {
 
@@ -484,6 +489,11 @@ namespace Engine {
 		// is not squeezed, or when that owner is disabled or pending destruction now.
 		bool IsSqueezed = false;
 		UUID SqueezedBy{};
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): how the last update moved
+		// the character (CharacterController::GetLastMove): Free for a free move, a MoveFree while the character was not
+		// grounded as the update began (on walkable ground and not leaving it faster than 0.1 m/s), so it can read Free beside
+		// IsGrounded in the update that lands; Walk otherwise. Derived, like IsSqueezed, and not hashed.
+		CharacterMoveMode LastMove = CharacterMoveMode::Walk;
 	};
 
 	// M47 (Docs/Decisions/0065-m47-water.md decision 3; physics.bodyInfo's buoyancy): what PreStep's buoyancy item (4c) found
@@ -633,11 +643,14 @@ namespace Engine {
 		[[nodiscard]] Status WakeUp(UUID entity);
 
 		// --- Characters (§9.6, §11.5 CharacterController) -------------------------------------------------------------------
-		// Sets the velocity of the character's next PreStep update (CharacterController::Update's desired velocity), which
-		// is consumed by that update: a script calls Move in every OnFixedUpdate it wants the character to move. Errors:
-		// NotFound "entity <id> has no character" when the entity owns no created character (or is disabled); InvalidArgument
-		// for a non-finite velocity or one with a component above MaxCharacterSpeed (Physics/CharacterController.h).
-		[[nodiscard]] Status MoveCharacter(UUID entity, const glm::vec3& velocity);
+		// Sets the velocity of the character's next PreStep update (CharacterController::Update's desired velocity), which is
+		// consumed by that update: a script calls Move in every OnFixedUpdate it wants the character to move. M48: and that
+		// update's mode (CharacterMoveMode::Free for CharacterController:MoveFree), consumed with it; the last call of a tick
+		// decides both, also when the tick writes a field that creates the character again (the move waits apart from the
+		// character, so the one created again takes it). Errors, with nothing changed: NotFound "entity <id> has no character"
+		// when the entity owns no created character (or is disabled); InvalidArgument for a non-finite velocity or one with a
+		// component above MaxCharacterSpeed (Physics/CharacterController.h).
+		[[nodiscard]] Status MoveCharacter(UUID entity, const glm::vec3& velocity, CharacterMoveMode mode = CharacterMoveMode::Walk);
 		// The state after the last update. Errors: as MoveCharacter.
 		[[nodiscard]] Result<PhysicsCharacterState> GetCharacterState(UUID entity) const;
 

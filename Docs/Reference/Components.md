@@ -754,7 +754,7 @@ Moves the entity as a walking character that climbs steps and slopes and collide
 | `Radius` | `Float` | `0.3` | >= 0.001 | m |  | The radius of the character's capsule, in metres. |
 | `MaxSlopeAngle` | `Float` | `45` | 0 to 90 | deg |  | The steepest slope the character can walk up, in degrees. |
 | `StepHeight` | `Float` | `0.3` | >= 0 | m |  | The highest step the character climbs without jumping, in metres. |
-| `Mass` | `Float` | `70` | 0.001 to 1e+09 | kg |  | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
+| `Mass` | `Float` | `70` | 0.001 to 1e+09 | kg |  | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it supports the character where it stands on it, and never pushes, launches or carries it. |
 | `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's gravity for the character. |
 | `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings. |
 | `InheritGroundVelocity` | `Bool` | `false` |  |  |  | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way. |
@@ -766,16 +766,17 @@ Script members of `CharacterController`:
 | `GetGroundCollider` | method | `(self: CharacterController) -> Entity?` |  | All | The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity. |
 | `GetGroundNormal` | method | `(self: CharacterController) -> vector` |  | All | Ground normal from the last update. |
 | `GetSqueezingBody` | method | `(self: CharacterController) -> Entity?` |  | All | The owner of the body that squeezed the character in its last update (the one with the lowest body handle when several did, a deterministic choice), or nil while it is not squeezed or that entity is disabled or destroyed. |
-| `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | Velocity after the last update. |
+| `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | The velocity the last update asked for (its step velocity), not the distance it covered; off the ground, without its part into a steep face the character touches, which the update drops. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for the character. |
 | `Height` | proxy field | `number` | read/write | All | The character's total height, in metres. |
 | `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way. |
 | `IsGrounded` | method | `(self: CharacterController) -> boolean` |  | All | Whether the last character update found supporting ground. |
 | `IsSqueezed` | method | `(self: CharacterController) -> boolean` |  | All | Whether the last character update found the character squeezed: a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it (a press onto the floor, a piston against a wall). Read in the next fixed update; the engine makes no escape and deals no damage. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. |
-| `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
+| `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it supports the character where it stands on it, and never pushes, launches or carries it. |
 | `MaxSlopeAngle` | proxy field | `number` | read/write | All | The steepest slope the character can walk up, in degrees. |
 | `Move` | method | `(self: CharacterController, velocity: vector) -> ()` |  | All | Supply desired velocity for the next fixed character update. |
+| `MoveFree` | method | `(self: CharacterController, velocity: vector) -> ()` |  | All | Supply the velocity of the next fixed character update as a free move: in the air the character takes it whole, its vertical part included, with no gravity and no floor sticking (swimming, climbing, gliding); grounded as the update begins (on walkable ground and not leaving it faster than 0.1 m/s) it is Move. Call it every OnFixedUpdate; the last Move or MoveFree of a tick wins. |
 | `Radius` | proxy field | `number` | read/write | All | The radius of the character's capsule, in metres. |
 | `StepHeight` | proxy field | `number` | read/write | All | The highest step the character climbs without jumping, in metres. |
 

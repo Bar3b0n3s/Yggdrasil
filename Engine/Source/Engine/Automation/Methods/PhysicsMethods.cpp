@@ -5,6 +5,7 @@
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Physics/CharacterController.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
@@ -147,6 +148,7 @@ namespace Engine {
 				result.Squeezed = report->Character->IsSqueezed;
 				if (report->Character->SqueezedBy.IsValid())
 					result.SqueezedBy = Utils::SummarizeEntityId(context, scene, report->Character->SqueezedBy);
+				result.LastMove = report->Character->LastMove == CharacterMoveMode::Free ? "Free" : "Walk";
 			}
 			result.CenterOfMass = report->CenterOfMass;
 			// M47: the buoyancy item's last application.
@@ -291,6 +293,10 @@ namespace Engine {
 				"For a body whose owner holds a Buoyancy, what the physics last floated it with: {water (the Buoyancy's Water when set; else "
 				"the water whose planes held the most of the submerged volume, null when nothing was submerged; as {id, name, path}), "
 				"submergedVolume, totalVolume (m^3)}, kept while it sleeps and 0 while it is skipped as invalid; null for any other body.")
+			.Field("lastMove", &PhysicsBodyInfoResult::LastMove,
+				"\"Free\" when a character's last update was a free move (CharacterController:MoveFree while the character was not grounded "
+				"as the update began: on walkable ground and not leaving it faster than 0.1 m/s), so it can read \"Free\" beside grounded true "
+				"in the update that lands; \"Walk\" otherwise; empty for other bodies.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).

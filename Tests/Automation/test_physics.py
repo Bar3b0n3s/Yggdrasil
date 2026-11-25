@@ -11,7 +11,8 @@ squeezed and squeezedBy). test_joint_info_reads_a_joint_in_play reads physics.jo
 Docs/Decisions/0054-m37-joints.md decision 10) and its errors. test_vehicle_info_reads_a_vehicle_in_play reads
 physics.vehicleInfo (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), through a vehicle and a wheel,
 and its errors. test_body_info_reports_buoyancy reads M47's buoyancy block (Docs/Decisions/0065-m47-water.md
-decision 3).
+decision 3). test_body_info_reports_a_characters_last_move reads physics.bodyInfo's lastMove after a
+CharacterController:MoveFree (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3).
 """
 
 from __future__ import annotations
@@ -233,6 +234,35 @@ class PhysicsTests(AutomationTestCase):
         self.assertIsNotNone(squeezed)
         assert squeezed is not None
         self.assertEqual(squeezed["squeezedBy"]["path"], "/Press")
+        client.call("play.stop")
+
+    def test_body_info_reports_a_characters_last_move(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        # A swimmer in open air with nothing under it, and a ball, which is no character.
+        client.call("entity.create", {"name": "Swimmer", "components": {
+            "Transform": {"Translation": [0, 10, 0]}, "CharacterController": {}}})
+        client.call("entity.create", {"name": "Ball", "components": {
+            "Transform": {"Translation": [5, 10, 0]}, "RigidBody": {"Type": "Dynamic"},
+            "SphereCollider": {"Radius": 0.5}}})
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 1, "render": "none"})
+        self.assertEqual(client.call("physics.bodyInfo", {"entity": "/Swimmer"})["lastMove"], "Walk")
+
+        # A free move in the air, consumed by the next step: the swimmer rises at the velocity it asked for, with no
+        # gravity.
+        client.call("script.eval", {"context": "play", "code":
+                                    "Scene.FindByName('Swimmer').CharacterController:MoveFree(vector.create(0, 1, 0))"})
+        client.call("play.step", {"ticks": 1, "render": "none"})
+        swimmer = client.call("physics.bodyInfo", {"entity": "/Swimmer"})
+        self.assertEqual(swimmer["lastMove"], "Free")
+        self.assertAlmostEqual(swimmer["linearVelocity"][1], 1.0, places=4)
+
+        # Without another call the next update walks: the swimmer falls on from the velocity it had.
+        client.call("play.step", {"ticks": 1, "render": "none"})
+        walked = client.call("physics.bodyInfo", {"entity": "/Swimmer"})
+        self.assertEqual(walked["lastMove"], "Walk")
+        self.assertLess(walked["linearVelocity"][1], 1.0)
+        self.assertEqual(client.call("physics.bodyInfo", {"entity": "/Ball"})["lastMove"], "")
         client.call("play.stop")
 
     def test_joint_info_reads_a_joint_in_play(self) -> None:

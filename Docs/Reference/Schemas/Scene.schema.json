@@ -1241,7 +1241,7 @@
 					"minimum": 0
 				},
 				"Mass": {
-					"description": "The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character.",
+					"description": "The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it supports the character where it stands on it, and never pushes, launches or carries it.",
 					"type": "number",
 					"minimum": 0.001,
 					"maximum": 1000000000

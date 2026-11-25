@@ -132,8 +132,8 @@ namespace Engine {
 			.Field("StepHeight", &CharacterControllerComponent::StepHeight, "The highest step the character climbs without jumping, in metres.",
 				{ .Min = 0.0, .Unit = "m" })
 			.Field("Mass", &CharacterControllerComponent::Mass,
-				"The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or "
-				"carries the character.",
+				"The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it supports the character where it "
+				"stands on it, and never pushes, launches or carries it.",
 				{ .Min = Utils::MinPhysicsMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
 			.Field("GravityFactor", &CharacterControllerComponent::GravityFactor, "The multiplier of the project's gravity for the character.")
 			.Field("Layer", &CharacterControllerComponent::Layer, "Physics layer name from project settings.")
