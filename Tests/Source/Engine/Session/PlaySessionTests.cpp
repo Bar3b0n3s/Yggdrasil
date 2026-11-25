@@ -2,12 +2,14 @@
 
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
+#include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/StaticComponent.h"
@@ -27,6 +29,7 @@
 #include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/ReplayRecorder.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/ScriptTestFixture.h"
@@ -260,8 +263,16 @@ namespace Engine {
 
 		TEST_CASE("PlaySession: an unchanged static scene visits no entity in a tick")
 		{
-			// M43: a static island of 40 pieces, each with a static collider, a camera and a sun: once its first tick has
-			// placed everything, a tick in which nothing moves recomputes no matrix and visits no entity.
+			// M43: a static island of 40 pieces, each with a static collider, and 4 rocks whose colliders are meshes (bodies
+			// with an asset input, S16's scenery: three the built-in cube, one a published copy of it), a camera and a sun: once
+			// its first tick has placed everything, a tick in which nothing moves recomputes no matrix and visits no entity.
+			Test::InMemoryAssetManager assets;
+			const AssetHandle boulderMesh(0x424f554c44455201ull);
+			const Result<AssetRef<Asset>> cube = assets.Load(BuiltinAssetHandles::CubeMesh);
+			const Result<AssetRef<Asset>> plane = assets.Load(BuiltinAssetHandles::PlaneMesh);
+			REQUIRE(cube.has_value());
+			REQUIRE(plane.has_value());
+			assets.Publish(boulderMesh, *cube);
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
 			Entity island = scene.CreateEntity("Island");
@@ -275,11 +286,23 @@ namespace Engine {
 				});
 				piece.AddComponent<BoxColliderComponent>();
 			}
+			for (int index = 0; index < 4; ++index)
+			{
+				Entity rock = scene.CreateEntity("Rock", island);
+				rock.Patch<TransformComponent>([index](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(4.0f * static_cast<float>(index), 0.0f, 20.0f);
+				});
+				const AssetHandle mesh = index == 3 ? boulderMesh : BuiltinAssetHandles::CubeMesh;
+				rock.AddComponent<MeshColliderComponent>(MeshColliderComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(mesh) });
+			}
 			Entity camera = scene.CreateEntity("Camera");
 			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
 			Entity sun = scene.CreateEntity("Sun");
 			sun.AddComponent<DirectionalLightComponent>();
-			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), scene);
+			PlaySessionSpecification specification = MakeSpecification(fixture);
+			specification.Assets = &assets;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
 			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
 			PlaySession& session = **created;
 			CHECK(session.GetLastTickWork().TransformsUpdated == 0);
@@ -287,6 +310,22 @@ namespace Engine {
 			for (int tick = 0; tick < 3; ++tick)
 				session.Tick();
 			CHECK(session.GetLastTickWork().TransformsUpdated == 0);
+			CHECK(session.GetLastTickWork().EntitiesVisited == 0);
+			const UUID boulder = session.GetScene().FindEntityByPath("/Island/Rock[3]").GetUUID();
+			const std::optional<Aabb> cubeBounds = session.GetPhysics().GetBodyBounds(boulder);
+			REQUIRE(cubeBounds.has_value());
+			CHECK(cubeBounds->GetSize().y == doctest::Approx(1.0f).epsilon(1.0e-3));
+
+			// A new version of the boulder's mesh (a hot reload: the flat plane) moves the asset manager's version revision:
+			// the next tick compares the rocks' mesh versions once and reshapes the boulder. The asset check is not counted
+			// (asset events are not simulation input), so the tick still visits no entity; then nothing again.
+			assets.Publish(boulderMesh, *plane);
+			session.Tick();
+			CHECK(session.GetLastTickWork().EntitiesVisited == 0);
+			const std::optional<Aabb> planeBounds = session.GetPhysics().GetBodyBounds(boulder);
+			REQUIRE(planeBounds.has_value());
+			CHECK(planeBounds->GetSize().y < 0.1f);
+			session.Tick();
 			CHECK(session.GetLastTickWork().EntitiesVisited == 0);
 
 			// A write to one piece (as a script's in the frame phase): its matrix recomputed, its body placed again (its shape

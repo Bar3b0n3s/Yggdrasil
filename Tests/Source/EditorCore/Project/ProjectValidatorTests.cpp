@@ -39,6 +39,7 @@
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/NavigationValidation.h"
@@ -46,11 +47,11 @@
 #include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
-#include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/SpriteValidation.h"
+#include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Support/AssetTestFixture.h"
@@ -2419,6 +2420,44 @@ end
 				CHECK(diagnostic.File == "Assets/Scenes/Main.scene");
 				CHECK_FALSE(diagnostic.Hint.empty());
 			}
+		}
+
+		TEST_CASE("ProjectValidator: SCENE_STATIC_MOVES reads a scene file's NotStatic body as not static")
+		{
+			// M43 (the lead's W43.1 review, finding 1): project.validate loads a scene that is not open into a scratch scene
+			// (CheckSceneFile). The loader added a Static default-constructed and copied its Scope in unseen, so a Dynamic body
+			// that itself holds Static {NotStatic} under a static root, the opt-out SCENE_STATIC_MOVES' hint gives, was still
+			// reported from the file; the same body without the opt-out is.
+			Test::EditorTestFixture fixture("ValidatorStaticSceneryFile");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const Scope<Scene> scene = editor.CreateScene("Island");
+			const Entity island = scene->CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			const Entity crate = scene->CreateEntity("Crate", island);
+			crate.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
+			crate.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::NotStatic });
+			const Entity barrel = scene->CreateEntity("Barrel", island);
+			barrel.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
+			const Result<std::string> text = SceneSerializer::SaveToString(*scene);
+			REQUIRE(text.has_value());
+			const Result<VfsPath> path = VfsPath::Create("project", "Assets/Scenes/Island.scene");
+			REQUIRE(path.has_value());
+			REQUIRE(editor.WriteProjectFile(*path, std::as_bytes(std::span(text->data(), text->size()))).has_value());
+			REQUIRE(editor.GetScenePath() != std::optional<VfsPath>(*path));
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<std::string> reported;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code != SceneStaticMovesCode)
+					continue;
+				CHECK(diagnostic.File == "Assets/Scenes/Island.scene");
+				reported.push_back(diagnostic.Entity);
+			}
+			CHECK(reported == std::vector<std::string>{ barrel.GetUUID().ToString() });
 		}
 
 		TEST_CASE("ProjectValidator: RENDER_REFLECTION_INVALID reports a mirror without a mesh or off its glass, with the glass's axis")

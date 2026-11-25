@@ -11,6 +11,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/TransformSystem.h"
 
 #include <entt/entity/registry.hpp>
@@ -451,6 +452,8 @@ namespace Engine {
 	void RenderStaticCache::VerifyAgainstFullRebuild() const
 	{
 		const Scene& scene = *m_Scene;
+		// The set follows the tags, so the tags are checked against the Static rule first.
+		VerifyHierarchyStaticTags(scene);
 		const entt::registry& registry = scene.GetRegistry();
 		std::vector<entt::entity> candidates;
 		scene.CollectCanonical<HierarchyStaticTag, MeshRendererComponent>(candidates);

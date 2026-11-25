@@ -9,8 +9,10 @@
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
@@ -789,6 +791,45 @@ namespace Engine {
 			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
 			CHECK(scene.GetEntityCount() == count);
 			CHECK(scene.GetRevision() == revision);
+		}
+
+		TEST_CASE("PrefabInstantiator: an instance whose root holds a NotStatic Static is not static under a static parent")
+		{
+			// M43 (the lead's W43.1 review, finding 1): instantiation creates each member through the serializer, and a prefab
+			// sync (here a revert) adds a removed component again to a member that has children. Both added a Static
+			// default-constructed (Scope Subtree) and copied its Scope in unseen, so the NotStatic root (and, on the sync, its
+			// children) stayed static under the static island.
+			Test::SceneTestFixture setup;
+			const Scope<Scene> source = setup.CreateEmptyScene();
+			const Entity millSource = source->CreateEntityWithID(UUID(0x6d696c6c), "Mill");
+			millSource.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::NotStatic });
+			static_cast<void>(source->CreateEntityWithID(UUID(0x7361696c), "Sail", millSource));
+			const Result<Prefab> prefab = Prefab::CreateFromEntity(millSource, "Mill");
+			REQUIRE_MESSAGE(prefab.has_value(), (prefab ? std::string() : prefab.error().ToString()));
+
+			Scene& scene = setup.GetScene();
+			const Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			PrefabInstantiateOptions options = MakeOptions(UUID(0x1515));
+			options.Parent = island;
+			LoadReport report;
+			const Result<Entity> mill = PrefabInstantiator::Instantiate(scene, *prefab, options, PrefabOptions{}, report);
+			REQUIRE(mill.has_value());
+			const Entity sail = scene.FindEntityByPath("/Island/Mill/Sail");
+			REQUIRE(sail.IsValid());
+			CHECK(island.HasComponent<HierarchyStaticTag>());
+			CHECK(mill->GetComponent<StaticComponent>().Scope == StaticScope::NotStatic);
+			CHECK_FALSE(mill->HasComponent<HierarchyStaticTag>());
+			CHECK_FALSE(sail.HasComponent<HierarchyStaticTag>());
+
+			// The instance's Static removed (the mill and its sail join the island's subtree), then reverted to the prefab's.
+			mill->RemoveComponent<StaticComponent>();
+			REQUIRE(sail.HasComponent<HierarchyStaticTag>());
+			REQUIRE(PrefabInstantiator::Revert(scene, *mill, *prefab, PrefabOptions{}, report).has_value());
+			REQUIRE(mill->HasComponent<StaticComponent>());
+			CHECK(mill->GetComponent<StaticComponent>().Scope == StaticScope::NotStatic);
+			CHECK_FALSE(mill->HasComponent<HierarchyStaticTag>());
+			CHECK_FALSE(sail.HasComponent<HierarchyStaticTag>());
 		}
 
 		TEST_CASE("PrefabInstantiator: a unique-per-scene component the scene already has is rejected")

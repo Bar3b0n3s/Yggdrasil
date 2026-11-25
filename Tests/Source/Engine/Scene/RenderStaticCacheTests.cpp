@@ -3,6 +3,7 @@
 #include "Engine/Scene/RenderStaticCache.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
@@ -524,6 +525,39 @@ namespace Engine {
 				for (size_t index = 0; index < originalCell.Items.size(); ++index)
 					CHECK(copiedCell.Items[index].World == originalCell.Items[index].World);
 			}
+		}
+
+		TEST_CASE("RenderStaticCache: a Static that ApplyEntityJson adds again over an existing subtree leaves the set right")
+		{
+			// M43 (the lead's W43.1 review, finding 1): undo of a Static's removal and a prefab sync add it again through
+			// SceneSerializer::ApplyEntityJson to an entity with children; its Scope must reach the tags, and so the set, as it
+			// is added. The cache's own Debug check compares the set with the tags, so the tag check runs first.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity island = CreateStaticRoot(scene, "Island");
+			const Entity rock = CreateMesh(scene, "Rock", island, glm::vec3(1.0f, 0.0f, 1.0f));
+			const Entity mill = CreateMesh(scene, "Mill", island, glm::vec3(3.0f, 0.0f, 3.0f));
+			mill.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::NotStatic });
+			const Entity sail = CreateMesh(scene, "Sail", mill, glm::vec3(0.0f, 2.0f, 0.0f));
+			const Entity hut = CreateMesh(scene, "Hut", Entity{}, glm::vec3(2.0f, 0.0f, 2.0f));
+			hut.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::EntityOnly });
+			static_cast<void>(CreateMesh(scene, "Door", hut, glm::vec3(0.5f, 0.0f, 0.0f)));
+			const std::vector<UUID> authored = SetEntities(*UpdateAndRefresh(scene));
+			REQUIRE(authored == std::vector<UUID>{ rock.GetUUID(), hut.GetUUID() });
+			const Result<Json> millBefore = SceneSerializer::EntityToJson(mill);
+			const Result<Json> hutBefore = SceneSerializer::EntityToJson(hut);
+			REQUIRE(millBefore.has_value());
+			REQUIRE(hutBefore.has_value());
+
+			// The removals an undo reverts: the mill and its sail join the island's set, and the hut leaves it.
+			mill.RemoveComponent<StaticComponent>();
+			hut.RemoveComponent<StaticComponent>();
+			CHECK(SetEntities(*UpdateAndRefresh(scene)) == std::vector<UUID>{ rock.GetUUID(), mill.GetUUID(), sail.GetUUID() });
+
+			LoadReport report;
+			REQUIRE(SceneSerializer::ApplyEntityJson(mill, JsonReader(*millBefore), LoadOptions{}, report).has_value());
+			REQUIRE(SceneSerializer::ApplyEntityJson(hut, JsonReader(*hutBefore), LoadOptions{}, report).has_value());
+			CHECK(SetEntities(*UpdateAndRefresh(scene)) == authored);
 		}
 
 		TEST_CASE("RenderStaticCache: a cleared scene's set is empty, and fills again with the entities made after")

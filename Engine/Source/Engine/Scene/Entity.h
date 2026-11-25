@@ -123,7 +123,9 @@ namespace Engine {
 		decltype(auto) AddComponent(Args&&... args) const;
 
 		// The component T (asserted present). Writing through the reference is the runtime-system path: it bypasses the
-		// change tracker; editor and automation code use Patch.
+		// change tracker; editor and automation code use Patch. A TransformComponent is written through it only in the files
+		// of ModuleRules.json's Banned.TransformWriteFiles, followed by Scene::MarkTransformWritten (M43, Lint
+		// banned-transform-write); everywhere else a transform write goes through Patch.
 		template<typename T>
 		[[nodiscard]] T& GetComponent() const;
 

@@ -722,7 +722,7 @@
 		]
 	},
 	"Banned": {
-		"Notes": "Path scopes of the banned-API step. SimulationPathModules may not call CRT transcendental functions (section 4.12); SimulationPathExceptions lists files of those modules that do not affect simulated state. TryCatchFiles are the boundary files of section 4.6 (Scripting needs none: lua_pcall catches Luau errors inside the VM and bindings are exception-neutral). JsonAccessFiles may call nlohmann json at()/get<>(). AbiMacroFiles may #define the ABI-relevant configuration macros the step otherwise bans: only EnTT's configuration header (section 4.5). TransformWriteFiles may write a TransformComponent through a mutable GetComponent, TryGetComponent, get or try_get access, which the step otherwise bans (banned-transform-write) because such a write bypasses the change tracking of world transforms: the systems that write transforms directly and call Scene::MarkTransformWritten after the write (section 5.2, Docs/Decisions/0061-m43-static-scenery.md decision 3); every other writer goes through Entity::Patch or a reflected setter.",
+		"Notes": "Path scopes of the banned-API step. SimulationPathModules may not call CRT transcendental functions (section 4.12); SimulationPathExceptions lists files of those modules that do not affect simulated state. TryCatchFiles are the boundary files of section 4.6 (Scripting needs none: lua_pcall catches Luau errors inside the VM and bindings are exception-neutral). JsonAccessFiles may call nlohmann json at()/get<>(). AbiMacroFiles may #define the ABI-relevant configuration macros the step otherwise bans: only EnTT's configuration header (section 4.5). TransformWriteFiles may write a TransformComponent through a mutable access (a GetComponent, TryGetComponent, get or try_get of it that is written or bound mutably, a get or try_get of several components naming it, a view or group naming it), which the step otherwise bans (banned-transform-write) because such a write bypasses the change tracking of world transforms: exactly the files that write transforms directly and call Scene::MarkTransformWritten after the write (section 5.2, Docs/Decisions/0061-m43-static-scenery.md decision 3); every other writer goes through Entity::Patch or a reflected setter. The step does not see a mutable access passed as a function argument.",
 		"SimulationPathModules": [
 			"Core",
 			"Scene",
@@ -756,7 +756,6 @@
 		"NewDeleteFiles": [],
 		"OutputFiles": [],
 		"TransformWriteFiles": [
-			"Engine/Source/Engine/Scene/TransformSystem.cpp",
 			"Engine/Source/Engine/Scene/PhysicsSystem.cpp",
 			"Engine/Source/Engine/Scene/Physics2DSystem.cpp"
 		]

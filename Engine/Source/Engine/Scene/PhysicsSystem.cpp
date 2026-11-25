@@ -949,55 +949,71 @@ namespace Engine {
 		return entry;
 	}
 
-	std::set<UUID> PhysicsSystem::State::FindShapeChanges(bool hierarchyChanged) const
-	{
-		const entt::registry& registry = Specification.RuntimeScene->GetRegistry();
-		const auto sameParts = [](const PhysicsShapeInput& input, const TransformComponent& local)
+	namespace Utils {
+
+		// Whether `local` holds the values of the parts a shape input baked in (FindShapeChanges and, M43,
+		// FindWrittenShapeChanges compare alike; the 2D twin is Physics2DSystem.cpp's Same2DShapeInputParts).
+		static bool SameShapeInputParts(const PhysicsShapeInput& input, const TransformComponent& local)
 		{
 			switch (input.Parts)
 			{
 				case PhysicsShapeInputParts::Scale:
-					return Utils::SameBits(local.Scale, input.Local.Scale);
+					return SameBits(local.Scale, input.Local.Scale);
 				case PhysicsShapeInputParts::ScaleRotation:
-					return Utils::SameBits(local.Scale, input.Local.Scale) && Utils::SameBits(local.Rotation, input.Local.Rotation);
+					return SameBits(local.Scale, input.Local.Scale) && SameBits(local.Rotation, input.Local.Rotation);
 				case PhysicsShapeInputParts::Whole:
 					break;
 			}
-			return Utils::SameBits(local.Translation, input.Local.Translation) && Utils::SameBits(local.Rotation, input.Local.Rotation)
-				&& Utils::SameBits(local.Scale, input.Local.Scale);
-		};
+			return SameBits(local.Translation, input.Local.Translation) && SameBits(local.Rotation, input.Local.Rotation)
+				&& SameBits(local.Scale, input.Local.Scale);
+		}
+
+		// Whether a shape input's entity is gone, or holds other values of the parts its shape baked in.
+		static bool IsShapeInputChanged(const entt::registry& registry, const PhysicsShapeInput& input)
+		{
+			const TransformComponent* local = registry.valid(input.Entity) ? registry.try_get<TransformComponent>(input.Entity) : nullptr;
+			return local == nullptr || !SameShapeInputParts(input, *local);
+		}
+
+	}
+
+	std::set<UUID> PhysicsSystem::State::FindShapeChanges(bool hierarchyChanged) const
+	{
+		const entt::registry& registry = Specification.RuntimeScene->GetRegistry();
 		std::set<UUID> owners;
 		for (const auto& [handle, entry] : Bodies)
 		{
-			static_cast<void>(handle);
 			bool changed = false;
 			if (hierarchyChanged && IsPresent(entry.Owner))
 			{
 				// The entities a shape bakes in may be others now (a reparent above the owner or between it and a collider).
 				const std::vector<PhysicsShapeInput> current = CaptureShapeInputs(entry.Plan);
 				changed = !std::equal(current.begin(), current.end(), entry.ShapeInputs.begin(), entry.ShapeInputs.end(),
-					[&sameParts](const PhysicsShapeInput& now, const PhysicsShapeInput& then)
+					[](const PhysicsShapeInput& now, const PhysicsShapeInput& then)
 				{
-					return now.Entity == then.Entity && now.Parts == then.Parts && sameParts(then, now.Local);
+					return now.Entity == then.Entity && now.Parts == then.Parts && Utils::SameShapeInputParts(then, now.Local);
 				});
 			}
 			else
 			{
-				changed = std::any_of(entry.ShapeInputs.begin(), entry.ShapeInputs.end(), [&registry, &sameParts](const PhysicsShapeInput& input)
+				changed = std::any_of(entry.ShapeInputs.begin(), entry.ShapeInputs.end(), [&registry](const PhysicsShapeInput& input)
 				{
-					const TransformComponent* local = registry.valid(input.Entity) ? registry.try_get<TransformComponent>(input.Entity) : nullptr;
-					return local == nullptr || !sameParts(input, *local);
+					return Utils::IsShapeInputChanged(registry, input);
 				});
 			}
-			const bool assetChanged = Specification.Assets != nullptr
-				&& std::any_of(entry.AssetInputs.begin(), entry.AssetInputs.end(), [this](const PhysicsAssetInput& input)
-			{
-				return Specification.Assets->GetVersion(input.Asset) != input.Version;
-			});
-			if (changed || assetChanged)
+			if (changed || HasAssetInputChanged(entry))
 				owners.insert(entry.Owner);
 		}
 		return owners;
+	}
+
+	bool PhysicsSystem::State::HasAssetInputChanged(const PhysicsBodyEntry& entry) const
+	{
+		return Specification.Assets != nullptr
+			&& std::any_of(entry.AssetInputs.begin(), entry.AssetInputs.end(), [this](const PhysicsAssetInput& input)
+		{
+			return Specification.Assets->GetVersion(input.Asset) != input.Version;
+		});
 	}
 
 	std::set<UUID> PhysicsSystem::State::FindWrittenShapeChanges()
@@ -1009,8 +1025,14 @@ namespace Engine {
 		}
 		RefreshOwnerLists();
 		const entt::registry& registry = Specification.RuntimeScene->GetRegistry();
-		// The bodies that bake a written entity in, then those with asset inputs; each checked as FindShapeChanges checks it.
-		std::vector<uint32_t> candidates = AssetInputBodies;
+		// The bodies that bake a written entity in (the tick's visits), and those with asset inputs while the asset manager's
+		// version revision has moved since every one of them was last found current (the lead's W43.1 review): a version
+		// changes only with that revision, and a body made or reshaped since captured the versions of its time, so an
+		// unchanged mesh or terrain collider costs nothing. The asset check is not counted: it follows asset events (a load,
+		// a hot reload, a built-in's first use, a dry run's restore), which are not simulation input and differ between a
+		// rendering and a headless session (the renderer streams its textures and meshes), so the counters stay deterministic.
+		// Each is checked as FindShapeChanges checks it.
+		std::vector<uint32_t> candidates;
 		for (const entt::entity entity : ChangedTransforms)
 		{
 			if (const auto found = ShapeInputBodies.find(entity); found != ShapeInputBodies.end())
@@ -1020,7 +1042,17 @@ namespace Engine {
 		const auto [first, last] = std::ranges::unique(candidates);
 		candidates.erase(first, last);
 		Specification.RuntimeScene->AddEntitiesVisited(candidates.size());
+		const uint64_t assetRevision = Specification.Assets != nullptr ? Specification.Assets->GetVersionRevision() : 0;
+		const bool checkAssets = AssetInputsCurrentAt != assetRevision;
+		if (checkAssets)
+		{
+			candidates.insert(candidates.end(), AssetInputBodies.begin(), AssetInputBodies.end());
+			std::ranges::sort(candidates);
+			const auto [assetFirst, assetLast] = std::ranges::unique(candidates);
+			candidates.erase(assetFirst, assetLast);
+		}
 		std::set<UUID> owners;
+		bool assetsCurrent = true;
 		for (const uint32_t handle : candidates)
 		{
 			const auto body = Bodies.find(handle);
@@ -1029,29 +1061,17 @@ namespace Engine {
 			const PhysicsBodyEntry& entry = body->second;
 			const bool changed = std::any_of(entry.ShapeInputs.begin(), entry.ShapeInputs.end(), [&registry](const PhysicsShapeInput& input)
 			{
-				const TransformComponent* local = registry.valid(input.Entity) ? registry.try_get<TransformComponent>(input.Entity) : nullptr;
-				if (local == nullptr)
-					return true;
-				switch (input.Parts)
-				{
-					case PhysicsShapeInputParts::Scale:
-						return !Utils::SameBits(local->Scale, input.Local.Scale);
-					case PhysicsShapeInputParts::ScaleRotation:
-						return !Utils::SameBits(local->Scale, input.Local.Scale) || !Utils::SameBits(local->Rotation, input.Local.Rotation);
-					case PhysicsShapeInputParts::Whole:
-						break;
-				}
-				return !Utils::SameBits(local->Translation, input.Local.Translation) || !Utils::SameBits(local->Rotation, input.Local.Rotation)
-					|| !Utils::SameBits(local->Scale, input.Local.Scale);
+				return Utils::IsShapeInputChanged(registry, input);
 			});
-			const bool assetChanged = Specification.Assets != nullptr
-				&& std::any_of(entry.AssetInputs.begin(), entry.AssetInputs.end(), [this](const PhysicsAssetInput& input)
-			{
-				return Specification.Assets->GetVersion(input.Asset) != input.Version;
-			});
+			const bool assetChanged = HasAssetInputChanged(entry);
+			assetsCurrent = assetsCurrent && !assetChanged;
 			if (changed || assetChanged)
 				owners.insert(entry.Owner);
 		}
+		// A body whose asset inputs are stale stays a candidate on every PreStep until it is reshaped (one whose owner is
+		// disabled waits for the rebuild its enable makes), as every body was before.
+		if (checkAssets && assetsCurrent)
+			AssetInputsCurrentAt = assetRevision;
 		return owners;
 	}
 

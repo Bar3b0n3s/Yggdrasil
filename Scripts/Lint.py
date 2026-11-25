@@ -20,7 +20,11 @@ Steps, selected with --steps (default: all, in this order):
             functions that call them on the simulation path (section 4.12); #define/#undef of the ABI-relevant
             configuration macros of vendored libraries and first-party settings (section 2.2); rand()/srand();
             dynamic_cast/typeid; output other than the logger; assert(); naked new/delete; the product name in C++,
-            Slang, Python and Lua code; a value move-assigned to itself; and what CodeStyle section 13 forbids. json
+            Slang, Python and Lua code; a value move-assigned to itself; a TransformComponent written directly past
+            change tracking outside Banned.TransformWriteFiles (banned-transform-write: a mutable single-component
+            access that is written or bound to a mutable reference or pointer, any get or try_get of several components
+            that names a mutable TransformComponent, and any view or group that does; a mutable access passed as a
+            function argument is not seen); and what CodeStyle section 13 forbids. json
             at()/get<>() receivers are found by type with clang-query on the flags from compile_commands.json when it
             is available (aliases, values returned by functions and call chains included), run on the translation
             units that can call basic_json's members: the sources that include nlohmann's json.hpp, through them the
@@ -1917,14 +1921,21 @@ TRANSFORM_BINDING_PATTERN = re.compile(
     r"(?:[A-Za-z_]\w*|\[[^\[\]]*\])\s*=\s*"
     r"(?:(?:[^;{}()?]|\([^;{}()]*\))*\?(?:(?:[^;{}()?:]|\([^;{}()]*\))*:)?\s*)?(?P<operator>[&*]?)\s*$"
 )
-# A view or group over a mutable TransformComponent (EnTT's registry view<...>): its elements are references through
-# which a write fires no signal. A view of const TransformComponent reads only.
-TRANSFORM_VIEW_PATTERN = re.compile(r"\bview\s*<(?P<types>[^<>;{}()]*)>\s*\(")
+# A get or try_get of several components at once (EnTT's registry and views): it returns a tuple of references (or
+# pointers), and a structured binding of it binds mutable references even when it is declared const, so one that names
+# a mutable TransformComponent is a write path whatever its use. Naming const TransformComponent reads only.
+TRANSFORM_MULTI_ACCESS_PATTERN = re.compile(r"\b(?P<name>get|try_get)\s*<(?P<types>[^<>;{}()]*,[^<>;{}()]*)>\s*\(")
+# A view or group over a mutable TransformComponent (EnTT's registry view<...> and group<...>): its elements are
+# references through which a write fires no signal. A view or group of const TransformComponent reads only. A group also
+# reaches the components of its entt::get<...> argument (not those of entt::exclude<...>).
+TRANSFORM_VIEW_PATTERN = re.compile(r"\b(?P<name>view|group)\s*<(?P<types>[^<>;{}()]*)>\s*\(")
+TRANSFORM_GROUP_GET_PATTERN = re.compile(r"\bget\s*<(?P<types>[^<>;{}()]*)>")
 TRANSFORM_MUTABLE_TYPE_PATTERN = re.compile(r"(?:::\s*)?(?:Engine\s*::\s*)?TransformComponent")
 TRANSFORM_WRITE_MESSAGE = (
     "a TransformComponent written directly bypasses change tracking (Architecture section 5.2, "
     "Docs/Decisions/0061-m43-static-scenery.md): write it through Entity::Patch or a reflected setter, or, in "
-    "Banned.TransformWriteFiles, call Scene::MarkTransformWritten after the write"
+    "Banned.TransformWriteFiles, call Scene::MarkTransformWritten after the write (the rule does not see a mutable "
+    "access passed as a function argument: never hand one to a TransformComponent& parameter)"
 )
 BANNED_HEADERS = {
     "cassert": (
@@ -2188,21 +2199,47 @@ class BannedChecker:
     @staticmethod
     def transform_writes(code: str) -> list[tuple[int, str]]:
         """The writes through a mutable TransformComponent access, which bypass the change tracking of world transforms
-        (Architecture section 5.2, Docs/Decisions/0061-m43-static-scenery.md decision 3), each at its access."""
+        (Architecture section 5.2, Docs/Decisions/0061-m43-static-scenery.md decision 3), each at its access: a
+        single-component access that is written or bound mutably, a get or try_get of several components, and a view or
+        group, that names a mutable TransformComponent. A mutable access passed as a function argument is read as a
+        read (the rule's limit, stated in its message)."""
+
+        def names_mutable_transform(types: str) -> bool:
+            return any(TRANSFORM_MUTABLE_TYPE_PATTERN.fullmatch(part.strip()) for part in types.split(","))
+
         results: list[tuple[int, str]] = []
         for match in TRANSFORM_ACCESS_PATTERN.finditer(code):
             kind = transform_write_kind(code, match)
             if kind is not None:
                 access = f"{match.group(1)}<TransformComponent>"
                 results.append((match.start(), f"'{access}' is {kind}: {TRANSFORM_WRITE_MESSAGE}"))
-        for match in TRANSFORM_VIEW_PATTERN.finditer(code):
-            types = [part.strip() for part in match.group("types").split(",")]
-            if any(TRANSFORM_MUTABLE_TYPE_PATTERN.fullmatch(part) for part in types):
+        for match in TRANSFORM_MULTI_ACCESS_PATTERN.finditer(code):
+            if names_mutable_transform(match.group("types")):
+                name = match.group("name")
                 results.append(
                     (
                         match.start(),
-                        "'view<TransformComponent>' is a view of a mutable TransformComponent (use view<const "
-                        f"TransformComponent> to read): {TRANSFORM_WRITE_MESSAGE}",
+                        f"'{name}<..., TransformComponent, ...>' reaches a mutable TransformComponent among several "
+                        "components (its tuple binds mutable references; name const TransformComponent to read): "
+                        f"{TRANSFORM_WRITE_MESSAGE}",
+                    )
+                )
+        for match in TRANSFORM_VIEW_PATTERN.finditer(code):
+            name = match.group("name")
+            mutable = names_mutable_transform(match.group("types"))
+            if name == "group" and not mutable:
+                arguments, _ = balanced_arguments(code, match.end() - 1)
+                mutable = any(
+                    names_mutable_transform(get.group("types"))
+                    for argument in arguments
+                    for get in TRANSFORM_GROUP_GET_PATTERN.finditer(argument)
+                )
+            if mutable:
+                results.append(
+                    (
+                        match.start(),
+                        f"'{name}<TransformComponent>' is a {name} of a mutable TransformComponent (use const "
+                        f"TransformComponent to read): {TRANSFORM_WRITE_MESSAGE}",
                     )
                 )
         return results

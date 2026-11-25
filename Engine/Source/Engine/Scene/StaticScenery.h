@@ -45,4 +45,14 @@ namespace Engine {
 	// (M44 appends VehicleWheel to the list at its merge). Pure function of the scene; main thread.
 	[[nodiscard]] std::vector<StaticSceneryIssue> FindStaticSceneryIssues(const Scene& scene);
 
+#if defined(ENGINE_DEBUG)
+	// M43's Debug check of the Static rule (ENGINE_DEBUG builds, Dependencies.lua; the lead's W43.1 review): every entity's
+	// effective static state, computed afresh in canonical order from the Static components (StaticComponent.h's rule), must
+	// match its HierarchyStaticTag, which the scene keeps incrementally (Scene::RefreshHierarchyStatic, from Entity's
+	// component templates). ENGINE_CORE_VERIFYs, naming the first entity whose tag is wrong. TransformSystem::Update runs it
+	// after its matrix check, and the render static cache before its full-rebuild check, which compares the set with the
+	// tags and so cannot catch a wrong tag. Nothing to check while the scene holds neither a Static nor the tag.
+	void VerifyHierarchyStaticTags(const Scene& scene);
+#endif
+
 }

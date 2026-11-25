@@ -71,6 +71,27 @@ namespace Engine {
 		static_cast<void>(Scene::Create(specification));
 	}
 
+#if defined(ENGINE_DEBUG)
+	// M43 (the lead's W43.1 review): a Static written past the scene's change hooks fails the next transform update's
+	// static-tag check.
+	ENGINE_DEATH_TEST("Scene/StaticWrittenPastChangeHooks")
+	{
+		Test::SceneTestFixture fixture;
+		Scene& scene = fixture.GetScene();
+		const Entity island = scene.CreateEntity("Island");
+		island.AddComponent<StaticComponent>();
+		static_cast<void>(scene.CreateEntity("Mill", island));
+		TransformSystem::Update(scene);
+		// Deliberately past the hooks: EnTT's patch fires on_update, which the scene does not follow; only Entity's component
+		// templates refresh the tags.
+		scene.GetRegistry().patch<StaticComponent>(island.GetHandle(), [](StaticComponent& component)
+		{
+			component.Scope = StaticScope::EntityOnly;
+		});
+		TransformSystem::Update(scene);
+	}
+#endif
+
 	TEST_SUITE("Scene")
 	{
 		TEST_CASE("Scene: canonical order is independent of insertion history")
@@ -874,6 +895,33 @@ namespace Engine {
 			hut.RemoveComponent<StaticComponent>();
 			crate.RemoveComponent<StaticComponent>();
 			CHECK(scene.GetRegistry().view<HierarchyStaticTag>().empty());
+		}
+
+		TEST_CASE("Scene: a Static written past the scene's change hooks fails the Debug static-tag check")
+		{
+#if defined(ENGINE_DEBUG)
+			ENGINE_CHECK_DEATH("Scene/StaticWrittenPastChangeHooks", "Stale static tag of entity '/Island/Mill'");
+#else
+			// Without the check (Release, Dist) the tags keep the rule of the Scope the scene last saw, until a write through
+			// Entity's templates refreshes them, which is why Debug runs check every update.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			const Entity mill = scene.CreateEntity("Mill", island);
+			TransformSystem::Update(scene);
+			scene.GetRegistry().patch<StaticComponent>(island.GetHandle(), [](StaticComponent& component)
+			{
+				component.Scope = StaticScope::EntityOnly;
+			});
+			TransformSystem::Update(scene);
+			CHECK(mill.HasComponent<HierarchyStaticTag>());
+			island.Patch<StaticComponent>([](StaticComponent& component)
+			{
+				component.Scope = StaticScope::EntityOnly;
+			});
+			CHECK_FALSE(mill.HasComponent<HierarchyStaticTag>());
+#endif
 		}
 	}
 

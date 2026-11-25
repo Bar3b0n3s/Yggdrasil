@@ -10,6 +10,7 @@
 
 #include <entt/entity/registry.hpp>
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -71,9 +72,12 @@ namespace Engine {
 	// Loading or copying a scene creates entities in canonical order.
 	//
 	// Mutation: editor and automation code change components only through Entity::Patch<T> or the reflected setters
-	// (ComponentAccess), which notify the change tracker; runtime systems may write components directly. Every mutation
-	// through the scene, Entity or ComponentAccess increments the revision (automation ifRevision, §13.4), except changes
-	// to runtime-only components (RuntimeComponents.h), which are neither recorded nor counted.
+	// (ComponentAccess), which notify the change tracker; runtime systems may write components directly, except
+	// TransformComponent (M43): a direct transform write bypasses change tracking, so it is made only in the files of
+	// ModuleRules.json's Banned.TransformWriteFiles, each followed by MarkTransformWritten (Lint banned-transform-write);
+	// every other writer patches. Every mutation through the scene, Entity or ComponentAccess increments the revision
+	// (automation ifRevision, §13.4), except changes to runtime-only components (RuntimeComponents.h), which are neither
+	// recorded nor counted.
 	//
 	// Const access: the const members hand out ConstEntity, a read-only handle, so code holding a const Scene& (the
 	// serializer, the state hash) reads entities without being able to change them.
@@ -267,7 +271,8 @@ namespace Engine {
 		[[nodiscard]] const ChangeTracker& GetChangeTracker() const { return m_ChangeTracker; }
 
 		// The underlying EnTT registry, for systems that iterate component views (TransformSystem, PhysicsSystem, render
-		// extraction). Writing through it bypasses the change tracker and the revision; editor and automation code never do.
+		// extraction). Writing through it bypasses the change tracker and the revision; editor and automation code never do,
+		// and a TransformComponent is written through it only as MarkTransformWritten says (M43).
 		[[nodiscard]] entt::registry& GetRegistry() { return m_Registry; }
 		[[nodiscard]] const entt::registry& GetRegistry() const { return m_Registry; }
 	private:
@@ -335,7 +340,6 @@ namespace Engine {
 			entt::entity Handle{ entt::null };
 			uint32_t Segment = 0;
 			uint32_t Index = 0;
-			bool TransformWritten = false; // in m_TransformWrites since the last TransformSystem::Update
 		};
 		struct WorldChangeList
 		{
@@ -360,7 +364,12 @@ namespace Engine {
 		void RefreshCanonicalSegments() const;
 		// on_construct and on_update of TransformComponent.
 		void OnTransformWritten(entt::registry& registry, entt::entity entity);
+		// Adds `entity` to m_TransformWrites unless it is there since the last TransformSystem::Update (m_TransformWritten).
 		void RecordTransformWrite(entt::entity entity);
+		// Whether `entity` is in m_TransformWrites (TransformSystem::Update's topmost test).
+		[[nodiscard]] bool IsTransformWritten(entt::entity entity) const;
+		// Empties m_TransformWrites and m_TransformWritten's entries for it (the end of TransformSystem::Update).
+		void ClearTransformWrites();
 		// TransformSystem::Update's report: `changed` appended to every open world-change list, `recomputed` counted.
 		void PublishWorldChanges(std::span<const entt::entity> changed, size_t recomputed);
 	private:
@@ -376,9 +385,12 @@ namespace Engine {
 		mutable std::vector<CanonicalKeySlot> m_CanonicalKeys;
 		mutable bool m_SegmentsDirty = false;
 		mutable bool m_SegmentOrdinalsDirty = false;
-		// M43: the entities written since the last TransformSystem::Update, each once (CanonicalKeySlot::TransformWritten),
-		// and the consumers' world-change lists.
+		// M43: the entities written since the last TransformSystem::Update, each once, and by entity index (entt::to_entity)
+		// the handle of each one while it is listed (entt::null otherwise): the only record of a pending write, so it is kept
+		// apart from the mutable key slots, which const readers may claim for another handle. Then the consumers'
+		// world-change lists.
 		std::vector<entt::entity> m_TransformWrites;
+		std::vector<entt::entity> m_TransformWritten;
 		std::vector<WorldChangeList> m_WorldChangeLists;
 		std::vector<entt::entity> m_LastWorldChanges; // TransformSystem::Update's result, until the next update
 		uint64_t m_StructureRevision = 0;

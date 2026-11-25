@@ -4,6 +4,7 @@
 #include "Engine/Scene/Components/AnimatorComponent.h"
 #include "Engine/Scene/Components/BoneAttachmentComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/StaticComponent.h"
@@ -12,6 +13,7 @@
 
 #include <format>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
 namespace Engine {
@@ -73,5 +75,48 @@ namespace Engine {
 		}
 		return issues;
 	}
+
+#if defined(ENGINE_DEBUG)
+	void VerifyHierarchyStaticTags(const Scene& scene)
+	{
+		const entt::registry& registry = scene.GetRegistry();
+		const auto* statics = registry.storage<StaticComponent>();
+		const auto* tags = registry.storage<HierarchyStaticTag>();
+		if ((statics == nullptr || statics->empty()) && (tags == nullptr || tags->empty()))
+			return;
+
+		// What each entity passes down to its children: Subtree passes "static", NotStatic "not static", and EntityOnly (or no
+		// Static) what its parent passed. Parents precede their children in canonical order; the map is lookup only.
+		std::unordered_map<entt::entity, bool> passed;
+		passed.reserve(scene.GetEntityCount());
+		for (const UUID id : scene.GetCanonicalOrder())
+		{
+			const ConstEntity entity = scene.FindEntityByID(id);
+			const entt::entity handle = entity.GetHandle();
+			bool inherited = false;
+			if (const UUID parent = registry.get<RelationshipComponent>(handle).Parent; parent.IsValid())
+			{
+				const auto found = passed.find(scene.FindEntityByID(parent).GetHandle());
+				ENGINE_CORE_VERIFY(found != passed.end(), "The parent of entity {} follows it in canonical order", id);
+				inherited = found->second;
+			}
+			bool isStatic = inherited;
+			bool passes = inherited;
+			if (const StaticComponent* component = registry.try_get<StaticComponent>(handle))
+			{
+				isStatic = component->Scope != StaticScope::NotStatic;
+				if (component->Scope != StaticScope::EntityOnly)
+					passes = component->Scope == StaticScope::Subtree;
+			}
+			passed.emplace(handle, passes);
+			const bool tagged = registry.all_of<HierarchyStaticTag>(handle);
+			ENGINE_CORE_VERIFY(tagged == isStatic,
+				"Stale static tag of entity '{}' ({}) in scene '{}': the Static rule makes it {} but it {} HierarchyStaticTag: a "
+				"Static was written past the scene's change hooks (add, write or remove it through Entity's component templates, "
+				"ComponentAccess or a component host operation), or the scene missed a change",
+				scene.GetEntityPath(entity), id, scene.GetName(), isStatic ? "static" : "not static", tagged ? "holds" : "lacks");
+		}
+	}
+#endif
 
 }

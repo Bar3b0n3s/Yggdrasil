@@ -17,14 +17,15 @@
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
-#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Prefab.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/FixtureSchemaSource.h"
 #include "Support/Fuzz.h"
 #include "Support/GlmApprox.h"
@@ -245,7 +246,7 @@ namespace Engine {
 		{
 			// M43 (Docs/Decisions/0061-m43-static-scenery.md, W43.2's first checkpoint): the scene refreshes HierarchyStaticTag
 			// when a Static is added, so a load that added it default-constructed (Scope Subtree) and copied its value in
-			// afterwards, unseen, left a NotStatic entity, and an EntityOnly entity's children, static.
+			// afterwards, unseen, left a NotStatic entity static: in a file load and in a play session's runtime copy.
 			Test::SceneTestFixture setup;
 			Scene& scene = setup.GetScene();
 			const Entity island = scene.CreateEntity("Island");
@@ -275,6 +276,60 @@ namespace Engine {
 					CHECK(entity.HasComponent<HierarchyStaticTag>() == expected);
 					CHECK(entity.HasComponent<HierarchyStaticTag>() == scene.FindEntityByPath(path).HasComponent<HierarchyStaticTag>());
 				}
+			}
+
+			// The play session's runtime copy of the scene (the lead's W43.1 review).
+			PlaySessionSpecification specification;
+			specification.Registry = &setup.GetRegistry();
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			for (const std::string_view path : { "/Island", "/Island/Mill", "/Island/Mill/Sail", "/Island/Rock", "/Hut", "/Hut/Door" })
+			{
+				CAPTURE(path);
+				const Entity entity = (*session)->GetScene().FindEntityByPath(path);
+				REQUIRE(entity.IsValid());
+				CHECK(entity.HasComponent<HierarchyStaticTag>() == scene.FindEntityByPath(path).HasComponent<HierarchyStaticTag>());
+			}
+		}
+
+		TEST_CASE("SceneSerializer: a Static that ApplyEntityJson adds again reaches the entity's existing subtree with its Scope")
+		{
+			// M43 (the lead's W43.1 review, finding 1): undo or redo of a Static's removal and a prefab sync add the Static
+			// again through ApplyEntityJson to an entity that already has children. Added default-constructed (Scope Subtree),
+			// the scene tagged the whole subtree static, and the loaded Scope then copied in unseen changed no tag: a NotStatic
+			// entity and its children, and an EntityOnly root's children, stayed static.
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::Subtree });
+			const Entity mill = scene.CreateEntity("Mill", island);
+			mill.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::NotStatic });
+			const Entity sail = scene.CreateEntity("Sail", mill);
+			const Entity blade = scene.CreateEntity("Blade", sail);
+			const Entity hut = scene.CreateEntity("Hut");
+			hut.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::EntityOnly });
+			const Entity door = scene.CreateEntity("Door", hut);
+			const Result<Json> millBefore = SceneSerializer::EntityToJson(mill);
+			const Result<Json> hutBefore = SceneSerializer::EntityToJson(hut);
+			REQUIRE(millBefore.has_value());
+			REQUIRE(hutBefore.has_value());
+
+			// The removals an undo reverts: the mill's subtree joins the island's, and the hut is not static any more.
+			mill.RemoveComponent<StaticComponent>();
+			hut.RemoveComponent<StaticComponent>();
+			REQUIRE(blade.HasComponent<HierarchyStaticTag>());
+			REQUIRE_FALSE(hut.HasComponent<HierarchyStaticTag>());
+
+			LoadReport report;
+			REQUIRE(SceneSerializer::ApplyEntityJson(mill, JsonReader(*millBefore), LoadOptions{}, report).has_value());
+			REQUIRE(SceneSerializer::ApplyEntityJson(hut, JsonReader(*hutBefore), LoadOptions{}, report).has_value());
+			CHECK(mill.GetComponent<StaticComponent>().Scope == StaticScope::NotStatic);
+			CHECK(hut.GetComponent<StaticComponent>().Scope == StaticScope::EntityOnly);
+			for (const auto& [entity, expected] : { std::pair<Entity, bool>{ island, true }, { mill, false }, { sail, false },
+					 { blade, false }, { hut, true }, { door, false } })
+			{
+				CAPTURE(scene.GetEntityPath(entity));
+				CHECK(entity.HasComponent<HierarchyStaticTag>() == expected);
 			}
 		}
 

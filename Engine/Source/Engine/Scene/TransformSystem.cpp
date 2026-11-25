@@ -10,6 +10,7 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/StaticScenery.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 
@@ -253,10 +254,6 @@ namespace Engine {
 		entt::registry& registry = scene.GetRegistry();
 		std::vector<entt::entity>& changed = scene.m_LastWorldChanges;
 		changed.clear();
-		const auto isWritten = [&scene](entt::entity handle)
-		{
-			return scene.ClaimKeySlot(handle).TransformWritten;
-		};
 
 		// The topmost written entities: a written entity under a written ancestor is recomputed with the ancestor's subtree.
 		// Pending destruction is left out, as the full pass over the canonical order left it.
@@ -269,7 +266,7 @@ namespace Engine {
 			for (UUID parent = registry.get<RelationshipComponent>(entity).Parent; parent.IsValid();)
 			{
 				const entt::entity handle = scene.FindHandle(parent);
-				if (isWritten(handle))
+				if (scene.IsTransformWritten(handle))
 				{
 					topmost = false;
 					break;
@@ -302,7 +299,7 @@ namespace Engine {
 						current->Matrix = matrix;
 						changed.push_back(handle);
 					}
-					else if (isWritten(handle))
+					else if (scene.IsTransformWritten(handle))
 					{
 						changed.push_back(handle);
 					}
@@ -321,15 +318,11 @@ namespace Engine {
 			}
 		}
 
-		for (const entt::entity entity : scene.m_TransformWrites)
-		{
-			if (registry.valid(entity))
-				scene.ClaimKeySlot(entity).TransformWritten = false;
-		}
-		scene.m_TransformWrites.clear();
+		scene.ClearTransformWrites();
 		scene.PublishWorldChanges(changed, recomputed);
 #if defined(ENGINE_DEBUG)
 		Utils::VerifyWorldMatrices(scene);
+		VerifyHierarchyStaticTags(scene);
 #endif
 		return changed;
 	}

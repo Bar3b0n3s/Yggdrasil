@@ -9,6 +9,11 @@ namespace Engine {
 		glm::vec3 Translation = glm::vec3(0.0f);
 	};
 
+	struct RigidBodyComponent
+	{
+		float Mass = 1.0f;
+	};
+
 	// A stand-in for the scene's entity handle: GetComponent and TryGetComponent return the component for a direct write,
 	// which bypasses change tracking; Patch writes it through the tracked path.
 	class Entity

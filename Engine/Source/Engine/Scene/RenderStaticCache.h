@@ -50,10 +50,11 @@
 // within this scene's set, for change detection within it (the edit scene and its play copy hand out the same versions);
 // what a renderer prepares from a cell is keyed by the cell object, the Ref<const RenderStaticCell> it holds while cached.
 //
-// The Debug check (ENGINE_DEBUG builds, Dependencies.lua): each refresh also builds the whole set afresh from the scene
-// (Scene::CollectCanonical over HierarchyStaticTag and MeshRenderer) and ENGINE_CORE_VERIFYs that it equals the cached one:
-// the cells and their keys, each item field by field, the pick tables and each cell's Dissolving, naming the first
-// difference.
+// The Debug check (ENGINE_DEBUG builds, Dependencies.lua): each refresh first checks every HierarchyStaticTag against the
+// Static rule (VerifyHierarchyStaticTags, StaticScenery.h), since the set follows the tags, then builds the whole set afresh
+// from the scene (Scene::CollectCanonical over HierarchyStaticTag and MeshRenderer) and ENGINE_CORE_VERIFYs that it equals
+// the cached one: the cells and their keys, each item field by field, the pick tables and each cell's Dissolving, naming the
+// first difference.
 //
 // Ownership: the Scene creates its cache at its first Static (Scene::CommitComponentChange) and owns it; extraction reaches
 // it through Scene::RefreshStaticSet and Scene::GetStaticCache. Neither the set nor the cache is serialized or hashed. Main

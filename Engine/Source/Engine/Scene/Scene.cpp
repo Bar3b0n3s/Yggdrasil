@@ -371,6 +371,7 @@ namespace Engine {
 		m_FreeSegments.clear();
 		m_CanonicalKeys.clear();
 		m_TransformWrites.clear();
+		m_TransformWritten.clear();
 		m_SegmentsDirty = false;
 		m_SegmentOrdinalsDirty = false;
 		++m_Revision;
@@ -1010,11 +1011,31 @@ namespace Engine {
 
 	void Scene::RecordTransformWrite(entt::entity entity)
 	{
-		CanonicalKeySlot& slot = ClaimKeySlot(entity);
-		if (slot.TransformWritten)
+		const auto index = static_cast<size_t>(entt::to_entity(entity));
+		if (index >= m_TransformWritten.size())
+			m_TransformWritten.resize(index + 1, entt::null);
+		if (m_TransformWritten[index] == entity)
 			return;
-		slot.TransformWritten = true;
+		// A destroyed entity's entry at the same index is replaced; its stale handle in m_TransformWrites is skipped.
+		m_TransformWritten[index] = entity;
 		m_TransformWrites.push_back(entity);
+	}
+
+	bool Scene::IsTransformWritten(entt::entity entity) const
+	{
+		const auto index = static_cast<size_t>(entt::to_entity(entity));
+		return index < m_TransformWritten.size() && m_TransformWritten[index] == entity;
+	}
+
+	void Scene::ClearTransformWrites()
+	{
+		for (const entt::entity entity : m_TransformWrites)
+		{
+			const auto index = static_cast<size_t>(entt::to_entity(entity));
+			if (m_TransformWritten[index] == entity)
+				m_TransformWritten[index] = entt::null;
+		}
+		m_TransformWrites.clear();
 	}
 
 	void Scene::PublishWorldChanges(std::span<const entt::entity> changed, size_t recomputed)
@@ -1073,7 +1094,8 @@ namespace Engine {
 		for (UUID ancestor = m_Registry.get<RelationshipComponent>(root).Parent; ancestor.IsValid();)
 		{
 			const entt::entity handle = FindHandle(ancestor);
-			if (const StaticComponent* component = m_Registry.try_get<StaticComponent>(handle); component != nullptr && component->Scope != StaticScope::EntityOnly)
+			if (const StaticComponent* component = m_Registry.try_get<StaticComponent>(handle);
+				component != nullptr && component->Scope != StaticScope::EntityOnly)
 			{
 				inherited = component->Scope == StaticScope::Subtree;
 				break;

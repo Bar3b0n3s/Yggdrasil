@@ -31,7 +31,8 @@ namespace Engine {
 	//     every matrix is bit-identical to it. An update of a scene where nothing was written recomputes nothing. Debug
 	//     builds (ENGINE_DEBUG) recompute every matrix after each update and ENGINE_CORE_VERIFY that the incremental ones
 	//     equal them, naming the first stale entity, so a write that bypassed the tracking fails there instead of drawing
-	//     stale in every configuration alike. Systems read WorldTransformComponent after an Update.
+	//     stale in every configuration alike; they then check every HierarchyStaticTag against the Static rule
+	//     (VerifyHierarchyStaticTags, StaticScenery.h). Systems read WorldTransformComponent after an Update.
 	//   - Between updates, gameplay reads (scripts, automation, the virtual fields) walk the parent chain on demand. The
 	//     getters take a readable entity (Entity::IsReadable), so a script reads the pose of an entity pending destruction
 	//     until the flush (M20, decision 4 of Docs/Decisions/0031-m20-contract.md); the setters take a valid one.

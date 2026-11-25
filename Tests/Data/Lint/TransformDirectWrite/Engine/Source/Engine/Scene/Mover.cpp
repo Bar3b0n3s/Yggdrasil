@@ -51,4 +51,26 @@ namespace Engine {
 		static_cast<void>(registry.template view<TransformComponent>());
 	}
 
+	// Seeded defects: a get and a try_get of several components that name the mutable component (their tuple binds mutable
+	// references, even through a const structured binding), a group that owns it, and a group that reaches it through its
+	// get list.
+	template<typename AnyRegistry>
+	void Settle(AnyRegistry& registry, int entity)
+	{
+		const auto [settled, body] = registry.template get<TransformComponent, RigidBodyComponent>(entity);
+		settled.Translation.y = body.Mass;
+		static_cast<void>(registry.template try_get<RigidBodyComponent, TransformComponent>(entity));
+		static_cast<void>(registry.template group<TransformComponent>());
+		static_cast<void>(registry.template group<RigidBodyComponent>(typename AnyRegistry::template get<TransformComponent>{}));
+	}
+
+	// Controls: a get of several components and a group that name the component const read only.
+	template<typename AnyRegistry>
+	float Weigh(AnyRegistry& registry, int entity)
+	{
+		const auto [transform, body] = registry.template get<const TransformComponent, const RigidBodyComponent>(entity);
+		static_cast<void>(registry.template group<const TransformComponent>());
+		return transform.Translation.y + body.Mass;
+	}
+
 }

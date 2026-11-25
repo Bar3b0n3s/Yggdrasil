@@ -16,7 +16,8 @@ namespace Engine {
 	// Patch"). Reflection's ComponentInfo stores a pointer to them without knowing this definition (ADR 0006); Scene's
 	// RegisterComponent<T> installs the instance generated for T (Detail::ComponentHostOpsFor<T>). Every operation but
 	// CollectCanonical (which takes the scene) takes a valid entity (asserted), and every one runs on the main thread; Add,
-	// Remove and Patch go through Entity's templates, so they are recorded by the change tracker and increment the revision.
+	// AddCopy, Remove and Patch go through Entity's templates, so they are recorded by the change tracker and increment the
+	// revision.
 	// Has and GetConst take a read-only handle, so code holding a const Scene& (the serializer) can use them; an Entity
 	// converts implicitly.
 	struct ComponentHostOps
@@ -25,7 +26,9 @@ namespace Engine {
 		bool (*Has)(ConstEntity entity) = nullptr;
 		// The component object, or nullptr when absent: read-only.
 		const void* (*GetConst)(ConstEntity entity) = nullptr;
-		// The component object, or nullptr when absent. For writes only by runtime systems (bypasses the change tracker).
+		// The component object, or nullptr when absent. For writes only by runtime systems (bypasses the change tracker);
+		// never for a TransformComponent write, which would bypass its change tracking too (M43: Patch it, or write it in a
+		// file of Banned.TransformWriteFiles and call Scene::MarkTransformWritten).
 		void* (*Get)(Entity entity) = nullptr;
 		// Adds a default-constructed component and returns it (asserts that it is absent).
 		void* (*Add)(Entity entity) = nullptr;
