@@ -23,7 +23,8 @@ namespace Engine {
 	// M43's static grouping key (ADR 0060's ledger: (pipeline, material, mesh, submesh), as a struct; M46 appends its level, Lod):
 	// the draws of one key share their vertices, indices, pipeline variant and material set, so a view draws every visible
 	// static instance of a key with one indexed draw. Pipeline is the forward variant of the camera's passes, or a shadow
-	// caster's variant (Material null for an Opaque caster, which binds none). Ordered as the opaque sort orders draws.
+	// caster's variant (Material null for an Opaque caster without wind, which binds none; M46: a wind caster's material, whose
+	// wind its draws push). Ordered as the opaque sort orders draws.
 	struct RenderStaticDrawKey
 	{
 		uint32_t Pipeline = 0;

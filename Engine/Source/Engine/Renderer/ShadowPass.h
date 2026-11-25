@@ -108,7 +108,7 @@ namespace Engine {
 	[[nodiscard]] bool ShadowBoxesOverlap(const ShadowBox& caster, const ShadowBox& light);
 
 	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): what the static casters of one key draw with (RenderStaticDrawKey:
-	// the caster variant, a Mask caster's material or null, the mesh and the submesh): ShadowCasterDraw's members a key
+	// the caster variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh): ShadowCasterDraw's members a key
 	// determines, resolved when a static cell is prepared and shared by the cells of the renderer that hold the key.
 	struct StaticShadowKey
 	{
@@ -207,14 +207,22 @@ namespace Engine {
 	};
 
 	// M43: ShadowPass::PrepareStaticFaces' working buckets: for each StaticShadowKey, the records and M29 signatures of the
-	// face's visible casters of that key, and the keys the face touched, in the order they first appear. Empty between calls;
-	// the renderer keeps them from render to render, so an unchanged frame's faces reuse their storage.
+	// face's visible casters of that key, and the keys the face touched, in the order they first appear. Keys and Touched are
+	// empty between calls; the renderer keeps them from render to render, so an unchanged frame's faces reuse their storage.
 	struct StaticShadowBuckets
 	{
 		std::vector<std::vector<std::pair<uint32_t, uint64_t>>> Keys{}; // per key: (record, signature)
 		std::vector<uint32_t> Touched{};
 		bool Wind = false; // M46: the face's visible static casters hold a wind caster
+		// M46 (the W46.4 review, finding 3): each caster's level in the render, chosen once for a cell a face looks at
+		// (PrepareStaticFaces' view camera is every face's): CellLevels[cell] is the cell's first entry in Levels
+		// (NoStaticCellLevels until then), Levels[i] its i-th caster's level or NoStaticShadowLevel beyond its CullDistance.
+		// Reset by each PrepareStaticFaces.
+		std::vector<uint32_t> CellLevels{};
+		std::vector<uint8_t> Levels{};
 	};
+	inline constexpr uint32_t NoStaticCellLevels = std::numeric_limits<uint32_t>::max();
+	inline constexpr uint8_t NoStaticShadowLevel = std::numeric_limits<uint8_t>::max();
 
 	// M43: one static caster draw of an item at one level (ShadowPass::AppendStaticItemCasters): its draw, by PrepareCasters'
 	// rule (Instance unset), and its key; M46 (W46.4): whether its material has wind, and its WindResponse.
@@ -357,7 +365,7 @@ namespace Engine {
 
 		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the caster draws of static item `item` (a finite world
 		// matrix), by PrepareCasters' rule and in its submesh order, appended to `draws` with their keys (RenderStaticDrawKey: the
-		// variant, a Mask caster's material or null, the mesh and the submesh; M46: and `level`) and their M29 signatures,
+		// variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh; M46: and `level`) and their M29 signatures,
 		// Instance unset: a static cell's casters, prepared once per cell version and level. Nothing for an item that does not
 		// cast, or at a level beyond its mesh's last. M46 (W46.4): the draws of `level` (0 to the mesh's last), each with its
 		// material's wind (a static record holds none), whose signature hashes the response but not the render's wind (its
@@ -375,7 +383,8 @@ namespace Engine {
 		// working storage, grown to `keyCount` keys and left empty. Pure but for `buckets` and `indices`.
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E and its W46.4 record): `view` chooses each
 		// visible caster's level as PrepareCasters does (its camera: the view's level plus the caster's ShadowLodOffset, nothing
-		// beyond its CullDistance; null draws level 0), its draws keyed and signed by that level; and a face whose visible
+		// beyond its CullDistance; null draws level 0), once per render for the cells the faces look at (a caster without
+		// levels or CullDistance takes level 0 unmeasured), its draws keyed and signed by that level; and a face whose visible
 		// casters hold a wind caster hashes `view`'s wind (its phases change every frame), which also sets the set's Wind.
 		[[nodiscard]] static StaticShadowSet PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
 			const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices,

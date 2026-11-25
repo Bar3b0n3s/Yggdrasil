@@ -245,10 +245,32 @@ namespace Engine {
 			}
 		}
 
+		// M46 (the W46.4 review, finding 3): the first entry in buckets.Levels of cell `index`'s casters' levels for the render,
+		// chosen at the first face that looks at the cell: PrepareCasters' SelectViewShadowLod by `camera` (level 0 without a
+		// camera, and, unmeasured, for a caster without levels or CullDistance, which is what it gives such a caster).
+		[[nodiscard]] static uint32_t ChooseStaticCellLevels(const StaticShadowCell& cell, uint32_t index, const CameraData* camera, StaticShadowBuckets& buckets)
+		{
+			uint32_t& first = buckets.CellLevels[index];
+			if (first != NoStaticCellLevels)
+				return first;
+			first = static_cast<uint32_t>(buckets.Levels.size());
+			for (const StaticShadowCaster& caster : cell.Casters)
+			{
+				std::optional<uint32_t> level = 0U;
+				if (camera != nullptr && (caster.LodCount != 0 || caster.Distance.CullDistance > 0.0f))
+				{
+					level = SelectViewShadowLod(std::span<const float>(caster.LodScreenSizes.data(), caster.LodCount), caster.MeshBounds, caster.World,
+						caster.Distance, *camera);
+				}
+				buckets.Levels.push_back(level.has_value() ? static_cast<uint8_t>(*level) : NoStaticShadowLevel);
+			}
+			return first;
+		}
+
 		// M43: one face's visible static casters into `buckets`: of each candidate cell not outside the face's frustum, each
 		// caster the dynamic path's tests keep (ShadowBoxesOverlap with `light`, then IsOutsideShadow), a test the cell's
-		// classification settles for all its casters skipped. M46 (W46.4): each at the level `camera` gives it (PrepareCasters'
-		// SelectViewShadowLod; level 0 without a camera), none beyond its CullDistance or at a level where it has no indices.
+		// classification settles for all its casters skipped. M46 (W46.4): each at its level in the render
+		// (ChooseStaticCellLevels), none beyond its CullDistance or at a level where it has no indices.
 		static void CullStaticFace(std::span<const StaticShadowCell> cells, std::span<const StaticFaceCandidate> candidates, const ShadowBox* light,
 			const glm::mat4& viewProjection, bool pancake, const CameraData* camera, StaticShadowBuckets& buckets)
 		{
@@ -264,19 +286,18 @@ namespace Engine {
 																	: ClassifyStaticCellShadow(InflateStaticCellBox(cell.Box, reference), viewProjection, pancake);
 				if (frustum == StaticCellVisibility::Outside)
 					continue;
-				for (const StaticShadowCaster& caster : cell.Casters)
+				const uint32_t levels = ChooseStaticCellLevels(cell, candidate.Cell, camera, buckets);
+				for (uint32_t casterIndex = 0; casterIndex < cell.Casters.size(); ++casterIndex)
 				{
+					const StaticShadowCaster& caster = cell.Casters[casterIndex];
 					if (light != nullptr && candidate.Light != StaticCellVisibility::Inside && !ShadowBoxesOverlap(caster.Box, *light))
 						continue;
 					if (frustum != StaticCellVisibility::Inside && IsOutsideShadow(caster.Bounds, viewProjection * caster.World, pancake))
 						continue;
-					const std::optional<uint32_t> level = camera != nullptr
-						? SelectViewShadowLod(std::span<const float>(caster.LodScreenSizes.data(), caster.LodCount), caster.MeshBounds, caster.World,
-							  caster.Distance, *camera)
-						: std::optional<uint32_t>(0U);
-					if (!level.has_value())
+					const uint8_t level = buckets.Levels[levels + casterIndex];
+					if (level == NoStaticShadowLevel)
 						continue;
-					const StaticShadowLevel chosen = *level == 0 ? StaticShadowLevel{ .Key = caster.Key, .Signature = caster.Signature } : caster.Levels[*level - 1];
+					const StaticShadowLevel chosen = level == 0 ? StaticShadowLevel{ .Key = caster.Key, .Signature = caster.Signature } : caster.Levels[level - 1U];
 					if (chosen.Key == NoStaticShadowKey)
 						continue;
 					AddStaticFaceCaster(buckets, chosen.Key, cell.FirstRecord + caster.Item, chosen.Signature);
@@ -291,6 +312,7 @@ namespace Engine {
 			ShadowCasterDraw Draw{};
 			MeshInstanceKey Key{};
 			InstanceRecord Record{};
+			AssetHandle Material{}; // M46 (the W46.4 review, finding 1): the submesh's material, which a static wind caster keys by
 		};
 
 		// The caster draws of `item` (a caster with a finite world matrix whose mesh `mesh`, the cache's copy, has its vertex,
@@ -339,6 +361,7 @@ namespace Engine {
 					.MaterialConstants = mask ? material.Constants : nvrhi::BufferHandle(),
 					.BaseColorMap = mask ? material.BaseColorMap : nvrhi::TextureHandle() };
 				// An Opaque caster binds no material, so the Opaque casters of one mesh batch whatever their materials.
+				candidate.Material = materialHandle;
 				candidate.Key = { .Pipeline = candidate.Draw.Variant,
 					.Material = mask ? materialHandle : AssetHandle(),
 					.Mesh = item.Mesh,
@@ -691,9 +714,13 @@ namespace Engine {
 		Utils::AppendCasterCandidates(cache, mesh, item, DeformedVertexSource{}, level, true, nullptr, candidates);
 		for (Utils::ShadowCasterCandidate& candidate : candidates)
 		{
+			// A wind caster keys by its material (the W46.4 review, finding 1): its key's draws push that material's response, so
+			// wind casters of different materials never share a draw; an Opaque caster without wind keeps no material and
+			// batches across materials.
 			const bool wind = (candidate.Record.Flags & DrawFlagWind) != 0;
+			const AssetHandle keyMaterial = wind ? candidate.Material : candidate.Key.Material;
 			draws.push_back({ .Draw = std::move(candidate.Draw),
-				.Key = { .Pipeline = candidate.Key.Pipeline, .Material = candidate.Key.Material, .Mesh = candidate.Key.Mesh, .Submesh = candidate.Key.Submesh, .Lod = level },
+				.Key = { .Pipeline = candidate.Key.Pipeline, .Material = keyMaterial, .Mesh = candidate.Key.Mesh, .Submesh = candidate.Key.Submesh, .Lod = level },
 				.Wind = wind,
 				.WindResponse = candidate.Record.WindResponse });
 		}
@@ -710,6 +737,9 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(buckets.Touched.empty(), "the static shadow buckets must be empty between faces");
 		if (buckets.Keys.size() < keyCount)
 			buckets.Keys.resize(keyCount);
+		// M46 (finding 3): the casters' levels, chosen once per render.
+		buckets.CellLevels.assign(cells.size(), NoStaticCellLevels);
+		buckets.Levels.clear();
 		std::vector<Utils::StaticFaceCandidate> candidates;
 		// A cascade's candidates are every cell, as its dynamic candidates are every caster draw.
 		if (cascades != nullptr)

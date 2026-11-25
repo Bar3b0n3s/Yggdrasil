@@ -89,6 +89,15 @@ namespace Engine {
 			return squared >= reach * reach;
 		}
 
+		// M46 (the W46.4 review, finding 3): the levels `camera` draws of static item `item`: SelectViewMeshLod's, or, unmeasured,
+		// level 0 unfaded for an item without levels or CullDistance, which is what SelectViewMeshLod gives such an item.
+		[[nodiscard]] static MeshLodSelection SelectStaticItemLod(const Detail::SceneRendererStaticItem& item, const CameraData& camera)
+		{
+			if (item.LodCount == 0 && !(item.Distance.CullDistance > 0.0f))
+				return MeshLodSelection{ .DrawCount = 1 };
+			return SelectViewMeshLod(std::span<const float>(item.LodScreenSizes.data(), item.LodCount), item.MeshBounds, item.World, item.Distance, camera);
+		}
+
 		// Whether the mesh of mirror `mesh` deforms an item that sets no morph weight: it has morph targets with a default weight
 		// that is not 0 (ResolveMorphWeights resolves an empty MorphWeights to the defaults, SceneRenderer.cpp's
 		// ResolveItemDeform).
@@ -580,8 +589,7 @@ namespace Engine {
 				if (!item.Finite || !item.Drawable)
 					continue;
 				// M46 (decision 3D): the item's levels in this view; an item at or beyond its CullDistance draws nothing.
-				const MeshLodSelection lods =
-					SelectViewMeshLod(std::span<const float>(item.LodScreenSizes.data(), item.LodCount), item.MeshBounds, item.World, item.Distance, lodCamera);
+				const MeshLodSelection lods = Utils::SelectStaticItemLod(item, lodCamera);
 				if (lods.DrawCount == 0)
 				{
 					if (main)

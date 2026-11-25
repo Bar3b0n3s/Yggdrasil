@@ -911,6 +911,44 @@ namespace Engine {
 			}
 		}
 
+		// The W46.4 review, finding 1: a static wind caster keys by its material, so two static casters of one mesh, one windy and
+		// one calm, push their own materials' wind. Off the view, under a storm, their shadows on the wall equal their dynamic
+		// twins', whichever material comes first in their cell, and differ from two calm casters' shadows.
+		TEST_CASE("MeshLods: static casters of one mesh whose materials' winds differ each sway as their dynamic twins do" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishAssets(fixture);
+			// The grids at x = -6 are outside the view; the light moves 2 m along X per metre of depth, so the shadows of the grids
+			// at z = -5 and z = -3 fall on the wall around x = 0 and x = 4.
+			RenderSnapshot snapshot = MakeScene(fixture, SweptGrid, glm::translate(glm::mat4(1.0f), glm::vec3(-6.0f, -1.0f, -5.0f)), StormMaterial);
+			MeshDrawItem calm = snapshot.Meshes[1];
+			calm.World = glm::translate(glm::mat4(1.0f), glm::vec3(-6.0f, -1.0f, -3.0f));
+			calm.Materials = { StillMaterial };
+			calm.Entity = UUID(41);
+			calm.PickId = 3;
+			snapshot.Meshes.push_back(calm);
+			AddSun(snapshot, glm::vec3(2.0f, 0.0f, -1.0f));
+			snapshot.Wind = MakeStorm();
+			for (const bool windyFirst : { true, false })
+			{
+				CAPTURE(windyFirst);
+				snapshot.Meshes[1].Materials = { windyFirst ? StormMaterial : StillMaterial };
+				snapshot.Meshes[2].Materials = { windyFirst ? StillMaterial : StormMaterial };
+				++snapshot.FrameIndex;
+				const Image dynamic = fixture.Render(snapshot);
+				++snapshot.FrameIndex;
+				CHECK(RenderAs(fixture, true, snapshot).Pixels == dynamic.Pixels);
+
+				RenderSnapshot both = snapshot;
+				both.Meshes[1].Materials = { StillMaterial };
+				both.Meshes[2].Materials = { StillMaterial };
+				++both.FrameIndex;
+				CHECK(fixture.Render(both).Pixels != dynamic.Pixels);
+			}
+		}
+
 		// W46.4 (the lead's ledger amendment fc41d563): a static item's one record serves every submesh of it, so each submesh's
 		// draw carries its own material's wind (DrawConstantsWind): the parted grid's stiff bark and stormy leaves sway in a storm
 		// exactly as the dynamic item's two records make them, and differently from the same grid whose halves share the

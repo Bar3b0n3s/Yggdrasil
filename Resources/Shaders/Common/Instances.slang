@@ -8,16 +8,16 @@
 // DrawConstantsStaticInstances) reads the static record StaticInstances[InstanceIndices[Draw.FirstInstance + i].Record]. The
 // vertex shader hands the fragment shaders the instance's index, StaticInstanceIndexBit set for a static instance (M46: its
 // InstanceIndices entry's index; below 2^31, as a static record's, the static pick ids' range, Renderer/RenderStaticSet.h),
-// and every read of a record, the
-// vertex shader's and the fragment shaders', goes through LoadInstanceRecord, so a static instance reads its own record
-// wherever a dynamic one reads its.
+// and every read of a record, the vertex shader's and the fragment shaders', goes through LoadInstanceRecord, so a static
+// instance reads its own record wherever a dynamic one reads its.
 //
 // M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E and its W46.4 record; ADR 0060's phase-8
 // ledger, amended 2026-11-25): a static instance's level fade is its view's, InstanceIndices[i].Reserved (the bits of a
 // signed float), and its wind its draw's, since a static record is shared by every view and every submesh of its item.
 // So GetInstanceIndex hands the fragment shaders a static instance's entry index i (with StaticInstanceIndexBit), and
-// LoadInstanceRecord returns the static record with LodFade from that entry and, for a draw with DrawConstantsWind (read in
-// the vertex stage, which alone displaces), DrawFlagWind and the draw's WindResponse; a dynamic record is returned as it is.
+// LoadInstanceRecord returns the static record with LodFade from that entry and, for a draw with DrawConstantsWind (in every
+// stage that loads the record; only the vertex stage displaces), DrawFlagWind and the draw's WindResponse; a dynamic record
+// is returned as it is.
 #pragma once
 
 #include "Shared/DrawConstants.h"

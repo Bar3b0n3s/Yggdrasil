@@ -6,15 +6,19 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The static shadow cache (M29, Docs/Decisions/0044-m29-light-limits.md decision 4): a shadowed point light whose light and
@@ -186,11 +190,58 @@ namespace Engine {
 			uint32_t CachedSpots = 0;
 		};
 
+		// M46 (the W46.4 review, finding 2): `snapshot` with its unskinned mesh items moved into a static set built as the scene's
+		// RenderStaticCache builds one (each in the cell of its world origin, cells in key order, items in snapshot order, without
+		// a pick id or a previous matrix); a skinned item stays dynamic, as the cache keeps it. A new set each call: the static
+		// casters' signatures do not depend on the set's identity.
+		RenderSnapshot MakeCacheStaticTwin(RenderSnapshot snapshot)
+		{
+			const auto key = [](float coordinate)
+			{
+				return static_cast<int32_t>(std::floor(static_cast<double>(coordinate) / static_cast<double>(StaticCellSize)));
+			};
+			std::map<std::pair<int32_t, int32_t>, Ref<RenderStaticCell>> cells;
+			std::vector<MeshDrawItem> kept;
+			uint64_t version = 0;
+			for (const MeshDrawItem& item : snapshot.Meshes)
+			{
+				if (!item.JointPalette.empty() || !item.MorphWeights.empty())
+				{
+					kept.push_back(item);
+					continue;
+				}
+				Ref<RenderStaticCell>& cell = cells[{ key(item.World[3].x), key(item.World[3].z) }];
+				if (cell == nullptr)
+				{
+					cell = CreateRef<RenderStaticCell>();
+					cell->Key = glm::ivec2(key(item.World[3].x), key(item.World[3].z));
+					cell->Version = ++version;
+				}
+				MeshDrawItem copy = item;
+				copy.PickId = 0;
+				copy.PreviousWorld.reset();
+				cell->Items.push_back(copy);
+				cell->PickTable.push_back(item.Entity);
+			}
+			Ref<RenderStaticSet> set = CreateRef<RenderStaticSet>();
+			for (const auto& entry : cells)
+				set->Cells.push_back(entry.second);
+			set->Version = ++version;
+			snapshot.StaticSet = set;
+			snapshot.Meshes.assign(kept.begin(), kept.end());
+			return snapshot;
+		}
+
 		// For each change: the scene (after `prepare`, when given) drawn afresh and then reused, the change rendered continuing
 		// the history, its cached counts checked, and its image compared with a render of the changed scene without the cache.
+		// M46: with `statics`, every render draws the scene's static twin (MakeCacheStaticTwin).
 		void CheckCacheChanges(Test::SceneRendererIntegrationFixture& fixture, const std::vector<CacheChange>& changes,
-			const std::function<void(RenderSnapshot&)>& prepare = {})
+			const std::function<void(RenderSnapshot&)>& prepare = {}, bool statics = false)
 		{
+			const auto render = [&fixture, statics](const RenderSnapshot& snapshot)
+			{
+				return fixture.Render(statics ? MakeCacheStaticTwin(snapshot) : snapshot);
+			};
 			for (const CacheChange& change : changes)
 			{
 				CAPTURE(change.Name);
@@ -199,23 +250,23 @@ namespace Engine {
 				if (prepare)
 					prepare(base);
 				SetHistory(base, false);
-				static_cast<void>(fixture.Render(base));
+				static_cast<void>(render(base));
 				SetHistory(base, true);
 				++base.FrameIndex;
-				static_cast<void>(fixture.Render(base));
+				static_cast<void>(render(base));
 				REQUIRE(fixture.Renderer().GetRenderStats().CachedPointShadows == 2);
 				REQUIRE(fixture.Renderer().GetRenderStats().CachedSpotShadows == 1);
 
 				RenderSnapshot changed = base;
 				++changed.FrameIndex;
 				change.Apply(changed, fixture);
-				const Image cached = fixture.Render(changed);
+				const Image cached = render(changed);
 				const RenderStats stats = fixture.Renderer().GetRenderStats();
 				CHECK(stats.CachedPointShadows == change.CachedPoints);
 				CHECK(stats.CachedSpotShadows == change.CachedSpots);
 				SetHistory(changed, false);
 				++changed.FrameIndex;
-				CHECK(fixture.Render(changed).Pixels == cached.Pixels);
+				CHECK(render(changed).Pixels == cached.Pixels);
 			}
 		}
 
@@ -439,6 +490,69 @@ namespace Engine {
 			}, 1, 0 },
 			};
 			CheckCacheChanges(fixture, levels, leveled);
+		}
+
+		// M46 (the W46.4 review, finding 2): the static path's M29 signatures. The case above with its casters static (their
+		// twin, MakeCacheStaticTwin; the skinned strip stays dynamic): a spot or point face whose visible static casters hold a
+		// wind caster hashes the render's wind, so a later wind time draws light A's map and the spot atlas again while light B's
+		// stays cached, and the moving wind past caster A without wind keeps every map; a static caster's face signature is its
+		// chosen level's, so a LodBias that keeps caster A's level keeps the maps, one that changes it draws them again, and so
+		// does a camera that moves back a metre (its screen size from 0.34 to 0.28 with LodBias 2, below the switch 0.3).
+		TEST_CASE("ShadowCache: a static wind caster's map draws again as its wind moves, and a static caster's new level draws it again")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishCacheAssets(fixture);
+			PublishCacheLodWindAssets(fixture);
+			const auto advance = [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Wind.Time += 0.3;
+			};
+			const auto swaying = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheWindMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			CheckCacheChanges(fixture, { { "the wind moved on", advance, 1, 0 } }, swaying, true);
+
+			const auto still = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheStillMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			CheckCacheChanges(fixture, { { "the wind moved on past a caster without wind", advance, 2, 1 } }, still, true);
+
+			const auto leveled = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Mesh = CacheLodQuad;
+				snapshot.Meshes[CasterA].Distance = { .LodBias = 4.0f, .ShadowLodOffset = 0 };
+			};
+			const std::vector<CacheChange> levels = {
+				{ "a LodBias that keeps the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 2.0f;
+			}, 2, 1 },
+				{ "a LodBias that changes the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 1.0f;
+			}, 1, 0 },
+			};
+			CheckCacheChanges(fixture, levels, leveled, true);
+
+			const auto near = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Mesh = CacheLodQuad;
+				snapshot.Meshes[CasterA].Distance = { .LodBias = 2.0f, .ShadowLodOffset = 0 };
+			};
+			const std::vector<CacheChange> moved = {
+				{ "a camera a metre back, which changes the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Camera.Position += glm::vec3(0.0f, 0.0f, 1.0f);
+				snapshot.Camera.View = snapshot.Camera.View * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+			}, 1, 0 },
+			};
+			CheckCacheChanges(fixture, moved, near, true);
 		}
 	}
 
