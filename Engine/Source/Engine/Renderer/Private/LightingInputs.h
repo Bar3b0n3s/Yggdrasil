@@ -30,6 +30,12 @@ namespace Engine {
 		// negative ambient colour channel is 0, and so is a scaled SH9 coefficient that is not finite.
 		[[nodiscard]] EnvironmentConstants MakeEnvironmentConstants(const RenderEnvironment& environment, const GpuEnvironment* mirror);
 
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the environment constants of a view lit by its enabled
+		// Sky: HasEnvironment 1, the Sky's Intensity (made usable as above), rotation 0, SpecularMaxLod the sky's specular cube's
+		// mip count - 1 (EnvironmentData::SpecularMipCount's), SkyboxLod 0, AmbientColor zero, and a zero SH9, which the sky's
+		// GPU copy overwrites every frame (Renderer/SkyLighting.h: RecordSkyResultCopies).
+		[[nodiscard]] EnvironmentConstants MakeSkyEnvironmentConstants(const RenderSky& sky);
+
 	}
 
 }

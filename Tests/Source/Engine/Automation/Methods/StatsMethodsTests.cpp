@@ -54,6 +54,9 @@ namespace Engine {
 			stats.StaticCells = 64;
 			stats.StaticCellsVisible = 9;
 			stats.DynamicItems = 31;
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's light regenerated and the volumes relit.
+			stats.SkyUpdates = 1;
+			stats.RelitIrradianceVolumes = 2;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -82,6 +85,8 @@ namespace Engine {
 			CHECK(summary.StaticCells == 64);
 			CHECK(summary.StaticCellsVisible == 9);
 			CHECK(summary.DynamicItems == 31);
+			CHECK(summary.SkyUpdates == 1);
+			CHECK(summary.RelitIrradianceVolumes == 2);
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
@@ -118,6 +123,8 @@ namespace Engine {
 			CHECK(unavailable.StaticCells == 0);
 			CHECK(unavailable.StaticCellsVisible == 0);
 			CHECK(unavailable.DynamicItems == 0);
+			CHECK(unavailable.SkyUpdates == 0);
+			CHECK(unavailable.RelitIrradianceVolumes == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")

@@ -49,9 +49,12 @@ PERF_REPORT_NAME = "Perf.json"
 # 60 Hz fixed step", Docs/Decisions/0045-m30-navigation.md decision 13; M42's three planar reflections at
 # 1920 x 1080, World Tree's brief 23's "about 2 ms or less", Docs/Decisions/0059-m42-planar-reflections.md decision 3;
 # M43's 20,000 static entities in one view, Skerries' brief S16's "about 2 ms of CPU",
-# Docs/Decisions/0061-m43-static-scenery.md decision 3). Exceeding one is a warning.
+# Docs/Decisions/0061-m43-static-scenery.md decision 3; M45's sky at 1920 x 1080, still and with its sun turned every
+# tick, Skerries' brief S03's time-lapse, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3). Exceeding one is a
+# warning.
 BUDGETS = {"playCopy/1000Entities": 30.0, "fog/Fog/gpuCostMs": 0.5, "navigation/150Agents/tickMs": 8.0,
-           "reflections/Mirrors3/gpuMs": 2.0, "staticScenery/20000Entities/cpuMs": 2.0}
+           "reflections/Mirrors3/gpuMs": 2.0, "staticScenery/20000Entities/cpuMs": 2.0, "sky/Static/gpuMs": 0.3,
+           "sky/Turning/gpuMs": 0.6}
 
 _CAPTURE_MEMBERS = {"format": str, "version": int, "commit": str, "config": str, "host": dict, "metrics": list,
                     "scenes": list, "warnings": list}

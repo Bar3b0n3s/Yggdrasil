@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/Private/LightingInputs.h"
 
+#include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Shared/EnvironmentBakeConstants.h"
 
@@ -73,6 +74,21 @@ namespace Engine {
 			constants.SpecularMaxLod = static_cast<float>(std::max(mirror->SpecularMipCount, 1U) - 1);
 			const float blur = std::isfinite(environment.SkyboxBlur) ? std::clamp(environment.SkyboxBlur, 0.0f, 1.0f) : 0.0f;
 			constants.SkyboxLod = blur * static_cast<float>(std::max(mirror->SkyboxMipCount, 1U) - 1);
+			constants.HasEnvironment = 1;
+			return constants;
+		}
+
+		EnvironmentConstants MakeSkyEnvironmentConstants(const RenderSky& sky)
+		{
+			EnvironmentConstants constants{};
+			constants.Intensity = std::isfinite(sky.Intensity) ? std::clamp(sky.Intensity, 0.0f, MaxEnvironmentIntensity) : 0.0f;
+			constants.RotationSin = 0.0f;
+			constants.RotationCos = 1.0f;
+			for (glm::vec4& coefficient : constants.IrradianceSH9)
+				coefficient = glm::vec4(0.0f);
+			constants.AmbientColor = glm::vec3(0.0f);
+			constants.SpecularMaxLod = static_cast<float>(EnvironmentData::SpecularMipCount - 1);
+			constants.SkyboxLod = 0.0f;
 			constants.HasEnvironment = 1;
 			return constants;
 		}

@@ -33,6 +33,8 @@
 #include "Engine/Renderer/ShadowCascades.h"
 #include "Engine/Renderer/ShadowPass.h"
 #include "Engine/Renderer/SkinningPass.h"
+#include "Engine/Renderer/SkyLighting.h"
+#include "Engine/Renderer/SkyPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Renderer/SsrPass.h"
@@ -497,6 +499,21 @@ namespace Engine {
 			bool HalfSsr = false;
 			// M32's milestone review: the skybox draws over the cleared pixels (a Lit view clearing to a skybox it has and shows).
 			bool DrawsSkybox = false;
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; Renderer/SkyLighting.h): set by the Prepare stage: a
+			// Sky lights the view (an enabled Sky in a Lit view with a camera outside the wireframe whose resources exist), the Sky
+			// pass draws over the cleared pixels (it lights the view and the camera clears to the skybox), the atmosphere's LUTs
+			// and the image-based light are regenerated this render (their keys changed), and the view's SkyConstants and the
+			// light's key. SkyUpdates is RenderStats::SkyUpdates, and RelitIrradianceVolumes (W45.3) the volumes its ProbeRelight row
+			// relit (RenderStats::RelitIrradianceVolumes).
+			bool Sky = false;
+			bool DrawsSky = false;
+			bool SkyLutUpdate = false;
+			bool SkyUpdate = false;
+			uint32_t SkyUpdates = 0;
+			uint32_t RelitIrradianceVolumes = 0;
+			SkyConstants SkyView{};
+			SkyLutKey SkyLuts{};
+			SkyLightingKey SkyLighting{};
 			ViewConstants View{};
 			EnvironmentConstants Environment{};
 			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Renderer/Fog.h), Enabled only in a Lit view
@@ -690,6 +707,9 @@ namespace Engine {
 		// a drawn reflection, binds at t17 to t20.
 		Scope<PlanarReflectionPass> PlanarReflections{};
 		nvrhi::TextureHandle EmptyPlanarReflection{};
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's lighting computes and its pass (place 1).
+		Scope<SkyLightingPass> SkyLighting{};
+		Scope<SkyPass> Sky{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -711,6 +731,9 @@ namespace Engine {
 		// The view's binding sets (PassBindingCache.h): its own set-0 sets, those of each shared pass, the materials'.
 		PassBindingCache ViewBindings{};
 		PassBindingCache SkyboxBindings{};
+		// M45 (decision 3): the sky's computes' sets and the Sky pass's (the main view's and its mirror slots').
+		PassBindingCache SkyLightingBindings{};
+		PassBindingCache SkyBindings{};
 		PassBindingCache BloomBindings{};
 		PassBindingCache TonemapBindings{};
 		PassBindingCache FxaaBindings{};
@@ -890,6 +913,9 @@ namespace Engine {
 		// limits, or a reflection probe whose cube's format or size differs from the first's) were logged, once per renderer
 		// each.
 		Utils::ProbeViewResources ProbeResources{};
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; Renderer/SkyLighting.h): the view's sky resources (the
+		// placement rule's place 2), created by the first render with a Sky and dropped with the state on a device loss.
+		std::optional<SkyViewResources> SkyResources{};
 		bool ProbeLimitLogged = false;
 		bool ProbeFormatLogged = false;
 		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decisions 22 and 29; stream T-C): the view's terrain state
@@ -1077,6 +1103,15 @@ namespace Engine {
 		// recorded (its error kept), it writes the brute-force constants. Without both buffers (their creation error kept) it
 		// writes nothing, and the forward passes and the data views' composite, which bind them, are skipped.
 		void RecordLightClusters(Detail::SceneRendererFrame& frame);
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; SceneRendererSky.cpp): the Prepare stage's sky inputs
+		// (after the environment's), the Ambient stage's SkyLighting rows (its end) and the Sky pass of a view (the main view's,
+		// or a mirror slot's with its framebuffer, constants and scissor).
+		void PrepareSky(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera, bool lit);
+		void RecordSkyLighting(Detail::SceneRendererFrame& frame);
+		// M45's W45.3: the ProbeRelight row (SceneRendererSky.cpp), at the end of RecordSkyLighting.
+		void RecordProbeRelight(Detail::SceneRendererFrame& frame);
+		[[nodiscard]] Status RecordSky(nvrhi::ICommandList& commandList, nvrhi::IFramebuffer& framebuffer, nvrhi::IBuffer& viewConstants, nvrhi::IBuffer& fogConstants,
+			const std::optional<nvrhi::Rect>& scissor);
 		// LightClusterConstantsBuffer when it is null, and LightClusterBuffer when it is null or holds fewer than
 		// `clusterCount` clusters of `wordCount` words (LightClusterPass's descs; M29: the grid's WordCount), each replacing
 		// the member only when its creation succeeded. Errors: those of GraphicsDevice::CreateBuffer (Gpu).

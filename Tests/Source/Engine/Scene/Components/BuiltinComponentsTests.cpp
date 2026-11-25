@@ -42,8 +42,9 @@ namespace Engine {
 			// decision 1) 62, M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63, and M42's
 			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64; phase 8's in train order: M43's Static
 			// (Docs/Decisions/0061-m43-static-scenery.md decision 3) 65, then M44's MassProperties
-			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3) 66 and its WheeledVehicle and VehicleWheel 68.
-			static_assert(BuiltinComponents::Size == 68);
+			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3) 66 and its WheeledVehicle and VehicleWheel 68, then M45's Sky
+			// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3) 69.
+			static_assert(BuiltinComponents::Size == 69);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -675,6 +676,8 @@ namespace Engine {
 				"PointLight",
 				"SpotLight",
 				"Environment",
+				// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): in Rendering, after Environment.
+				"Sky",
 				"PostProcess",
 				"Text",
 				"RigidBody",

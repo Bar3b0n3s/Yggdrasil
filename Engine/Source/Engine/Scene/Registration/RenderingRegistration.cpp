@@ -154,7 +154,7 @@ namespace Engine {
 			.Entry(ProjectionType::Orthographic, "Orthographic", "Parallel projection whose half height is OrthographicSize.");
 
 		registry.Enum<ClearMode>("ClearMode", "What a camera draws behind the scene's geometry.")
-			.Entry(ClearMode::Skybox, "Skybox", "The scene's Environment skybox (its fallback colour when none is shown).")
+			.Entry(ClearMode::Skybox, "Skybox", "The scene's Sky, or its Environment skybox (its fallback colour when none is shown).")
 			.Entry(ClearMode::Color, "Color", "The camera's ClearColor.");
 
 		registry.Enum<Tonemapper>("Tonemapper", "The curve that maps HDR scene colours to the display.")
@@ -286,6 +286,49 @@ namespace Engine {
 				{ .Min = 0.0, .Max = 1.0 })
 			.ColorField("FallbackColor", &EnvironmentComponent::FallbackColor,
 				"The linear ambient colour used when no environment map is assigned.", Utils::ColorRange());
+
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: after Environment).
+		RegisterComponent<SkyComponent>(registry, "Sky",
+			"The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud "
+			"layer; it lights the scene in the Environment's place.")
+			.Category("Rendering")
+			.Version(1)
+			.Flags(ComponentFlags::UniquePerScene)
+			.Field("Sun", &SkyComponent::Sun,
+				"The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's "
+				"first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon.")
+			.Field("Moon", &SkyComponent::Moon,
+				"The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the "
+				"moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: "
+				"no moon.")
+			.Field("Intensity", &SkyComponent::Intensity, "The unitless strength of the sky's radiance and of the image-based light it gives.",
+				{ .Min = 0.0, .Max = Utils::MaxEnvironmentIntensity })
+			.Field("DriveLights", &SkyComponent::DriveLights,
+				"Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the "
+				"horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read.")
+			.Field("Haze", &SkyComponent::Haze, "The density of the atmosphere's aerosols, a multiple of a clear day's (1).", { .Min = 0.0, .Max = 10.0 })
+			.Field("Overcast", &SkyComponent::Overcast,
+				"How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, "
+				"with DriveLights, the sun.",
+				{ .Min = 0.0, .Max = 1.0 })
+			.ColorField("GroundAlbedo", &SkyComponent::GroundAlbedo, "The linear albedo of the atmosphere's ground, which brightens the sky above it.",
+				Utils::ColorRange())
+			.Field("SunDisc", &SkyComponent::SunDisc,
+				"The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its "
+				"size is the Sun light's LightAngle; 0 draws no disc.",
+				{ .Min = 0.0, .Max = 1000.0 })
+			.Field("MoonSize", &SkyComponent::MoonSize, "The angular diameter of the moon's disc, in degrees.", { .Min = 0.1, .Max = 10.0, .Unit = "deg" })
+			.Field("Stars", &SkyComponent::Stars, "The brightness of the stars, faded by the sky's own brightness; 0 draws none.",
+				{ .Min = 0.0, .Max = 100.0 })
+			.Field("Latitude", &SkyComponent::Latitude,
+				"The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun.",
+				{ .Min = -90.0, .Max = 90.0, .Unit = "deg" })
+			.Field("NorthAngle", &SkyComponent::NorthAngle,
+				"The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above).", { .Min = -360.0, .Max = 360.0, .Unit = "deg" })
+			.Field("Clouds", &SkyComponent::Clouds, "The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows.",
+				{ .Min = 0.0, .Max = 1.0 })
+			.Field("CloudSpeed", &SkyComponent::CloudSpeed,
+				"How fast the cloud layer drifts, in metres per second of simulation time along world X and Z.", { .Min = -100.0, .Max = 100.0, .Unit = "m/s" });
 
 		RegisterComponent<PostProcessComponent>(registry, "PostProcess",
 			"The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing "

@@ -52,6 +52,7 @@
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SkyValidation.h"
 #include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/TerrainValidation.h"
@@ -1388,11 +1389,12 @@ end
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
 			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
 			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes), and phase 8's in train order (M43's
-			// StaticSceneryDiagnosticCodes, then M44's PhysicsMassDiagnosticCodes and PhysicsVehicleDiagnosticCodes).
+			// StaticSceneryDiagnosticCodes, then M44's PhysicsMassDiagnosticCodes and PhysicsVehicleDiagnosticCodes, then M45's
+			// SkyDiagnosticCodes).
 			CHECK(codes.size()
 				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
 					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size() + StaticSceneryDiagnosticCodes.size()
-					+ PhysicsMassDiagnosticCodes.size() + PhysicsVehicleDiagnosticCodes.size());
+					+ PhysicsMassDiagnosticCodes.size() + PhysicsVehicleDiagnosticCodes.size() + SkyDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1455,7 +1457,9 @@ end
 			// RENDER_REFLECTION_INVALID (Docs/Decisions/0059-m42-planar-reflections.md, its ledger's validation row), which lands after
 			// M41. Phase 8's follow in train order (ADR 0060's ledger): M43's SCENE_STATIC_MOVES
 			// (Docs/Decisions/0061-m43-static-scenery.md decision 3), then M44's PHYSICS_MASS_UNUSED and PHYSICS_VEHICLE_INVALID
-			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), the last lander's block ending the list.
+			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), then M45's SKY_LIGHT_INVALID, SKY_ENVIRONMENT_IGNORED and
+			// PROBE_NOT_RELIGHTABLE (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), the last lander's block ending the
+			// list.
 			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
 			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
@@ -1463,7 +1467,10 @@ end
 			CHECK(position(RenderReflectionInvalidCode) + 1 == position(SceneStaticMovesCode));
 			CHECK(position(SceneStaticMovesCode) + 1 == position(PhysicsMassUnusedCode));
 			CHECK(position(PhysicsMassUnusedCode) + 1 == position(PhysicsVehicleInvalidCode));
-			CHECK(codes.back() == PhysicsVehicleInvalidCode);
+			CHECK(position(PhysicsVehicleInvalidCode) + 1 == position(SkyLightInvalidCode));
+			CHECK(position(SkyLightInvalidCode) + 1 == position(SkyEnvironmentIgnoredCode));
+			CHECK(position(SkyEnvironmentIgnoredCode) + 1 == position(ProbeNotRelightableCode));
+			CHECK(codes.back() == ProbeNotRelightableCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

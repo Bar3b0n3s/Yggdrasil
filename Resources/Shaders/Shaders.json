@@ -389,6 +389,52 @@
 			]
 		},
 		{
+			"Name": "Sky",
+			"File": "Passes/Sky.slang",
+			"Entries": [
+				{
+					"Name": "CSTransmittanceLut",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSMultipleScatteringLut",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSSkyViewLut",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSSkyCube",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSSkyFinalize",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSProbeRelight",
+					"Stage": "compute"
+				},
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "CSTestCopyWrite",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSTestCopyRead",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "Skybox",
 			"File": "Passes/Skybox.slang",
 			"Entries": [

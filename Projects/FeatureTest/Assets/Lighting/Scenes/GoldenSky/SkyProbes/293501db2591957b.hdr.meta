@@ -1,0 +1,14 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "27d3be2af7420059",
+	"Type": "Environment",
+	"Importer": "Environment",
+	"ImporterVersion": 2,
+	"Settings": {
+		"ClampLuminance": false,
+		"MaxLuminance": 1000,
+		"Compression": "Auto"
+	},
+	"SubAssets": []
+}

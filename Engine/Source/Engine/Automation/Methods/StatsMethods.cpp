@@ -114,6 +114,8 @@ namespace Engine {
 		result.StaticCells = stats.StaticCells;
 		result.StaticCellsVisible = stats.StaticCellsVisible;
 		result.DynamicItems = stats.DynamicItems;
+		result.SkyUpdates = stats.SkyUpdates;
+		result.RelitIrradianceVolumes = stats.RelitIrradianceVolumes;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -204,7 +206,16 @@ namespace Engine {
 			.Field("staticCells", &StatsViewSummary::StaticCells, "Cells of the frame's static set: 32 m squares on the XZ plane, each holding the static items whose origin lies in it.")
 			.Field("staticCellsVisible", &StatsViewSummary::StaticCellsVisible,
 				"Static cells the view's camera did not cull whole: the view's static work follows them, testing only their items.")
-			.Field("dynamicItems", &StatsViewSummary::DynamicItems, "Mesh items render extraction visited for the frame: every MeshRenderer that is not static scenery.");
+			.Field("dynamicItems", &StatsViewSummary::DynamicItems, "Mesh items render extraction visited for the frame: every MeshRenderer that is not static scenery.")
+			.Field("skyUpdates", &StatsViewSummary::SkyUpdates,
+				"1 when the frame regenerated its Sky's image-based light (its cube, specular prefilter and irradiance) because what it is "
+				"made of changed: the atmosphere (Haze, Overcast, GroundAlbedo), the Sun light's direction, colour or intensity, the Moon "
+				"light's, or the cloud layer's coverage or its drift past a 1 s step; else 0, and 0 without a Sky. Its cost is in the pass "
+				"row SkyIbl.")
+			.Field("relitIrradianceVolumes", &StatsViewSummary::RelitIrradianceVolumes,
+				"The irradiance volumes baked under a Sky (relightable) that the frame relit by its sky, because the sky's image-based "
+				"light was regenerated, its Intensity changed or the volumes' data was copied to the view again; 0 otherwise. Its cost is in "
+				"the pass row ProbeRelight.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

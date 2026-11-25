@@ -62,6 +62,7 @@ namespace Engine {
 		stats.PlanarReflections = view.PlanarReflections;
 		stats.DroppedPlanarReflections = view.DroppedPlanarReflections;
 		stats.StaticCellsVisible = view.StaticCellsVisible; // M43
+		stats.SkyUpdates = view.SkyUpdates;
 		if (view.SsrAreaAvailable)
 		{
 			stats.SsrTiles = view.SsrTiles;

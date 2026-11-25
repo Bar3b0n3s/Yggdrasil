@@ -20,6 +20,7 @@
 #include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/SkyConstants.h"
 
 #include <glm/gtc/packing.hpp>
 
@@ -458,12 +459,47 @@ namespace Engine {
 			desc.keepInitialState = true;
 			desc.debugName = std::format("{} (probes)", name);
 			ENGINE_TRY_ASSIGN(nvrhi::BufferHandle buffer, device.CreateBuffer(desc));
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a relightable volume's relight block, in
+			// Shared/SkyConstants.h's layout (each probe's nine local coefficients, then its transfer four values a float4), and
+			// its probes' baked constant terms. A block whose size disagrees with the probes is refused as the counts are.
+			GpuIrradianceVolume mirror{ .Probes = std::move(buffer), .CountX = volume.CountX, .CountY = volume.CountY, .CountZ = volume.CountZ };
+			std::vector<glm::vec4> relight;
+			if (!volume.Relight.empty())
+			{
+				if (volume.Relight.size() != probeCount)
+				{
+					return MakeError(ErrorCode::InvalidArgument, "the irradiance volume '{}' of {} probes holds {} relight blocks", name, probeCount,
+						volume.Relight.size());
+				}
+				relight.reserve(probeCount * SkyRelightProbeVectors);
+				for (const IrradianceProbeRelight& block : volume.Relight)
+				{
+					for (const glm::vec3& coefficient : block.Local)
+						relight.emplace_back(coefficient, 0.0f);
+					for (size_t index = 0; index < block.Transfer.size(); index += 4)
+					{
+						glm::vec4 values(0.0f);
+						for (size_t component = 0; component < 4 && index + component < block.Transfer.size(); ++component)
+							values[static_cast<glm::length_t>(component)] = block.Transfer[index + component];
+						relight.push_back(values);
+					}
+				}
+				mirror.ConstantTerms.reserve(probeCount);
+				for (const IrradianceProbe& probe : volume.Probes)
+					mirror.ConstantTerms.push_back(probe.SH9[0]);
+				nvrhi::BufferDesc relightDesc = desc;
+				relightDesc.byteSize = relight.size() * sizeof(glm::vec4);
+				relightDesc.debugName = std::format("{} (relight)", name);
+				ENGINE_TRY_ASSIGN(mirror.Relight, device.CreateBuffer(relightDesc));
+			}
 			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
 				device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 			CommandListRecording recording(device, *commandList);
-			commandList->writeBuffer(buffer, coefficients.data(), desc.byteSize);
+			commandList->writeBuffer(mirror.Probes, coefficients.data(), desc.byteSize);
+			if (mirror.Relight != nullptr)
+				commandList->writeBuffer(mirror.Relight, relight.data(), relight.size() * sizeof(glm::vec4));
 			recording.Execute();
-			return GpuIrradianceVolume{ .Probes = std::move(buffer), .CountX = volume.CountX, .CountY = volume.CountY, .CountZ = volume.CountZ };
+			return mirror;
 		}
 
 		// M26 (C26.1, R-LUT; Docs/Decisions/0037-m26-contract.md decision 15, stream X-B): the GPU mirror of `lut` (GpuLut): its

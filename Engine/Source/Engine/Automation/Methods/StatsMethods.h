@@ -90,6 +90,10 @@ namespace Engine {
 		uint32_t StaticCells = 0;
 		uint32_t StaticCellsVisible = 0;
 		uint32_t DynamicItems = 0;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: appended after M43's
+		// rows): RenderStats::SkyUpdates and RelitIrradianceVolumes.
+		uint32_t SkyUpdates = 0;
+		uint32_t RelitIrradianceVolumes = 0;
 	};
 
 	struct StatsGetResult

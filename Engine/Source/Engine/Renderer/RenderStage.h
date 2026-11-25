@@ -27,7 +27,9 @@ namespace Engine {
 		Shadows,
 		// The depth/normal prepass, or the picking prepass with EntityId (pass 4).
 		DepthNormal,
-		// The linear view-depth pyramid and GTAO with its denoise (passes 5 and 6); M23's LightClusters at its end.
+		// The linear view-depth pyramid and GTAO with its denoise (passes 5 and 6); M23's LightClusters, then M45's SkyLighting
+		// (a Sky's LUTs, its image-based light and the relit irradiance volumes; Docs/Decisions/0063-m45-sky-and-time-of-day.md
+		// decision 3) at its end.
 		Ambient,
 		// Forward opaque, skybox, forward transparent, or the Overdraw data view's pass (passes 7 to 9).
 		Forward,

@@ -12,6 +12,7 @@
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TestOptions.h"
+#include "Support/TextureCreationFails.h"
 
 #include <vulkan/vulkan.hpp>
 
@@ -310,6 +311,47 @@ namespace Engine {
 					CHECK(fails.GetFailedCount() == 1);
 				}
 				const Result<nvrhi::BindingSetHandle> afterwards = device.CreateBindingSet(selectedDesc, **layout);
+				CHECK_MESSAGE(afterwards.has_value(), (afterwards.has_value() ? std::string() : afterwards.error().ToString()));
+			}
+			device.RunGarbageCollection();
+		}
+
+		// M45 (W45.2): a texture the test's fault selects (GpuDiagnostics::SetTextureCreationFault) fails with Gpu before NVRHI is
+		// called, so nothing is created (a failed vkCreateImage would trip NVRHI's assertion in Debug); a texture it does not
+		// select, and every texture once the fault is gone, is created.
+		TEST_CASE("GraphicsDevice: a texture the test fault selects fails before NVRHI, and the others are created"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			GpuResourceTracker& tracker = device.GetResourceTracker();
+			{
+				nvrhi::TextureDesc selected;
+				selected.width = 8;
+				selected.height = 8;
+				selected.format = nvrhi::Format::RGBA16_FLOAT;
+				selected.isUAV = true;
+				selected.initialState = nvrhi::ResourceStates::ShaderResource;
+				selected.keepInitialState = true;
+				selected.debugName = "SelectedTexture";
+				nvrhi::TextureDesc other = selected;
+				other.debugName = "OtherTexture";
+				const uint64_t texturesBefore = tracker.GetLiveCount(GpuResourceType::Texture);
+				{
+					const Test::TextureCreationFails fails(device, [](const nvrhi::TextureDesc& desc)
+					{
+						return desc.debugName == "SelectedTexture";
+					});
+					const Result<nvrhi::TextureHandle> failed = device.CreateTexture(selected);
+					REQUIRE_FALSE(failed.has_value());
+					CHECK(failed.error().GetCode() == ErrorCode::Gpu);
+					CHECK(tracker.GetLiveCount(GpuResourceType::Texture) == texturesBefore);
+					const Result<nvrhi::TextureHandle> created = device.CreateTexture(other);
+					CHECK_MESSAGE(created.has_value(), (created.has_value() ? std::string() : created.error().ToString()));
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				const Result<nvrhi::TextureHandle> afterwards = device.CreateTexture(selected);
 				CHECK_MESSAGE(afterwards.has_value(), (afterwards.has_value() ? std::string() : afterwards.error().ToString()));
 			}
 			device.RunGarbageCollection();

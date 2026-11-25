@@ -1147,7 +1147,7 @@ Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
 - "ProbeRelight: a reflection probe inside a relit volume dims with it"
 - "ProbeValidation: a volume without a relight block under a Sky is reported"
 - `Golden: SkyDay`, `Golden: SkyOvercast` and `Golden: SkyProbes`, with every existing golden byte-identical.
-- `test_sky.py` passes.
+- `test_sky.py`: entity updates of the Sky, Scene-view screenshots that differ between dawn and noon, `stats.get`'s `skyUpdates` (1 while the sun turns, 0 when it stands still), `lighting.bake`'s `relightable`, `SKY_ENVIRONMENT_IGNORED` from `project.validate`.
 - The `Sky` suite passes in the editor, Release and Dist; `Sky.replay` verifies at one hash in Debug, Release and Dist and fails without its input.
 - The frozen-layout cases: `RenderPassDeclarationTests`' rows (45), the pipeline count (88), "Shaders: SharedStructsMatchReflection" with `SkyConstants`, and the existing `IrradianceVolumeData` fuzz case on its new seed.
 - Perf.py's `sky/Static/gpuMs` is within 0.3 ms and `sky/Turning/gpuMs` within 0.6 ms (warning-only).

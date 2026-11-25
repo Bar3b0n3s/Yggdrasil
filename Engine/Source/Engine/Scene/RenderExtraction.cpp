@@ -39,6 +39,7 @@
 #include "Engine/Scene/Private/TilemapDrawing.h"
 #include "Engine/Scene/RenderStaticCache.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SkyExtraction.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiExtraction.h"
 #include "Engine/Scene/UiLayout.h"
@@ -1004,6 +1005,9 @@ namespace Engine {
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
 		snapshot.Fog = fog.value_or(RenderFog{});
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the scene's Sky, its roles resolved against the lights
+		// above and driven (Scene/SkyExtraction.h).
+		ExtractRenderSky(scene, request, snapshot);
 		Utils::SortSpritesForDrawing(snapshot.Sprites);
 		Utils::PlaceTilemapsForDrawing(snapshot.Tilemaps, tilemapPositions, std::move(spriteKeys));
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI, laid out at the scene resolution of the

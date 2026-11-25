@@ -1,0 +1,290 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "SkyDay",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Sky": 1,
+		"PostProcess": 2,
+		"Fog": 1
+	},
+	"Entities": [
+		{
+			"ID": "51abdae8287612bd",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Auto",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Fxaa"
+				}
+			}
+		},
+		{
+			"ID": "311e7acc6dec503f",
+			"Name": "Haze",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Fog": {
+					"Color": [0.75, 0.8, 0.85],
+					"AmbientTint": 1,
+					"Density": 0.004,
+					"StartDistance": 15,
+					"MaxOpacity": 0.5,
+					"HeightDensity": 0,
+					"HeightFalloff": 0.5,
+					"BaseHeight": 0,
+					"SunGlow": 0.2,
+					"SunGlowExponent": 8,
+					"FogSkybox": false
+				}
+			}
+		},
+		{
+			"ID": "d4113d438449d3c6",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.7, 9],
+					"Rotation": [0.052335955, 0, 0, 0.9986295],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "4d3cc72d02d12a2a",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.29045948, -0.2468401, -0.077828385, 0.9212198],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 4,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 0.53,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "81df569b7c5f525d",
+			"Name": "Moon",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.10938165, 0.8754261, 0.4082179, 0.23456971],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [0.75, 0.82, 1],
+					"Intensity": 0.02,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "2222eea63070368f",
+			"Name": "Sky",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Sky": {
+					"Sun": "4d3cc72d02d12a2a",
+					"Moon": "81df569b7c5f525d",
+					"Intensity": 1,
+					"DriveLights": true,
+					"Haze": 1,
+					"Overcast": 0,
+					"GroundAlbedo": [0.3, 0.3, 0.3],
+					"SunDisc": 1,
+					"MoonSize": 2,
+					"Stars": 1,
+					"Latitude": 45,
+					"NorthAngle": 0,
+					"Clouds": 0.35,
+					"CloudSpeed": [5, 0]
+				}
+			}
+		},
+		{
+			"ID": "4febd7892382bf6b",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [80, 1, 80]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["dc28d0e23e8cb2a3"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "571b13eb2342052d",
+			"Name": "Water",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.02, -8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [40, 1, 14]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["f289a64c86a12358"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "65eab8acb76465d6",
+			"Name": "Rock",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4.5, 0.6, -1.5],
+					"Rotation": [0.018863956, 0.215616, 0.0850898, 0.9725809],
+					"Scale": [2.4, 1.5, 1.9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["82c198e000f8894a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "41826befc8b2aaca",
+			"Name": "Hut",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 1.2, -0.5],
+					"Rotation": [0, -0.17364818, 0, 0.9848077],
+					"Scale": [3, 2.4, 2.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["0f5d3e34c7762980"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "001f444671547a1a",
+			"Name": "Roof",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 2.55, -0.5],
+					"Rotation": [0, -0.17364818, 0, 0.9848077],
+					"Scale": [3.5, 0.3, 3.1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["0b3471ca803fa4ca"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

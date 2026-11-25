@@ -33,6 +33,14 @@
 //     changes no component records no undo step (an EditorTransaction without a command records nothing), so an undo after
 //     it takes back the edit before it, such as the previous bake's assignment.
 //   - Captures render without the probes (RenderQualitySettings::Probes false): one bounce.
+//   - M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): in a scene with an enabled Sky, each
+//     IrradianceVolume is baked relightable: each probe's capture is a relight capture (ProbeCaptureMode::Relight) of
+//     MakeRelightCaptureSnapshot's snapshot (the sky dark, its Sun and Moon lights off), whose projection is the probe's local
+//     light and whose sky visibility its sky transfer (ProjectCubeToSkyTransfer), and its coefficients are what the bake's sky
+//     gives (RelightIrradianceSH9 of the sky's radiance SH9, MakeSkyRadianceSH9 of the capture's sky totals times the Sky's
+//     Intensity); the volume's file is then version 2 with its relight block (Asset/IrradianceVolumeData.h), and the renderer
+//     relights it by the sky it renders. Without a Sky the volume bakes as before, version 1 byte for byte. Reflection probes
+//     bake as before under either.
 //   - World Tree's brief 21: every capture collects the garbage of its submissions before it returns (ProbeCapture), and so
 //     does a reflection probe's import, which bakes its environment on the GPU (EnvironmentBaker), both through
 //     GraphicsDevice::CollectCompletedSubmissions, so a bake holds one capture's and one import's device allocations whatever
@@ -55,7 +63,8 @@ namespace Engine {
 		UUID Entity{};
 		std::string Path{}; // the written source, project-relative ("Assets/Lighting/Scenes/Room/7a1c3e5f20b4d608.irradiance")
 		AssetHandle Asset{};
-		bool Changed = false; // whether the file's bytes changed (false for a rebake of an unchanged scene)
+		bool Changed = false;     // whether the file's bytes changed (false for a rebake of an unchanged scene)
+		bool Relightable = false; // M45: an IrradianceVolume baked under an enabled Sky, with its relight block
 	};
 
 	struct LightingBakeResult

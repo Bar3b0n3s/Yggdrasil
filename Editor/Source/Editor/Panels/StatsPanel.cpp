@@ -172,6 +172,8 @@ namespace Engine {
 				Utils::DrawSupportingMetric("Planar reflections", std::format("{} drawn / {} dropped", view.PlanarReflections, view.DroppedPlanarReflections));
 				// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; first of phase 8's rows).
 				Utils::DrawSupportingMetric("Static scenery", std::format("{} items, {} / {} cells", view.StaticItems, view.StaticCellsVisible, view.StaticCells));
+				// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+				Utils::DrawSupportingMetric("Sky", std::format("{} updates / {} relit volumes", view.SkyUpdates, view.RelitIrradianceVolumes));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

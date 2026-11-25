@@ -55,6 +55,7 @@ namespace Engine {
 	// (local lights also positive range) nor ambient environment illumination. Effective environment uses the first
 	// enabled Environment or default RenderEnvironment: positive intensity and either a loaded map with a positive SH
 	// DC term or, when no usable map exists, the effective positive fallback color. Missing maps use the renderer fallback.
+	// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): an enabled Sky of positive Intensity illuminates too.
 	// Empty/text-only scenes and scenes whose every visible submesh has potential emission do not warn. Potential
 	// emission means max(Emissive * EmissiveStrength)>0; conservatively do not inspect texture texels. Emission never
 	// illuminates another nonemissive material. All current materials are PBR; no new Unlit field is assumed. Resolve missing

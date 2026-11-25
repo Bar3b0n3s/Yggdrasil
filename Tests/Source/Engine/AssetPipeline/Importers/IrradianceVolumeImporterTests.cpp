@@ -90,7 +90,8 @@ namespace Engine {
 			CHECK(imported->Artifacts.front().Cooked == CookIrradianceVolume(volume, IrradianceVolumeImporter::Version));
 		}
 
-		TEST_CASE("IrradianceVolumeImporter: a source that is not a version 1 volume fails the import")
+		// M45: versions 1 and 2 import (IrradianceVolumeDataTests reads both), so the newer version refused is 3.
+		TEST_CASE("IrradianceVolumeImporter: a source that is not a version 1 or 2 volume fails the import")
 		{
 			Test::AssetTestFixture fixture;
 			Buffer source = WriteIrradianceVolumeSource(MakeImportedVolume());
@@ -99,7 +100,7 @@ namespace Engine {
 			REQUIRE_FALSE(truncated.has_value());
 			CHECK(truncated.error().GetCode() == ErrorCode::ImportFailed);
 
-			source[4] = std::byte{ 2 };
+			source[4] = std::byte{ 3 };
 			fixture.WriteProjectFile("Assets/Newer.irradiance", source);
 			const Result<ImportResult> newer = ImportVolume(fixture, "Assets/Newer.irradiance");
 			REQUIRE_FALSE(newer.has_value());

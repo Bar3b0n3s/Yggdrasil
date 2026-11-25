@@ -81,7 +81,7 @@ namespace Engine {
 			if (!read)
 				return Lua::RaiseError(call, read.error());
 			const ScriptPerformanceStats& stats = *read;
-			lua_createtable(call.State, 0, 29);
+			lua_createtable(call.State, 0, 30);
 			const auto field = [&call](const char* name, const auto& value)
 			{
 				Lua::Push(call, value);
@@ -116,6 +116,7 @@ namespace Engine {
 			field("StaticCellRebuilds", stats.StaticCellRebuilds);
 			field("StaticItems", stats.StaticItems);
 			field("StaticCellsVisible", stats.StaticCellsVisible);
+			field("SkyUpdates", stats.SkyUpdates);
 			return 1;
 		}
 
@@ -269,7 +270,7 @@ namespace Engine {
 				"Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, "
 				"CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, "
 				"DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, "
-				"StaticItems: number, StaticCellsVisible: number}",
+				"StaticItems: number, StaticCellsVisible: number, SkyUpdates: number}",
 				"The performance readout of Application.GetStats: frame-paced observations, never simulation state."));
 			ENGINE_TRY(api.RegisterAlias("DisplayMode", "{Width: number, Height: number, RefreshRate: number}", "One video mode of the monitor: its size in pixels and refresh rate in Hz."));
 			ENGINE_TRY(api.RegisterAlias("DisplaySettings", "{WindowMode: \"Windowed\" | \"Borderless\" | \"Exclusive\", Width: number, Height: number, RefreshRate: number, VSync: boolean}",
@@ -299,15 +300,16 @@ namespace Engine {
 					"those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and "
 					"the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and "
 					"SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of "
-					"4 or whose GPU objects, or the view's probe constants, could not be created), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies "
-					"(both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the "
-					"world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or "
-					"parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the "
-					"entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters "
-					"and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an "
-					"editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in "
-					"every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a "
-					"renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step "
+					"4 or whose GPU objects, or the view's probe constants, could not be created; and SkyUpdates, 1 when it regenerated "
+					"its Sky's image-based light, else 0), all 0 without a renderer; and the session's live Particles, its physics Bodies "
+					"and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: "
+					"TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' "
+					"write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), "
+					"EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, "
+					"animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's "
+					"extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's "
+					"set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 "
+					"without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step "
 					"gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, "
 					"OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.",
 					read)

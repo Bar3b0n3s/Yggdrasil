@@ -49,8 +49,8 @@ namespace Engine {
 
 	}
 
-	FogConstants MakeFogConstants(const RenderFog& fog, const CameraData& camera, std::span<const LightData> lights, const EnvironmentConstants& environment,
-		bool fogged)
+	FogConstants MakeFogConstants(const RenderFog& fog, const CameraData& camera, std::span<const LightData> lights, std::optional<size_t> glowLight,
+		const EnvironmentConstants& environment, bool fogged)
 	{
 		const RenderFog defaults;
 		FogConstants constants;
@@ -68,11 +68,8 @@ namespace Engine {
 		constants.SunDirection = glm::vec3(0.0f, 1.0f, 0.0f);
 		constants.SunColor = glm::vec3(0.0f);
 		const float glow = Utils::ClampFinite(fog.SunGlow, 0.0f, Utils::MaxFogSunGlow, defaults.SunGlow);
-		const auto sun = std::ranges::find_if(lights, [](const LightData& light)
-		{
-			return light.Type == RenderLightType::Directional;
-		});
-		if (sun != lights.end())
+		const LightData* sun = glowLight.has_value() && *glowLight < lights.size() ? &lights[*glowLight] : nullptr;
+		if (sun != nullptr && sun->Type == RenderLightType::Directional)
 		{
 			if (const std::optional<glm::vec3> direction = Utils::NormalizeFinite(sun->Direction))
 			{

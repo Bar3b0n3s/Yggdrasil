@@ -26,7 +26,7 @@ namespace Engine {
 	// One probe validation finding.
 	struct ProbeSceneIssue
 	{
-		std::string Code{}; // ProbeNotBakedCode
+		std::string Code{}; // ProbeNotBakedCode, or M45's ProbeNotRelightableCode (Scene/SkyValidation.h)
 		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
 		UUID Entity{};           // the probe's entity
 		std::string Component{}; // "IrradianceVolume" or "ReflectionProbe"
@@ -42,8 +42,11 @@ namespace Engine {
 	// another type) is PROBE_NOT_BAKED, with the hint to bake the scene's lighting. World Tree brief 14 (§7.4): a
 	// ReflectionProbe whose Data load is Unsupported, an environment whose GPU bake an editor without a graphics device
 	// deferred, is baked already, so its issue says the bake is deferred to an editor with a GPU and carries the load's hint
-	// (start the editor with a GPU once) instead. Loads the probes' data (the editor's asset manager imports what it has
-	// not); main thread.
+	// (start the editor with a GPU once) instead. M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): in a scene
+	// with an effectively enabled Sky, an IrradianceVolume whose data loads without a relight block, and a ReflectionProbe whose
+	// data loads and whose centre (its world position) lies in the box of no effectively enabled IrradianceVolume whose data loads
+	// with one, is PROBE_NOT_RELIGHTABLE (Scene/SkyValidation.h's ProbeNotRelightableCode) on its Data, in the same order, with
+	// the hint to bake under the Sky. Loads the probes' data (the editor's asset manager imports what it has not); main thread.
 	[[nodiscard]] std::vector<ProbeSceneIssue> FindProbeSceneIssues(const Scene& scene, AssetManager& assets);
 
 }

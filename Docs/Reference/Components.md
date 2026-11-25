@@ -20,6 +20,7 @@ Every component of the type registry, in canonical component order: the order of
 | `PointLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A light shining in every direction from the entity. |
 | `SpotLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A cone of light shining down the entity's local -Z axis. |
 | `Environment` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's image-based lighting and skybox (one per scene). |
+| `Sky` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud layer; it lights the scene in the Environment's place. |
 | `PostProcess` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene). |
 | `Text` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Draws a text string on the screen or in the world. |
 | `RigidBody` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Simulates the entity with Jolt physics. |
@@ -421,6 +422,52 @@ Script members of `Environment`:
 | `Rotation` | proxy field | `number` | read/write | All | The rotation of the environment about the +Y axis, in degrees. |
 | `ShowSkybox` | proxy field | `boolean` | read/write | All | Whether cameras that clear to the skybox show the environment map. |
 | `SkyboxBlur` | proxy field | `number` | read/write | All | How blurred the visible skybox is, from sharp (0) to fully blurred (1). |
+
+## Sky
+
+The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud layer; it lights the scene in the Environment's place.
+
+- Category: Rendering
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene
+- Requires: none
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Sun` | `EntityRef` | `null` |  |  |  | The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon. |
+| `Moon` | `EntityRef` | `null` |  |  |  | The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: no moon. |
+| `Intensity` | `Float` | `1` | 0 to 65504 |  |  | The unitless strength of the sky's radiance and of the image-based light it gives. |
+| `DriveLights` | `Bool` | `true` |  |  |  | Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read. |
+| `Haze` | `Float` | `1` | 0 to 10 |  |  | The density of the atmosphere's aerosols, a multiple of a clear day's (1). |
+| `Overcast` | `Float` | `0` | 0 to 1 |  |  | How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, with DriveLights, the sun. |
+| `GroundAlbedo` | `Color3` | `[0.3,0.3,0.3]` | 0 to 1 |  |  | The linear albedo of the atmosphere's ground, which brightens the sky above it. |
+| `SunDisc` | `Float` | `1` | 0 to 1000 |  |  | The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its size is the Sun light's LightAngle; 0 draws no disc. |
+| `MoonSize` | `Float` | `0.52` | 0.1 to 10 | deg |  | The angular diameter of the moon's disc, in degrees. |
+| `Stars` | `Float` | `1` | 0 to 100 |  |  | The brightness of the stars, faded by the sky's own brightness; 0 draws none. |
+| `Latitude` | `Float` | `45` | -90 to 90 | deg |  | The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun. |
+| `NorthAngle` | `Float` | `0` | -360 to 360 | deg |  | The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above). |
+| `Clouds` | `Float` | `0` | 0 to 1 |  |  | The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows. |
+| `CloudSpeed` | `Vec2` | `[5,0]` | -100 to 100 | m/s |  | How fast the cloud layer drifts, in metres per second of simulation time along world X and Z. |
+
+Script members of `Sky`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `CloudSpeed` | proxy field | `vector` | read/write | All | How fast the cloud layer drifts, in metres per second of simulation time along world X and Z. |
+| `Clouds` | proxy field | `number` | read/write | All | The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows. |
+| `DriveLights` | proxy field | `boolean` | read/write | All | Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read. |
+| `GroundAlbedo` | proxy field | `Color` | read/write | All | The linear albedo of the atmosphere's ground, which brightens the sky above it. |
+| `Haze` | proxy field | `number` | read/write | All | The density of the atmosphere's aerosols, a multiple of a clear day's (1). |
+| `Intensity` | proxy field | `number` | read/write | All | The unitless strength of the sky's radiance and of the image-based light it gives. |
+| `Latitude` | proxy field | `number` | read/write | All | The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun. |
+| `Moon` | proxy field | `Entity?` | read/write | All | The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: no moon. |
+| `MoonSize` | proxy field | `number` | read/write | All | The angular diameter of the moon's disc, in degrees. |
+| `NorthAngle` | proxy field | `number` | read/write | All | The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above). |
+| `Overcast` | proxy field | `number` | read/write | All | How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, with DriveLights, the sun. |
+| `Stars` | proxy field | `number` | read/write | All | The brightness of the stars, faded by the sky's own brightness; 0 draws none. |
+| `Sun` | proxy field | `Entity?` | read/write | All | The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon. |
+| `SunDisc` | proxy field | `number` | read/write | All | The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its size is the Sun light's LightAngle; 0 draws no disc. |
 
 ## PostProcess
 
@@ -1915,7 +1962,7 @@ The scene's distance and height fog, drawn over every surface, terrain, 3D sprit
 | `HeightDensity` | `Float` | `0` | 0 to 10 | 1/m |  | The height fog's density per metre at BaseHeight; 0 has no height fog. |
 | `HeightFalloff` | `Float` | `0.5` | 0.001 to 100 | 1/m |  | How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent. |
 | `BaseHeight` | `Float` | `0` |  | m |  | The world height, in metres, where the height fog has HeightDensity. |
-| `SunGlow` | `Float` | `0` | 0 to 100 |  |  | How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. |
+| `SunGlow` | `Float` | `0` | 0 to 100 |  |  | How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow. |
 | `SunGlowExponent` | `Float` | `8` | 1 to 1000 |  |  | How tightly the sun glow gathers around the light's direction: higher is tighter. |
 | `FogSkybox` | `Bool` | `true` |  |  |  | Whether the skybox is fogged too, as if it lay infinitely far away. |
 
@@ -1932,7 +1979,7 @@ Script members of `Fog`:
 | `HeightFalloff` | proxy field | `number` | read/write | All | How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent. |
 | `MaxOpacity` | proxy field | `number` | read/write | All | The most fog any point receives, from none (0) to fully fogged (1). |
 | `StartDistance` | proxy field | `number` | read/write | All | The view depth, in metres, where fog begins. |
-| `SunGlow` | proxy field | `number` | read/write | All | How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. |
+| `SunGlow` | proxy field | `number` | read/write | All | How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow. |
 | `SunGlowExponent` | proxy field | `number` | read/write | All | How tightly the sun glow gathers around the light's direction: higher is tighter. |
 
 ## Navigation
@@ -2477,7 +2524,7 @@ What a camera draws behind the scene's geometry.
 
 | Value | Description |
 |---|---|
-| `Skybox` | The scene's Environment skybox (its fallback colour when none is shown). |
+| `Skybox` | The scene's Sky, or its Environment skybox (its fallback colour when none is shown). |
 | `Color` | The camera's ClearColor. |
 
 ### ExposureMode

@@ -176,7 +176,13 @@ namespace Engine {
 		}
 		if (!Utils::IsFiniteAnnotationVector(ambient) || !Utils::IsFiniteAnnotationVector(ambient * environment.Intensity))
 			return MakeError(ErrorCode::InvalidArgument, "environment irradiance must be finite");
-		illumination = illumination || (environment.Intensity > 0 && Utils::HasPositiveComponent(ambient));
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): an enabled Sky lights the scene in the Environment's
+		// place, so beside one only the Sky's Intensity counts (the W45.2 review's finding 3: the Environment, its fallback colour
+		// included, is unused).
+		if (snapshot.Sky.Enabled)
+			illumination = illumination || snapshot.Sky.Intensity > 0.0f;
+		else
+			illumination = illumination || (environment.Intensity > 0 && Utils::HasPositiveComponent(ambient));
 		bool needsLighting = false;
 		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the dynamic items and the static set's.
 		std::vector<const MeshDrawItem*> items;

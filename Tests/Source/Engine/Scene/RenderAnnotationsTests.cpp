@@ -17,6 +17,7 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/SkyComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -337,6 +338,50 @@ namespace Engine {
 			{
 				r.Materials.resize(1);
 				r.Materials[0].SetHandle(AssetHandle(2002));
+			});
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+		}
+
+		TEST_CASE("RenderSceneValidation: an enabled Sky of positive Intensity illuminates")
+		{
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a Sky lights the scene in the Environment's place,
+			// while its entity is enabled and its Intensity positive.
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Scene& scene = fixture.GetScene();
+			Entity mesh = scene.CreateEntity("Cube");
+			mesh.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			Entity environment = scene.CreateEntity("Environment");
+			environment.AddComponent<EnvironmentComponent>().Intensity = 0;
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			Entity sky = scene.CreateEntity("Sky");
+			sky.AddComponent<SkyComponent>();
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 0.0f;
+			});
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 1.0f;
+			});
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.SetActive(false);
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			// The W45.2 review's finding 3: beside an enabled Sky the Environment lights nothing, so a scene without an Environment
+			// entity, whose default fallback colour lights it without a Sky, is unlit under a Sky of Intensity 0.
+			scene.DestroyEntity(environment);
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.SetActive(true);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 0.0f;
+			});
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 1.0f;
 			});
 			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 		}
