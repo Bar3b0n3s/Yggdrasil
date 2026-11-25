@@ -31,36 +31,16 @@ namespace Engine {
 			return glm::dvec2(glm::dot(relative, frame.AxisX), glm::dot(relative, frame.AxisZ));
 		}
 
-		// The entities holding a Water that are not pending destruction, in canonical order.
+		// The entities holding a Water that are not pending destruction, in canonical order: M43's CollectCanonical, the view
+		// sorted by canonical key (phase 8's landing), never a walk of every entity.
 		static std::vector<ConstEntity> CollectWaterEntities(const Scene& scene)
 		{
+			std::vector<entt::entity> handles;
+			scene.CollectCanonical<WaterComponent>(handles);
 			std::vector<ConstEntity> entities;
-			const auto view = scene.GetRegistry().view<WaterComponent>();
-			for (const entt::entity handle : view)
-			{
-				const ConstEntity entity(handle, &scene);
-				if (scene.FindEntityByID(entity.GetUUID()).IsValid())
-					entities.push_back(entity);
-			}
-			if (entities.size() < 2)
-				return entities;
-			// Several: their positions in the canonical order.
-			std::vector<std::pair<size_t, ConstEntity>> positioned;
-			positioned.reserve(entities.size());
-			const std::span<const UUID> order = scene.GetCanonicalOrder();
-			for (size_t position = 0; position < order.size() && positioned.size() < entities.size(); ++position)
-			{
-				const auto found = std::ranges::find_if(entities, [id = order[position]](const ConstEntity& entity)
-				{
-					return entity.GetUUID() == id;
-				});
-				if (found != entities.end())
-					positioned.emplace_back(position, *found);
-			}
-			std::ranges::sort(positioned, {}, &std::pair<size_t, ConstEntity>::first);
-			entities.clear();
-			for (const auto& [position, entity] : positioned)
-				entities.push_back(entity);
+			entities.reserve(handles.size());
+			for (const entt::entity handle : handles)
+				entities.emplace_back(handle, &scene);
 			return entities;
 		}
 

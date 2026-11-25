@@ -32,32 +32,18 @@ namespace Engine {
 
 	namespace Utils {
 
-		// The owners holding a Buoyancy that are not pending destruction, in canonical order (the registry's view, sorted by
-		// its entities' canonical positions when it holds two or more; M43's CollectCanonical replaces this at the merge).
+		// The owners holding a Buoyancy that are not pending destruction, in canonical order: M43's CollectCanonical, the
+		// view sorted by canonical key (phase 8's landing), never a walk of every entity; the visits are added to the scene's
+		// EntitiesVisited (ADR 0060's ledger, "Rules for every pass a later lander adds").
 		static std::vector<Entity> CollectBuoyancyOwners(Scene& scene)
 		{
+			std::vector<entt::entity> handles;
+			scene.CollectCanonical<BuoyancyComponent>(handles);
+			scene.AddEntitiesVisited(handles.size());
 			std::vector<Entity> owners;
-			for (const entt::entity handle : scene.GetRegistry().view<BuoyancyComponent>())
-			{
-				const Entity entity(handle, &scene);
-				if (scene.FindEntityByID(entity.GetUUID()).IsValid())
-					owners.push_back(entity);
-			}
-			if (owners.size() < 2)
-				return owners;
-			std::map<UUID, size_t> positions;
-			for (const Entity& owner : owners)
-				positions.emplace(owner.GetUUID(), 0);
-			const std::span<const UUID> order = scene.GetCanonicalOrder();
-			for (size_t position = 0; position < order.size(); ++position)
-			{
-				if (const auto found = positions.find(order[position]); found != positions.end())
-					found->second = position;
-			}
-			std::ranges::sort(owners, {}, [&positions](const Entity& owner)
-			{
-				return positions.at(owner.GetUUID());
-			});
+			owners.reserve(handles.size());
+			for (const entt::entity handle : handles)
+				owners.emplace_back(handle, &scene);
 			return owners;
 		}
 

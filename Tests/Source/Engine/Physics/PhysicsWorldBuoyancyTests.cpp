@@ -118,6 +118,48 @@ namespace Engine {
 			CHECK_FALSE(world->ApplyBuoyancy(BodyHandle(), planes, settings, BuoyancyStep).has_value());
 		}
 
+		TEST_CASE("PhysicsWorld: a body with an offset centre of mass floats at its analytic draft")
+		{
+			// Phase 8's landing (ADR 0060's merge train, item 4; Docs/Decisions/0065-m47-water.md Acceptance): M44's
+			// MassProperties wraps the body's shape in an offset centre of mass, which the buoyancy walk descends. The 400 kg
+			// box of "a box of known mass floats at its analytic draft within 1 cm", its centre of mass lowered 0.15 m: the
+			// displaced water still weighs as much as the box, so its draft is 0.2 m and its geometric centre rests at
+			// y = +0.05, level, while its centre of mass lies 0.15 m below that.
+			Scope<PhysicsWorld> world = CreateBuoyancyWorld();
+			Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create(
+				{ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(1.0f, 0.25f, 0.5f) } } } });
+			REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+			Result<BodyHandle> created = world->CreateBody({ .Shape = *shape,
+				.MotionType = PhysicsMotionType::Dynamic,
+				.Pose = { .Position = glm::vec3(0.0f, 0.5f, 0.0f) },
+				.Mass = 400.0f,
+				.AllowSleeping = false,
+				.MassOverride = PhysicsMassOverride{ .CenterOfMassOffset = glm::vec3(0.0f, -0.15f, 0.0f) } });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			const BodyHandle box = *created;
+			const std::array<PhysicsFluidPlane, 1> planes = { StillWater(0.0f) };
+			const PhysicsBuoyancySettings settings{};
+			double submerged = 0.0;
+			float height = 0.0f;
+			for (int step = 0; step < 600; ++step)
+			{
+				const Result<PhysicsBuoyancyResult> result = world->ApplyBuoyancy(box, planes, settings, BuoyancyStep);
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				CHECK(result->TotalVolume == doctest::Approx(1.0f).epsilon(1e-5));
+				REQUIRE(world->Step(BuoyancyStep, 1));
+				height = world->GetPose(box).Position.y;
+				if (step >= 300)
+					submerged += result->SubmergedVolume;
+			}
+			CAPTURE(height);
+			CHECK(std::abs(height - 0.05f) < 0.01f);
+			CHECK(std::abs(submerged / 300.0 - 0.4) < 0.02);
+			// Level, and the centre of mass where the override puts it.
+			const glm::vec3 up = world->GetPose(box).Rotation * glm::vec3(0.0f, 1.0f, 0.0f);
+			CHECK(up.y > 0.9999f);
+			CHECK(world->GetCenterOfMassPosition(box).y == doctest::Approx(height - 0.15f).epsilon(1e-3));
+		}
+
 		TEST_CASE("PhysicsWorld: each collider is submerged against its own plane")
 		{
 			// Two 1 m pontoons 4 m apart on one body, the left one's plane at its centre's height and the right one's 1 m below
