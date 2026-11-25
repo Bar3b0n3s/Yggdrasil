@@ -70,6 +70,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/SpriteValidation.h"
+#include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Engine/Session/PlayInput.h"
@@ -222,6 +223,10 @@ namespace Engine {
 			// landing order (its ledger: after M41's ANIMATION_ATTACHMENT_INVALID), an array of its own
 			// (PlanarReflectionDiagnosticCodes).
 			RenderReflectionInvalidCode,
+			// M43 (Scene/StaticScenery.h, Docs/Decisions/0061-m43-static-scenery.md decision 3), the first of phase 8's codes in
+			// train order (ADR 0060's ledger: after M42's RENDER_REFLECTION_INVALID), an array of its own
+			// (StaticSceneryDiagnosticCodes).
+			SceneStaticMovesCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -497,6 +502,11 @@ namespace Engine {
 				"Put the PlanarReflection on the entity whose MeshRenderer draws a flat glass, and set its Normal to the glass's facing axis and "
 				"Offset to its surface (the finding names the axis along which the mesh is thinnest and that face's Offset; the built-in Quad "
 				"faces +Z, the Plane +Y)." },
+			ValidationCodeInfo{ SceneStaticMovesCode, "Warning", false,
+				"A static entity (Static on it or on an ancestor's subtree) has a component that moves it every tick: a Dynamic or Kinematic "
+				"RigidBody, a CharacterController, a BoneAttachment or an Animator whose RootMotion is Apply. It moves correctly, but rebuilds its "
+				"static cell each tick and renders without interpolation.",
+				"Move the moving entity out of the static subtree, or give it (or the root of its moving part) a Static with Scope NotStatic." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1370,6 +1380,21 @@ namespace Engine {
 			}
 		}
 
+		// The static scenery checks of §13.7 (M43, Scene/StaticScenery.h): SCENE_STATIC_MOVES on each static entity that a
+		// component moves every tick. Not fixable.
+		static void CheckStaticScenery(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			for (StaticSceneryIssue& issue : FindStaticSceneryIssues(*checked.Target))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static Status CheckRenderScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const auto render = EvaluateRenderSceneValidation(*checked.Target, *editor.GetEngine().GetAssetManager());
@@ -1668,6 +1693,7 @@ namespace Engine {
 			CheckTerrain(editor, checked, diagnostics);
 			CheckNavigation(editor, checked, diagnostics);
 			CheckPlanarReflections(editor, checked, diagnostics);
+			CheckStaticScenery(checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

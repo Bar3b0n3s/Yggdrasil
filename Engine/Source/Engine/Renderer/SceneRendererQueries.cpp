@@ -51,7 +51,7 @@ namespace Engine {
 		// output mapping (the Output stage of that Render set OutputMapping).
 		const RenderOutputMapping& mapping = state.OutputMapping;
 		if (mapping.IsIdentity())
-			return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, request);
+			return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, request, state.ImageStaticPicks);
 		if (request.X >= mapping.ViewWidth || request.Y >= mapping.ViewHeight)
 		{
 			ErrorLocation location{};
@@ -65,7 +65,7 @@ namespace Engine {
 		{
 			scene.X = pixel->x;
 			scene.Y = pixel->y;
-			return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, scene);
+			return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, scene, state.ImageStaticPicks);
 		}
 		// A letterbox pixel shows no scene: it picks the background, through the texel every picking render clears to 0. A
 		// render whose output targets could not be created (out of memory, decision 44) keeps an earlier render's texel; the
@@ -75,7 +75,7 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "the letterbox of this view has no picking texel: its output targets could not be created; pick again after the next render");
 		scene.X = 0;
 		scene.Y = 0;
-		return state.Picker->Request(*state.OutputTargets.LetterboxEntityId, state.ImagePickTable, state.Generation, scene);
+		return state.Picker->Request(*state.OutputTargets.LetterboxEntityId, state.ImagePickTable, state.Generation, scene, state.ImageStaticPicks);
 	}
 
 	Result<std::optional<PickResult>> SceneRenderer::PollPick(PickTicket ticket, uint64_t currentFrameIndex)

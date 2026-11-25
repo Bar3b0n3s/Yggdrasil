@@ -270,8 +270,11 @@ namespace Engine {
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
 			const Entity entity = scene.CreateEntity("Entity");
+			entity.AddComponent<RigidBodyComponent>();
 			scene.GetChangeTracker().Begin();
-			entity.GetComponent<TransformComponent>().Translation.x = 5.0f;
+			// Not a TransformComponent: a direct write to one bypasses the change tracking of world transforms too, and is
+			// banned outside Banned.TransformWriteFiles (Docs/Decisions/0061-m43-static-scenery.md decision 3).
+			entity.GetComponent<RigidBodyComponent>().Mass = 5.0f;
 			CHECK(scene.GetChangeTracker().End().empty());
 		}
 

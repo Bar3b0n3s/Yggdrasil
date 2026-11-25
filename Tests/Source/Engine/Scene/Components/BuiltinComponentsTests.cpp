@@ -40,8 +40,9 @@ namespace Engine {
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
 			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, M37's four joints (Docs/Decisions/0054-m37-joints.md
 			// decision 1) 62, M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63, and M42's
-			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64.
-			static_assert(BuiltinComponents::Size == 64);
+			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64, and M43's Static
+			// (Docs/Decisions/0061-m43-static-scenery.md decision 3) 65.
+			static_assert(BuiltinComponents::Size == 65);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -58,6 +59,7 @@ namespace Engine {
 			static_assert(!TypeListContains<WorldTransformComponent, BuiltinComponents>);
 			static_assert(!TypeListContains<PreviousWorldTransformComponent, BuiltinComponents>);
 			static_assert(!TypeListContains<InterpolationResetTag, BuiltinComponents>);
+			static_assert(!TypeListContains<HierarchyStaticTag, BuiltinComponents>);
 			static_assert(!TypeListContains<HierarchyDisabledTag, BuiltinComponents>);
 			static_assert(!TypeListContains<PendingDestroyTag, BuiltinComponents>);
 			// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 29): an Animator's sampled pose is runtime state.
@@ -107,6 +109,7 @@ namespace Engine {
 			CHECK_FALSE(PrefabLinkComponent{}.PrefabEntityID.IsValid());
 			CHECK_FALSE(PrefabLinkComponent{}.InstanceRoot.IsValid());
 			CHECK_FALSE(PrefabLinkComponent{}.OuterPrefabEntityID.IsValid());
+			CHECK(StaticComponent{}.Scope == StaticScope::Subtree);
 		}
 
 		TEST_CASE("BuiltinComponents: rendering defaults follow the component table")
@@ -664,6 +667,7 @@ namespace Engine {
 				"Transform",
 				"Prefab",
 				"PrefabLink",
+				"Static",
 				"MeshRenderer",
 				"Camera",
 				"DirectionalLight",

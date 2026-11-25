@@ -380,7 +380,10 @@ namespace Engine {
 			for (const float x : { -1.0f, 1.0f })
 			{
 				const Entity entity = editor.GetScene().CreateEntity(x < 0 ? "Left" : "Right");
-				entity.GetComponent<TransformComponent>().Translation.x = x;
+				entity.Patch<TransformComponent>([x](TransformComponent& transform)
+				{
+					transform.Translation.x = x;
+				});
 				entity.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
 				(x < 0 ? Left : Right) = entity.GetUUID();
 			}

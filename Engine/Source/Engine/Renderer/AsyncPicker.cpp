@@ -3,12 +3,14 @@
 
 #include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -23,6 +25,8 @@ namespace Engine {
 			nvrhi::CommandListHandle Commands{};
 			nvrhi::EventQueryHandle Query{};
 			std::vector<UUID> Table{};
+			// M43: the image's static cells, by their first record.
+			std::vector<StaticPickRange> StaticTable{};
 			PickRequest Request{};
 			PickTicket Ticket{};
 			uint64_t Submission = 0;
@@ -41,6 +45,7 @@ namespace Engine {
 		void Release(Slot& slot)
 		{
 			slot.Table.clear();
+			slot.StaticTable.clear();
 			slot.Ticket = {};
 			slot.Submission = 0;
 			slot.Cancelled = false;
@@ -73,7 +78,7 @@ namespace Engine {
 	AsyncPicker::~AsyncPicker() = default;
 
 	Result<PickTicket> AsyncPicker::Request(nvrhi::ITexture& entityIds, std::span<const UUID> pickTable,
-		uint64_t viewGeneration, const PickRequest& request)
+		uint64_t viewGeneration, const PickRequest& request, std::span<const StaticPickRange> staticTable)
 	{
 		State& state = *m_State;
 		state.CollectCancelled();
@@ -129,6 +134,8 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(slot.Query, state.Device->CreateEventQuery());
 		}
 		slot.Table.assign(pickTable.begin(), pickTable.end());
+		slot.StaticTable.assign(staticTable.begin(), staticTable.end());
+		std::ranges::sort(slot.StaticTable, {}, &StaticPickRange::First);
 		slot.Request = request;
 		{
 			CommandListRecording recording(*state.Device, *slot.Commands);
@@ -182,6 +189,18 @@ namespace Engine {
 		device->unmapStagingTexture(slot.Staging);
 		if (result.PickId != 0 && result.PickId <= slot.Table.size())
 			result.Entity = slot.Table[result.PickId - 1];
+		else if (result.PickId >= StaticPickIdBase)
+		{
+			// M43: the static cell whose range holds the record (the last starting at or before it), and its item there.
+			const uint32_t record = result.PickId - StaticPickIdBase;
+			const auto after = std::ranges::upper_bound(slot.StaticTable, record, {}, &StaticPickRange::First);
+			if (after != slot.StaticTable.begin())
+			{
+				const StaticPickRange& range = *std::prev(after);
+				if (range.Cell != nullptr && record - range.First < range.Cell->PickTable.size())
+					result.Entity = range.Cell->PickTable[record - range.First];
+			}
+		}
 		result.FrameIndex = slot.Request.FrameIndex;
 		result.SceneRevision = slot.Request.SceneRevision;
 		result.Sequence = slot.Request.Sequence;

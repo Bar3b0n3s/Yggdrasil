@@ -5,9 +5,14 @@
 #include "Engine/Scene/ParticleSystem.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/RenderStaticCache.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptHost.h"
 #include "Engine/Session/PlaySession.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <limits>
 
 namespace Engine {
 
@@ -20,6 +25,18 @@ namespace Engine {
 		result.ActiveBodies = session.GetPhysics().GetStats().ActiveBodyCount + (physics2D != nullptr ? physics2D->GetStats().ActiveBodyCount : 0);
 		if (const ParticleSystem* particles = session.GetParticles(); particles != nullptr)
 			result.Particles = particles->GetStats().Particles;
+		// M43: the last tick's work (its static cell rebuilds those of its own frame phase, never an editor view's) and the
+		// static set of the scene's last extraction.
+		const auto clamp = [](uint64_t value)
+		{
+			return static_cast<uint32_t>(std::min<uint64_t>(value, std::numeric_limits<uint32_t>::max()));
+		};
+		const PlaySessionTickWork work = session.GetLastTickWork();
+		result.TransformsUpdated = clamp(work.TransformsUpdated);
+		result.EntitiesVisited = clamp(work.EntitiesVisited);
+		result.StaticCellRebuilds = clamp(work.StaticCellRebuilds);
+		if (const RenderStaticCache* cache = session.GetScene().GetStaticCache(); cache != nullptr)
+			result.StaticItems = clamp(cache->GetItemCount());
 		return result;
 	}
 
@@ -44,6 +61,7 @@ namespace Engine {
 		stats.CachedSpotShadows = view.CachedSpotShadows;
 		stats.PlanarReflections = view.PlanarReflections;
 		stats.DroppedPlanarReflections = view.DroppedPlanarReflections;
+		stats.StaticCellsVisible = view.StaticCellsVisible; // M43
 		if (view.SsrAreaAvailable)
 		{
 			stats.SsrTiles = view.SsrTiles;

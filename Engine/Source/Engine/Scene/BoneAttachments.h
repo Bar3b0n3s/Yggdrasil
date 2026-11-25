@@ -6,6 +6,7 @@
 #include "Engine/Core/UUID.h"
 #include "Engine/Scene/AnimationValidation.h"
 
+#include <entt/entity/fwd.hpp>
 #include <glm/glm.hpp>
 
 #include <array>
@@ -121,6 +122,8 @@ namespace Engine {
 	private:
 		std::vector<SkeletonJoints> m_Skeletons{};
 		std::set<UUID> m_Reported{};
+		// M43: the pass's BoneAttachments in canonical order (Scene::CollectCanonical), kept to reuse its capacity.
+		std::vector<entt::entity> m_Attachments{};
 	};
 
 	// Decision R: the Animator entity whose rendered pose `entity` (readable) follows: the recorded Animator of the nearest

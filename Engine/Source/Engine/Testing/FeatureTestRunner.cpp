@@ -8,6 +8,7 @@
 #include "Engine/Core/Clock.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
@@ -522,6 +523,18 @@ namespace Engine {
 			for (const auto& mesh : snapshot.Meshes)
 				if (mesh.Entity == entity)
 					return glm::vec3(mesh.World[3]);
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a static entity's mesh is in the static set.
+			if (snapshot.StaticSet != nullptr)
+			{
+				for (const Ref<const RenderStaticCell>& cell : snapshot.StaticSet->Cells)
+				{
+					for (const MeshDrawItem& mesh : cell->Items)
+					{
+						if (mesh.Entity == entity)
+							return glm::vec3(mesh.World[3]);
+					}
+				}
+			}
 			for (const auto& text : snapshot.Texts)
 				if (text.Entity == entity)
 					return glm::vec3(text.World[3]);

@@ -254,6 +254,46 @@ namespace Engine {
 			CHECK(again.GetMatchCount() == 1);
 		}
 
+		TEST_CASE("AssetManager: the version revision moves with every version change and never goes back")
+		{
+			// M43 (the lead's W43.1 review): the physics system compares its mesh and terrain colliders' asset versions only
+			// after this revision moved, so every change of what GetVersion returns must move it.
+			MainThreadQueue queue;
+			JobSystem jobs(0, queue);
+			FixedAssetManager manager(jobs);
+			const AssetHandle texture(0x4444000044440000ull);
+			const uint64_t start = manager.GetVersionRevision();
+
+			// A load (0 to 1) and a hot-reload swap (1 to 2) each move it; reads and loads of a loaded asset do not.
+			manager.Add(texture, CreateRef<TextureData>());
+			const uint64_t loaded = manager.GetVersionRevision();
+			CHECK(loaded > start);
+			static_cast<void>(manager.Load(texture));
+			CHECK(manager.GetVersion(texture) == 1);
+			CHECK(manager.GetVersionRevision() == loaded);
+			manager.Add(texture, CreateRef<TextureData>());
+			const uint64_t swapped = manager.GetVersionRevision();
+			CHECK(swapped > loaded);
+
+			// A procedural built-in's first use takes its version from 0 to 1; its later uses change nothing.
+			REQUIRE(manager.GetVersion(BuiltinAssetHandles::CubeMesh) == 0);
+			REQUIRE(manager.Load(BuiltinAssetHandles::CubeMesh).has_value());
+			CHECK(manager.GetVersion(BuiltinAssetHandles::CubeMesh) == 1);
+			const uint64_t builtin = manager.GetVersionRevision();
+			CHECK(builtin > swapped);
+			REQUIRE(manager.Load(BuiltinAssetHandles::CubeMesh).has_value());
+			CHECK(manager.GetVersionRevision() == builtin);
+
+			// A dry run's restore puts the versions back (2 to 3 to 2) and moves the revision forward.
+			manager.SaveSharedState();
+			manager.Add(texture, CreateRef<TextureData>());
+			const uint64_t dryRun = manager.GetVersionRevision();
+			CHECK(dryRun > builtin);
+			manager.RestoreSharedState();
+			CHECK(manager.GetVersion(texture) == 2);
+			CHECK(manager.GetVersionRevision() > dryRun);
+		}
+
 		TEST_CASE("AssetManager: the Font placeholder is an empty font when the Default font cannot load")
 		{
 			MainThreadQueue queue;

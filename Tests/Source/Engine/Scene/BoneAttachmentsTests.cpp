@@ -374,6 +374,39 @@ namespace Engine {
 			CHECK(lanceState->Joint == 1);
 		}
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the pass reads the BoneAttachment view sorted by canonical
+		// key, so with the components added children first (the view's storage order the reverse of the canonical order) a
+		// charm on an attached staff is still placed through the staff's pose of the same pass, and a step visits the
+		// Animator and the two attachments only.
+		TEST_CASE("BoneAttachments: attachments are placed in canonical order whatever order their components were added in, and a step visits only them")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			Entity warden = scene.CreateEntity("Warden");
+			warden.AddComponent<AnimatorComponent>(MakeAnimator({ MakeLayer(WalkHandle), MakeLayer(SwingHandle) }));
+			Entity staff = scene.CreateEntity("Staff", warden);
+			Entity charm = scene.CreateEntity("Charm", staff);
+			for (int index = 0; index < 8; ++index)
+				static_cast<void>(scene.CreateEntity("Bystander"));
+			charm.AddComponent<BoneAttachmentComponent>(BoneAttachmentComponent{ .Bone = "Hips", .Offset = glm::vec3(0.25f, 0.0f, 0.0f) });
+			staff.AddComponent<BoneAttachmentComponent>(BoneAttachmentComponent{ .Bone = "Hand", .Offset = glm::vec3(0.0f, 0.5f, 0.0f), .Rotation = AboutX(30.0f) });
+			TransformSystem::Update(scene);
+			Scope<AnimationSystem> system = CreateSystem(scene, assets);
+			for (uint64_t tick = 0; tick < 45; ++tick)
+			{
+				CAPTURE(tick);
+				const uint64_t visited = scene.GetEntitiesVisited();
+				system->Step(SimStep::FromTick(tick, FixedDelta));
+				CHECK(scene.GetEntitiesVisited() - visited == 3);
+				TransformSystem::Update(scene);
+				CheckOnBone(charm, warden, "Hips", glm::vec3(0.25f, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+				CheckOnBone(staff, warden, "Hand", glm::vec3(0.0f, 0.5f, 0.0f), AboutX(30.0f));
+			}
+			CHECK(system->GetDiagnostics().empty());
+		}
+
 		// Not attached: no Animator above the entity (an entity's own Animator never counts), an empty Bone, a bone the
 		// Skeleton lacks (the finding names the close joint names), an Animator whose Skeleton does not load, and one posed to
 		// values that are not finite. Each keeps its Transform, holds no attachment state and is reported once with

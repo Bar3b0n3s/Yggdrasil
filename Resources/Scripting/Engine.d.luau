@@ -203,6 +203,9 @@ export type Space = "Local" | "World"
 -- The sample count of screen-space ambient occlusion (GTAO).
 export type SsaoQuality = "Low" | "Medium" | "High"
 
+-- The part of the hierarchy a Static component covers.
+export type StaticScope = "Subtree" | "EntityOnly" | "NotStatic"
+
 -- What a terrain stroke does.
 export type TerrainTool = "Raise" | "Lower" | "Smooth" | "Flatten" | "Paint"
 
@@ -300,7 +303,7 @@ export type MusicState = {Clip: AssetRef, Intro: AssetRef?, Volume: number, Loop
 export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
 
 -- The performance readout of Application.GetStats: frame-paced observations, never simulation state.
-export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number}
+export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number}
 
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
@@ -712,6 +715,7 @@ declare extern type Entity with
 	GetChildren: (self: Entity) -> {Entity}
 	-- Get a component proxy, or nil when absent. [All modes; Runtime|Test; pure/read]
 	function GetComponent(self, name: "Transform"): Transform?
+	function GetComponent(self, name: "Static"): Static?
 	function GetComponent(self, name: "MeshRenderer"): MeshRenderer?
 	function GetComponent(self, name: "Camera"): Camera?
 	function GetComponent(self, name: "DirectionalLight"): DirectionalLight?
@@ -843,6 +847,8 @@ declare extern type Entity with
 	SpriteAnimator: SpriteAnimator?
 	-- The entity's SpriteRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SpriteRenderer: SpriteRenderer?
+	-- The entity's Static component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Static: Static?
 	-- The entity's Terrain component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Terrain: Terrain?
 	-- The entity's TerrainCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -1585,6 +1591,12 @@ declare extern type SpriteRenderer with
 	Texture: AssetRef?
 end
 
+-- Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.
+declare extern type Static with
+	-- What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree). [All modes; Runtime|Test; pure/read; setter mutates]
+	Scope: StaticScope
+end
+
 -- An opaque coroutine handle owned by one script VM.
 declare extern type TaskHandle with
 end
@@ -1921,7 +1933,7 @@ declare Application: {
 	GetDisplaySettings: () -> DisplaySettings,
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
 	GetPlatform: () -> string,
-	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
+	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
 	GetStats: () -> PerformanceStats,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,

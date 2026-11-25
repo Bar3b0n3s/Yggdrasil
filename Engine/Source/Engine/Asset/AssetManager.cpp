@@ -97,6 +97,9 @@ namespace Engine {
 		// of them (AppendRecorded inserts in place, every other change rebuilds it).
 		std::vector<AssetDiagnostic> Merged;
 		std::map<AssetHandle, AssetRef<Asset>> ProceduralBuiltins;
+		// GetVersionRevision: moved by every change of what GetVersion returns. Not part of a dry run's saved state, so it never
+		// goes back when the versions do.
+		uint64_t VersionRevision = 0;
 		// The Font placeholder when the Default font cannot be loaded: an empty font, created once.
 		AssetRef<FontData> EmptyFont;
 		std::optional<SharedState> Saved;
@@ -248,6 +251,11 @@ namespace Engine {
 		return found == m_State->Shared.Versions.end() ? 0 : found->second;
 	}
 
+	uint64_t AssetManager::GetVersionRevision() const
+	{
+		return m_State->VersionRevision;
+	}
+
 	std::span<const AssetDiagnostic> AssetManager::GetDiagnostics() const
 	{
 		return m_State->Merged;
@@ -305,6 +313,7 @@ namespace Engine {
 	void AssetManager::BumpVersion(AssetHandle handle)
 	{
 		++m_State->Shared.Versions[handle];
+		++m_State->VersionRevision;
 		// The handle loads now: a reference to it is no longer missing.
 		if (m_State->RemoveRecorded([handle](const AssetDiagnostic& diagnostic)
 		{
@@ -346,6 +355,7 @@ namespace Engine {
 			return cached->second;
 		ENGINE_TRY_ASSIGN(AssetRef<Asset> asset, CreateProceduralBuiltinAsset(handle));
 		m_State->ProceduralBuiltins.emplace(handle, asset);
+		++m_State->VersionRevision; // its version goes from 0 to 1
 		return asset;
 	}
 
@@ -363,6 +373,7 @@ namespace Engine {
 		m_State->Shared = std::move(*m_State->Saved);
 		m_State->Saved.reset();
 		m_State->RebuildMerged();
+		++m_State->VersionRevision; // the versions are the saved ones again
 	}
 
 	void AssetManager::ReportUnavailable(AssetHandle handle, AssetType expectedType, const Error* error)

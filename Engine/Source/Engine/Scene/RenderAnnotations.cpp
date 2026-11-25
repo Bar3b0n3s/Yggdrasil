@@ -6,6 +6,7 @@
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Scene/ColliderDebugDraw.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
@@ -26,6 +27,7 @@
 #include <cmath>
 #include <format>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -172,8 +174,22 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "environment irradiance must be finite");
 		illumination = illumination || (environment.Intensity > 0 && Utils::HasPositiveComponent(ambient));
 		bool needsLighting = false;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the dynamic items and the static set's.
+		std::vector<const MeshDrawItem*> items;
+		items.reserve(snapshot.Meshes.size());
 		for (const MeshDrawItem& item : snapshot.Meshes)
+			items.push_back(&item);
+		if (snapshot.StaticSet != nullptr)
 		{
+			for (const Ref<const RenderStaticCell>& cell : snapshot.StaticSet->Cells)
+			{
+				for (const MeshDrawItem& item : cell->Items)
+					items.push_back(&item);
+			}
+		}
+		for (const MeshDrawItem* drawn : items)
+		{
+			const MeshDrawItem& item = *drawn;
 			const auto mesh = assets.GetOrPlaceholder<MeshData>(item.Mesh);
 			for (const MeshSubmesh& submesh : mesh->Submeshes)
 			{

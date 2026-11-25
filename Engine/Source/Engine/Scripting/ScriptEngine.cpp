@@ -277,8 +277,9 @@ namespace Engine {
 		Scene& scene = GetHost().GetScene();
 		m_State->RefreshLifecycleOrder();
 		// Only entities with a Script component and existing instances can change, so only those are visited, in canonical
-		// order. The refreshed lifecycle order already lists every instance canonically; a scene walk is needed only when
-		// a scripted entity may need a new instance. Large scenes with few scripts therefore cost no per-entity work.
+		// order. The refreshed lifecycle order already lists every instance canonically; only when a scripted entity may need
+		// a new instance are the candidates sorted by canonical key (M43: never a scene walk). Large scenes with few scripts
+		// therefore cost no per-entity work.
 		using InstanceKey = State::InstanceKey;
 		const auto mayCreate = [this](Entity entity, InstanceKey key)
 		{
@@ -286,8 +287,12 @@ namespace Engine {
 		};
 		entt::registry& registry = scene.GetRegistry();
 		std::vector<UUID> unplaced;
+		// M43: the Script view's entities and, below, the entities this synchronization visits count in the scene's
+		// EntitiesVisited.
+		size_t visited = 0;
 		for (const entt::entity handle : registry.view<const ScriptComponent>())
 		{
+			++visited;
 			const UUID id = registry.get<const IDComponent>(handle).ID;
 			const ScriptComponent& component = registry.get<const ScriptComponent>(handle);
 			for (uint32_t slot = 0; slot < Detail::GetScriptSlotCount(component); ++slot)
@@ -321,12 +326,20 @@ namespace Engine {
 			candidates.insert(candidates.end(), unplaced.begin(), unplaced.end());
 			std::sort(candidates.begin(), candidates.end());
 			candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
-			for (const UUID id : scene.GetCanonicalOrder())
+			// M43: the candidates' live entities sorted by canonical key, which is the canonical order restricted to them.
+			std::vector<entt::entity> handles;
+			handles.reserve(candidates.size());
+			for (const UUID id : candidates)
 			{
-				if (std::binary_search(candidates.begin(), candidates.end(), id))
-					snapshot.push_back(id);
+				if (const Entity entity = scene.FindEntityByID(id))
+					handles.push_back(entity.GetHandle());
 			}
+			scene.SortCanonical(handles);
+			snapshot.reserve(handles.size());
+			for (const entt::entity handle : handles)
+				snapshot.push_back(registry.get<const IDComponent>(handle).ID);
 		}
+		scene.AddEntitiesVisited(visited + snapshot.size());
 		struct ActiveTransition
 		{
 			InstanceKey Key{};

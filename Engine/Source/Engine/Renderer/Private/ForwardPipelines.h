@@ -105,6 +105,12 @@ namespace Engine {
 		inline constexpr uint32_t PlanarReflectionConstantsRegister = 7;
 		inline constexpr uint32_t PlanarReflectionsRegister = 17;
 		inline constexpr uint32_t PlanarReflectionSlotCount = 4;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's GPU-resident instance records
+		// (GpuResourceCache::GetStaticRecordBuffer) and the view's InstanceIndices (Shared/InstanceRecord.h), which a static
+		// draw's instances read (DrawConstantsStaticInstances): in the prepass, overdraw and forward sets and the Shadow
+		// program's, after their earlier items; the Terrain program declares them unread, since it shares the forward set.
+		inline constexpr uint32_t StaticInstancesRegister = 21;
+		inline constexpr uint32_t InstanceIndicesRegister = 22;
 		inline constexpr uint32_t LinearClampRegister = 0;
 		inline constexpr uint32_t ShadowCompareRegister = 1;
 		inline constexpr uint32_t AnisoWrapRegister = 2;

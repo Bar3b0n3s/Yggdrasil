@@ -56,7 +56,19 @@ namespace Engine {
 		uint32_t Padding2 = 0;
 	};
 
+	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): one entry of a view's InstanceIndices structured buffer (t22
+	// of set 0 of the Scene and Shadow programs): a static draw (DrawConstants::Flags with DrawConstantsStaticInstances)
+	// reads instance i's record at StaticInstances[InstanceIndices[FirstInstance + i].Record], StaticInstances (t21) being the
+	// GPU-resident records of the scene's static set. Reserved is 0 and unread at M43, kept for M46's per-view fade of a
+	// static entry (ADR 0060's ledger), so M46 changes no layout of M43's.
+	struct InstanceIndex
+	{
+		uint32_t Record = 0;
+		uint32_t Reserved = 0;
+	};
+
 #if !defined(ENGINE_SHADER)
+	static_assert(sizeof(InstanceIndex) == 8 && offsetof(InstanceIndex, Reserved) == 4, "InstanceIndex must match its 8-byte structured-buffer layout");
 	static_assert(sizeof(InstanceRecord) == 208, "InstanceRecord must match its 208-byte structured-buffer layout");
 	static_assert(offsetof(InstanceRecord, PreviousWorld) == 64 && offsetof(InstanceRecord, EntityId) == 128 && offsetof(InstanceRecord, Tint) == 144
 			&& offsetof(InstanceRecord, Emissive) == 160 && offsetof(InstanceRecord, DissolveEdge) == 176 && offsetof(InstanceRecord, UVOffset) == 192,

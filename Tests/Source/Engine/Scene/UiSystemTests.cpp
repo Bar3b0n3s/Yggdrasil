@@ -832,7 +832,10 @@ namespace Engine {
 			// The camera at (0, 0, 10) looking down -Z with a 90 degree field of view; the scene image 200 x 200, so a pointer at
 			// the image's centre looks straight at the canvas's centre.
 			Entity camera = scene.CreateEntity("Camera");
-			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			});
 			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .Primary = true });
 			// A World canvas of 200 x 100 canvas pixels at 20 pixels per unit (10 x 5 units) at the origin, facing the camera.
 			Entity canvas = scene.CreateEntity("Board");
@@ -878,6 +881,37 @@ namespace Engine {
 			// Without a ray (no primary camera, or a frame without it) the World canvas is not hit.
 			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(100.0f) });
 			CHECK_FALSE(ui.GetInteraction().Hovered.IsValid());
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): both layout phases add the entities their scan iterated to
+		// the scene's EntitiesVisited: the canvases and their trees, never the rest of the scene, and nothing without a canvas.
+		TEST_CASE("UiSystem: a layout visits the canvases' trees only, and a scene without a canvas nothing")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity world = scene.CreateEntity("World");
+			for (int index = 0; index < 8; ++index)
+				static_cast<void>(scene.CreateEntity("Prop", world));
+			UiSystem ui;
+			uint64_t visited = scene.GetEntitiesVisited();
+			ui.LayoutStep(scene, glm::uvec2(100, 50));
+			ui.LayoutFrame(scene, glm::uvec2(100, 50));
+			CHECK(scene.GetEntitiesVisited() == visited);
+
+			// A canvas, an entity without a UiRect below it and two elements: four entities a layout.
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity group = scene.CreateEntity("Group", canvas);
+			scene.CreateEntity("First", group).AddComponent<UiRectComponent>(UiRectComponent{});
+			scene.CreateEntity("Second", canvas).AddComponent<UiRectComponent>(UiRectComponent{});
+			visited = scene.GetEntitiesVisited();
+			ui.LayoutStep(scene, glm::uvec2(100, 50));
+			CHECK(scene.GetEntitiesVisited() - visited == 4);
+			CHECK(ui.GetStepLayout().Nodes.size() == 2);
+			visited = scene.GetEntitiesVisited();
+			ui.LayoutFrame(scene, glm::uvec2(100, 50));
+			CHECK(scene.GetEntitiesVisited() - visited == 4);
+			CHECK(ui.GetFrameLayout().Nodes.size() == 2);
 		}
 	}
 

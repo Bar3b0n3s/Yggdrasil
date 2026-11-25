@@ -37,7 +37,9 @@ namespace Engine {
 			view.visibility = nvrhi::ShaderType::All;
 			view.registerSpace = 0;
 			view.registerSpaceIsDescriptorSet = true;
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static records and the view's indices after the records.
 			view.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(0), nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
+				nvrhi::BindingLayoutItem::StructuredBuffer_SRV(StaticInstancesRegister), nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstanceIndicesRegister),
 				nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask)
 			{
@@ -172,6 +174,190 @@ namespace Engine {
 				hasher.UpdateU64(casters.Draws[index].Signature);
 		}
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a cell a face's static cull looks at, and where it lies against
+		// the light's box (Inside when the face has no light box: a cascade's).
+		struct StaticFaceCandidate
+		{
+			uint32_t Cell = 0;
+			StaticCellVisibility Light = StaticCellVisibility::Inside;
+		};
+
+		// M43: one of a face's visible static casters into `buckets` by key, so the keys keep the order they first appear in
+		// and, within a key, the casters their visit order.
+		static void AddStaticFaceCaster(StaticShadowBuckets& buckets, uint32_t key, uint32_t record, uint64_t signature)
+		{
+			if (buckets.Keys[key].empty())
+				buckets.Touched.push_back(key);
+			buckets.Keys[key].emplace_back(record, signature);
+		}
+
+		// M43: the face's draws, one per key, appended to `set` with their indices appended to `indices`, and, when `hashed`
+		// (a face M29's cache holds: a spot tile or a point face), its signature; `buckets` is left empty for the next face.
+		[[nodiscard]] static StaticShadowFace FinishStaticFace(StaticShadowBuckets& buckets, bool hashed, StaticShadowSet& set, std::vector<InstanceIndex>& indices)
+		{
+			StaticShadowFace face{ .FirstDraw = static_cast<uint32_t>(set.Draws.size()) };
+			XXH64Hasher signature;
+			for (const uint32_t key : buckets.Touched)
+			{
+				std::vector<std::pair<uint32_t, uint64_t>>& bucket = buckets.Keys[key];
+				set.Draws.push_back({ .Key = key, .First = static_cast<uint32_t>(indices.size()), .Count = static_cast<uint32_t>(bucket.size()) });
+				for (const auto& [record, casterSignature] : bucket)
+				{
+					indices.push_back({ .Record = record });
+					if (hashed)
+						signature.UpdateU64(casterSignature);
+				}
+				bucket.clear();
+			}
+			face.DrawCount = static_cast<uint32_t>(buckets.Touched.size());
+			face.Signature = hashed && face.DrawCount != 0 ? FinishShadowSignature(signature) : 0;
+			buckets.Touched.clear();
+			return face;
+		}
+
+		// M43: the cells a face of the light box `light` (null: a cascade's, every cell) may draw from: those whose box is not
+		// outside the light's (ClassifyStaticCellLight; an unbounded cell always), in cell order.
+		static void SelectStaticFaceCandidates(std::span<const StaticShadowCell> cells, const ShadowBox* light, std::vector<StaticFaceCandidate>& candidates)
+		{
+			candidates.clear();
+			for (uint32_t index = 0; index < cells.size(); ++index)
+			{
+				const StaticShadowCell& cell = cells[index];
+				StaticCellVisibility visibility = StaticCellVisibility::Inside;
+				if (light != nullptr)
+				{
+					visibility = cell.Unbounded ? StaticCellVisibility::Partial
+												: ClassifyStaticCellLight(InflateStaticCellBox(cell.Box, light->Centre), light->Centre, light->HalfExtent);
+				}
+				if (visibility != StaticCellVisibility::Outside)
+					candidates.push_back({ .Cell = index, .Light = visibility });
+			}
+		}
+
+		// M43: one face's visible static casters into `buckets`: of each candidate cell not outside the face's frustum, each
+		// caster the dynamic path's tests keep (ShadowBoxesOverlap with `light`, then IsOutsideShadow), a test the cell's
+		// classification settles for all its casters skipped.
+		static void CullStaticFace(std::span<const StaticShadowCell> cells, std::span<const StaticFaceCandidate> candidates, const ShadowBox* light,
+			const glm::mat4& viewProjection, bool pancake, StaticShadowBuckets& buckets)
+		{
+			// The face's frustum's centre bounds the magnitudes its clip coordinates are computed from (InflateStaticCellBox); a
+			// degenerate face's falls back to the origin, so no margin is ever non-finite.
+			glm::vec3 reference = GetShadowFrustumBox(viewProjection).Centre;
+			if (!std::isfinite(reference.x) || !std::isfinite(reference.y) || !std::isfinite(reference.z))
+				reference = glm::vec3(0.0f);
+			for (const StaticFaceCandidate& candidate : candidates)
+			{
+				const StaticShadowCell& cell = cells[candidate.Cell];
+				const StaticCellVisibility frustum = cell.Unbounded ? StaticCellVisibility::Partial
+																	: ClassifyStaticCellShadow(InflateStaticCellBox(cell.Box, reference), viewProjection, pancake);
+				if (frustum == StaticCellVisibility::Outside)
+					continue;
+				for (const StaticShadowCaster& caster : cell.Casters)
+				{
+					if (light != nullptr && candidate.Light != StaticCellVisibility::Inside && !ShadowBoxesOverlap(caster.Box, *light))
+						continue;
+					if (frustum != StaticCellVisibility::Inside && IsOutsideShadow(caster.Bounds, viewProjection * caster.World, pancake))
+						continue;
+					AddStaticFaceCaster(buckets, caster.Key, cell.FirstRecord + caster.Item, caster.Signature);
+				}
+			}
+		}
+
+		// One caster draw with its instancing key and instance record, before PrepareCasters sorts them.
+		struct ShadowCasterCandidate
+		{
+			ShadowCasterDraw Draw{};
+			MeshInstanceKey Key{};
+			InstanceRecord Record{};
+		};
+
+		// The caster draws of `item` (a caster with a mesh and a finite world matrix) whose vertices `source` gives, one per
+		// submesh that casts, in submesh order, with their keys, records and M29 signatures (PrepareCasters' rule, which M43's
+		// static casters share): appended to `candidates`.
+		static void AppendCasterCandidates(GpuResourceCache& cache, const MeshDrawItem& item, const DeformedVertexSource& source,
+			std::vector<ShadowCasterCandidate>& candidates)
+		{
+			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
+			const GpuMesh mesh = cache.GetMesh(item.Mesh);
+			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer)
+				return;
+			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0;
+			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
+			{
+				const GpuSubmesh& submesh = mesh.Submeshes[submeshIndex];
+				if (submesh.IndexCount == 0)
+					continue;
+				AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
+				if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot].IsValid())
+					materialHandle = item.Materials[submesh.MaterialSlot];
+				else if (submesh.MaterialSlot < mesh.DefaultMaterials.size() && mesh.DefaultMaterials[submesh.MaterialSlot].IsValid())
+					materialHandle = mesh.DefaultMaterials[submesh.MaterialSlot];
+				const GpuMaterial& material = cache.GetMaterial(materialHandle);
+				if (material.AlphaMode == AlphaMode::Blend || !material.Constants || !material.BaseColorMap)
+					continue;
+				// M31 (decision 5): a dissolving item's Opaque material casts through the Mask variant, its material bound.
+				const AlphaMode mode = SelectMeshAlphaMode(material.AlphaMode, item.Parameters, true);
+				const bool mask = mode == AlphaMode::Mask;
+				ShadowCasterCandidate candidate;
+				candidate.Draw = { .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
+					.Attributes = mesh.AttributeBuffer,
+					.Indices = mesh.IndexBuffer,
+					.IndexOffset = submesh.IndexOffset,
+					.IndexCount = submesh.IndexCount,
+					.Bounds = source.Vertices != nullptr ? source.Bounds : submesh.Bounds,
+					.World = item.World,
+					.Variant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(mirrored, material.DoubleSided)),
+					.ReflectedVariant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(!mirrored, material.DoubleSided)),
+					.MaterialConstants = mask ? material.Constants : nvrhi::BufferHandle(),
+					.BaseColorMap = mask ? material.BaseColorMap : nvrhi::TextureHandle() };
+				// An Opaque caster binds no material, so the Opaque casters of one mesh batch whatever their materials.
+				candidate.Key = { .Pipeline = candidate.Draw.Variant,
+					.Material = mask ? materialHandle : AssetHandle(),
+					.Mesh = item.Mesh,
+					.Submesh = submeshIndex,
+					.VertexStream = source.VertexStream };
+				candidate.Record = MakeMeshInstanceRecord(item);
+				// M29 (decision 4): what this draw puts into a depth map. An Opaque caster binds no material, so its material does
+				// not count; a deformed caster's vertices are its entity's, posed by its palette and weights.
+				XXH64Hasher signature;
+				Utils::HashShadowValue(signature, item.World);
+				signature.UpdateU64(item.Mesh.GetValue());
+				signature.UpdateU64(mesh.Version);
+				signature.UpdateU64(submesh.IndexOffset);
+				signature.UpdateU64(submesh.IndexCount);
+				signature.UpdateU64(candidate.Draw.Variant);
+				signature.UpdateU64(candidate.Draw.ReflectedVariant);
+				signature.UpdateU64(mask ? materialHandle.GetValue() : 0U);
+				signature.UpdateU64(mask ? material.Generation : 0U);
+				// M31's parameters (batch 1's landing and its review, finding 2): exactly the instance-record values a Mask
+				// caster's fragment shader (Shadow.slang's PSMain) reads under DrawFlagMaterialParameters. The dissolve's amount
+				// always; its noise scale only while the amount is above 0 and below 1, the only amounts that sample the noise;
+				// the texture-coordinate offset only for a Mask material, whose alpha test samples at it (an Opaque material's
+				// dissolve tests no alpha and samples the noise without the offset). A fade and a tint never reach a shadow, and an
+				// Opaque caster reads no record value.
+				const bool parameters = mask && (candidate.Record.Flags & DrawFlagMaterialParameters) != 0;
+				signature.UpdateU64(parameters ? 1U : 0U);
+				if (parameters)
+				{
+					const float dissolve = candidate.Record.DissolveAmount;
+					Utils::HashShadowValue(signature, dissolve);
+					if (dissolve > 0.0f && dissolve < 1.0f)
+						Utils::HashShadowValue(signature, candidate.Record.DissolveNoiseScale);
+					if (material.AlphaMode == AlphaMode::Mask)
+						Utils::HashShadowValue(signature, candidate.Record.UVOffset);
+				}
+				signature.UpdateU64(source.Vertices != nullptr ? 1U : 0U);
+				if (source.Vertices != nullptr)
+				{
+					signature.UpdateU64(item.Entity.GetValue());
+					Utils::HashShadowValues(signature, std::span<const glm::mat4>(item.JointPalette));
+					Utils::HashShadowValues(signature, std::span<const float>(item.MorphWeights));
+				}
+				candidate.Draw.Signature = Utils::FinishShadowSignature(signature);
+				candidates.push_back(std::move(candidate));
+			}
+		}
+
 	}
 
 	namespace {
@@ -196,13 +382,21 @@ namespace Engine {
 
 		// The Mask casters' material sets (null for Opaque casters), one per draw of `casters`, from the caller's cache.
 		[[nodiscard]] Result<std::vector<nvrhi::IBindingSet*>> ResolveMaterialSets(PassBindingCache& bindings, const ShadowCasterSet& casters);
+		// M43: the Mask static keys' material sets (null for Opaque keys), one per key of `keys`, from the caller's cache.
+		[[nodiscard]] Result<std::vector<nvrhi::IBindingSet*>> ResolveStaticMaterialSets(PassBindingCache& bindings, std::span<const StaticShadowKey> keys);
+		// The Opaque and the Mask casters' set 0 of caster-constant slot `slot`, from the caller's cache.
+		[[nodiscard]] Result<std::array<nvrhi::IBindingSet*, 2>> GetViewSets(PassBindingCache& bindings, const ShadowRenderInputs& inputs, nvrhi::ITexture& noise,
+			uint32_t slot);
 		// One face: the runs of `visible` (the face's CullShadowView, ascending) that are adjacent draws of one batch
-		// (`batchOf`: each draw's batch), each one instanced draw. `reflected`: the face's projection is a reflection (a
-		// point-shadow face), so the draws use their ReflectedVariant.
-		[[nodiscard]] Status RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
-			std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IFramebuffer& framebuffer,
-			const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot, std::span<const uint32_t> visible,
+		// (`batchOf`: each draw's batch), each one instanced draw with the face's `viewSets`. `reflected`: the face's projection
+		// is a reflection (a point-shadow face), so the draws use their ReflectedVariant.
+		void RecordView(nvrhi::ICommandList& commandList, const ShadowCasterSet& casters, std::span<nvrhi::IBindingSet* const> materialSets,
+			const std::array<nvrhi::IBindingSet*, 2>& viewSets, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport, std::span<const uint32_t> visible,
 			std::span<const uint32_t> batchOf, RenderPassCounters& counters, bool reflected);
+		// M43: one face's static draws (`face`, of inputs.StaticDraws), each one indexed draw of its key's visible static casters.
+		void RecordStaticFace(nvrhi::ICommandList& commandList, const ShadowRenderInputs& inputs, std::span<nvrhi::IBindingSet* const> materialSets,
+			const std::array<nvrhi::IBindingSet*, 2>& viewSets, const StaticShadowFace& face, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport,
+			RenderPassCounters& counters, bool reflected);
 
 		// M29 (the review): CPU buffers every Record reuses, so a steady-state record allocates nothing: the casters' boxes
 		// and batches, every draw (a cascade's candidates), a light's candidates, and the visible draws of a cascade or point
@@ -371,13 +565,7 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(sources.empty() || sources.size() == casters.size(), "the casters' vertex sources are none or one per caster");
 		// The draws in caster order with their keys and records, sorted below.
-		struct Candidate
-		{
-			ShadowCasterDraw Draw{};
-			MeshInstanceKey Key{};
-			InstanceRecord Record{};
-		};
-		std::vector<Candidate> candidates;
+		std::vector<Utils::ShadowCasterCandidate> candidates;
 		for (size_t casterIndex = 0; casterIndex < casters.size(); ++casterIndex)
 		{
 			const MeshDrawItem& item = casters[casterIndex];
@@ -387,85 +575,7 @@ namespace Engine {
 				continue;
 			if (!Utils::IsFiniteShadowWorld(item.World))
 				return MakeError(ErrorCode::InvalidArgument, "Shadow caster {} has a non-finite world transform", item.Entity);
-			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
-			const GpuMesh mesh = cache.GetMesh(item.Mesh);
-			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer)
-				continue;
-			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0;
-			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
-			{
-				const GpuSubmesh& submesh = mesh.Submeshes[submeshIndex];
-				if (submesh.IndexCount == 0)
-					continue;
-				AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
-				if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot].IsValid())
-					materialHandle = item.Materials[submesh.MaterialSlot];
-				else if (submesh.MaterialSlot < mesh.DefaultMaterials.size() && mesh.DefaultMaterials[submesh.MaterialSlot].IsValid())
-					materialHandle = mesh.DefaultMaterials[submesh.MaterialSlot];
-				const GpuMaterial& material = cache.GetMaterial(materialHandle);
-				if (material.AlphaMode == AlphaMode::Blend || !material.Constants || !material.BaseColorMap)
-					continue;
-				// M31 (decision 5): a dissolving item's Opaque material casts through the Mask variant, its material bound.
-				const AlphaMode mode = SelectMeshAlphaMode(material.AlphaMode, item.Parameters, true);
-				const bool mask = mode == AlphaMode::Mask;
-				Candidate candidate;
-				candidate.Draw = { .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
-					.Attributes = mesh.AttributeBuffer,
-					.Indices = mesh.IndexBuffer,
-					.IndexOffset = submesh.IndexOffset,
-					.IndexCount = submesh.IndexCount,
-					.Bounds = source.Vertices != nullptr ? source.Bounds : submesh.Bounds,
-					.World = item.World,
-					.Variant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(mirrored, material.DoubleSided)),
-					.ReflectedVariant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(!mirrored, material.DoubleSided)),
-					.MaterialConstants = mask ? material.Constants : nvrhi::BufferHandle(),
-					.BaseColorMap = mask ? material.BaseColorMap : nvrhi::TextureHandle() };
-				// An Opaque caster binds no material, so the Opaque casters of one mesh batch whatever their materials.
-				candidate.Key = { .Pipeline = candidate.Draw.Variant,
-					.Material = mask ? materialHandle : AssetHandle(),
-					.Mesh = item.Mesh,
-					.Submesh = submeshIndex,
-					.VertexStream = source.VertexStream };
-				candidate.Record = MakeMeshInstanceRecord(item);
-				// M29 (decision 4): what this draw puts into a depth map. An Opaque caster binds no material, so its material does
-				// not count; a deformed caster's vertices are its entity's, posed by its palette and weights.
-				XXH64Hasher signature;
-				Utils::HashShadowValue(signature, item.World);
-				signature.UpdateU64(item.Mesh.GetValue());
-				signature.UpdateU64(mesh.Version);
-				signature.UpdateU64(submesh.IndexOffset);
-				signature.UpdateU64(submesh.IndexCount);
-				signature.UpdateU64(candidate.Draw.Variant);
-				signature.UpdateU64(candidate.Draw.ReflectedVariant);
-				signature.UpdateU64(mask ? materialHandle.GetValue() : 0U);
-				signature.UpdateU64(mask ? material.Generation : 0U);
-				// M31's parameters (batch 1's landing and its review, finding 2): exactly the instance-record values a Mask
-				// caster's fragment shader (Shadow.slang's PSMain) reads under DrawFlagMaterialParameters. The dissolve's amount
-				// always; its noise scale only while the amount is above 0 and below 1, the only amounts that sample the noise;
-				// the texture-coordinate offset only for a Mask material, whose alpha test samples at it (an Opaque material's
-				// dissolve tests no alpha and samples the noise without the offset). A fade and a tint never reach a shadow, and an
-				// Opaque caster reads no record value.
-				const bool parameters = mask && (candidate.Record.Flags & DrawFlagMaterialParameters) != 0;
-				signature.UpdateU64(parameters ? 1U : 0U);
-				if (parameters)
-				{
-					const float dissolve = candidate.Record.DissolveAmount;
-					Utils::HashShadowValue(signature, dissolve);
-					if (dissolve > 0.0f && dissolve < 1.0f)
-						Utils::HashShadowValue(signature, candidate.Record.DissolveNoiseScale);
-					if (material.AlphaMode == AlphaMode::Mask)
-						Utils::HashShadowValue(signature, candidate.Record.UVOffset);
-				}
-				signature.UpdateU64(source.Vertices != nullptr ? 1U : 0U);
-				if (source.Vertices != nullptr)
-				{
-					signature.UpdateU64(item.Entity.GetValue());
-					Utils::HashShadowValues(signature, std::span<const glm::mat4>(item.JointPalette));
-					Utils::HashShadowValues(signature, std::span<const float>(item.MorphWeights));
-				}
-				candidate.Draw.Signature = Utils::FinishShadowSignature(signature);
-				candidates.push_back(std::move(candidate));
-			}
+			Utils::AppendCasterCandidates(cache, item, source, candidates);
 		}
 
 		// Equal draws adjacent, ties in caster order (the candidates' index).
@@ -484,7 +594,7 @@ namespace Engine {
 		instances.reserve(instances.size() + candidates.size());
 		for (const uint32_t index : order)
 		{
-			Candidate& candidate = candidates[index];
+			Utils::ShadowCasterCandidate& candidate = candidates[index];
 			candidate.Draw.Instance = static_cast<uint32_t>(instances.size());
 			instances.push_back(candidate.Record);
 			keys.push_back(candidate.Key);
@@ -497,6 +607,72 @@ namespace Engine {
 			set.Batches.reserve(set.Draws.size());
 			for (uint32_t index = 0; index < set.Draws.size(); ++index)
 				set.Batches.push_back({ .First = index, .Count = 1 });
+		}
+		return set;
+	}
+
+	void ShadowPass::AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, std::vector<ShadowCasterDraw>& draws,
+		std::vector<RenderStaticDrawKey>& keys)
+	{
+		ENGINE_CORE_ASSERT(Utils::IsFiniteShadowWorld(item.World), "a static caster's world matrix must be finite");
+		if (!item.CastShadows || !item.Mesh.IsValid())
+			return;
+		std::vector<Utils::ShadowCasterCandidate> candidates;
+		Utils::AppendCasterCandidates(cache, item, DeformedVertexSource{}, candidates);
+		for (Utils::ShadowCasterCandidate& candidate : candidates)
+		{
+			keys.push_back({ .Pipeline = candidate.Key.Pipeline, .Material = candidate.Key.Material, .Mesh = candidate.Key.Mesh, .Submesh = candidate.Key.Submesh });
+			draws.push_back(std::move(candidate.Draw));
+		}
+	}
+
+	StaticShadowSet ShadowPass::PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
+		const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices)
+	{
+		StaticShadowSet set;
+		if (cells.empty())
+			return set;
+		ENGINE_CORE_ASSERT(buckets.Touched.empty(), "the static shadow buckets must be empty between faces");
+		if (buckets.Keys.size() < keyCount)
+			buckets.Keys.resize(keyCount);
+		std::vector<Utils::StaticFaceCandidate> candidates;
+		// A cascade's candidates are every cell, as its dynamic candidates are every caster draw.
+		if (cascades != nullptr)
+		{
+			ENGINE_CORE_ASSERT(cascades->Count <= MaxShadowCascades, "Directional shadow cascade count is invalid");
+			Utils::SelectStaticFaceCandidates(cells, nullptr, candidates);
+			for (uint32_t index = 0; index < cascades->Count; ++index)
+			{
+				Utils::CullStaticFace(cells, candidates, nullptr, cascades->Cascades[index].ViewProjection, depthClamp, buckets);
+				set.Cascades[index] = Utils::FinishStaticFace(buckets, false, set, indices); // cascades are drawn every frame
+			}
+		}
+		if (spots != nullptr)
+		{
+			ENGINE_CORE_ASSERT(spots->Tiles.size() <= MaxSpotShadowLights, "Spot shadow tile count is invalid");
+			for (size_t index = 0; index < spots->Tiles.size(); ++index)
+			{
+				const ShadowBox light = Utils::GetShadowFrustumBox(spots->Tiles[index].ViewProjection);
+				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
+				Utils::CullStaticFace(cells, candidates, &light, spots->Tiles[index].ViewProjection, false, buckets);
+				set.Spots[index] = Utils::FinishStaticFace(buckets, true, set, indices);
+			}
+		}
+		if (points != nullptr)
+		{
+			ENGINE_CORE_ASSERT(points->Lights.size() <= MaxPointShadowLights, "Point shadow light count is invalid");
+			for (size_t index = 0; index < points->Lights.size(); ++index)
+			{
+				// Every face lies inside the light's cube of FarClip (the Range) around it, as Record's candidates.
+				const PointShadowLight& planned = points->Lights[index];
+				const ShadowBox light{ .Centre = planned.Position, .HalfExtent = glm::vec3(planned.FarClip) };
+				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
+				for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
+				{
+					Utils::CullStaticFace(cells, candidates, &light, planned.FaceViewProjections[face], false, buckets);
+					set.Points[index][face] = Utils::FinishStaticFace(buckets, true, set, indices);
+				}
+			}
 		}
 		return set;
 	}
@@ -516,29 +692,54 @@ namespace Engine {
 		return sets;
 	}
 
-	Status ShadowPass::State::RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
-		std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IFramebuffer& framebuffer,
-		const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot, std::span<const uint32_t> visible,
-		std::span<const uint32_t> batchOf, RenderPassCounters& counters, bool reflected)
+	Result<std::vector<nvrhi::IBindingSet*>> ShadowPass::State::ResolveStaticMaterialSets(PassBindingCache& bindings, std::span<const StaticShadowKey> keys)
+	{
+		std::vector<nvrhi::IBindingSet*> sets(keys.size(), nullptr);
+		for (size_t index = 0; index < keys.size(); ++index)
+		{
+			const StaticShadowKey& key = keys[index];
+			if (key.MaterialConstants == nullptr)
+				continue;
+			nvrhi::BindingSetDesc desc;
+			desc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, key.MaterialConstants), nvrhi::BindingSetItem::Texture_SRV(0, key.BaseColorMap) };
+			ENGINE_TRY_ASSIGN(sets[index], bindings.GetOrCreate(*Device, desc, *Pipelines[key.Variant].BindingLayouts[1]));
+		}
+		return sets;
+	}
+
+	Result<std::array<nvrhi::IBindingSet*, 2>> ShadowPass::State::GetViewSets(PassBindingCache& bindings, const ShadowRenderInputs& inputs, nvrhi::ITexture& noise,
+		uint32_t slot)
 	{
 		// The slot's range of the caller's buffer (NVRHI binds constant-buffer ranges in whole 256-byte units): the same desc
-		// every frame, so the caller's cache keeps the sets.
+		// every frame, so the caller's cache keeps the sets. M43: the static records and the view's indices, or the view's
+		// Instances in the place of either the inputs lack (no static draw reads them then).
 		static_assert(sizeof(ShadowCasterConstants) <= ShadowCasterSlotStride && ShadowCasterSlotStride % 256 == 0);
 		const nvrhi::BufferRange range(static_cast<uint64_t>(slot) * ShadowCasterSlotStride, ShadowCasterSlotStride);
+		nvrhi::IBuffer* staticInstances = inputs.StaticInstances != nullptr ? inputs.StaticInstances : inputs.Instances;
+		nvrhi::IBuffer* instanceIndices = inputs.InstanceIndices != nullptr ? inputs.InstanceIndices : inputs.Instances;
 		std::array<nvrhi::IBindingSet*, 2> viewSets{};
 		for (uint32_t mask = 0; mask < 2; ++mask)
 		{
 			nvrhi::BindingSetDesc desc;
-			desc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, &casterConstants, range),
-				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, &instances),
+			desc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, inputs.CasterConstants, range),
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, inputs.Instances),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask != 0)
 			{
 				desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, &noise));
 				desc.bindings.push_back(nvrhi::BindingSetItem::Sampler(2, AnisoWrap));
 			}
+			desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, staticInstances));
+			desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, instanceIndices));
 			ENGINE_TRY_ASSIGN(viewSets[mask], bindings.GetOrCreate(*Device, desc, *Pipelines[mask * 3].BindingLayouts[0]));
 		}
+		return viewSets;
+	}
+
+	void ShadowPass::State::RecordView(nvrhi::ICommandList& commandList, const ShadowCasterSet& casters, std::span<nvrhi::IBindingSet* const> materialSets,
+		const std::array<nvrhi::IBindingSet*, 2>& viewSets, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport, std::span<const uint32_t> visible,
+		std::span<const uint32_t> batchOf, RenderPassCounters& counters, bool reflected)
+	{
 		// One instanced draw of `count` draws from `first`, whose instance records are adjacent. A batch's draws share their key,
 		// so they share their variant and its reflected variant.
 		const auto recordRun = [this, &commandList, &casters, materialSets, &framebuffer, &viewport, &viewSets, &counters, reflected](uint32_t first, uint32_t count)
@@ -582,7 +783,37 @@ namespace Engine {
 		}
 		if (runCount != 0)
 			recordRun(runFirst, runCount);
-		return {};
+	}
+
+	void ShadowPass::State::RecordStaticFace(nvrhi::ICommandList& commandList, const ShadowRenderInputs& inputs, std::span<nvrhi::IBindingSet* const> materialSets,
+		const std::array<nvrhi::IBindingSet*, 2>& viewSets, const StaticShadowFace& face, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport,
+		RenderPassCounters& counters, bool reflected)
+	{
+		// M43: one indexed draw per key of the face's visible static casters, reading their records through the view's indices.
+		for (uint32_t index = face.FirstDraw; index < face.FirstDraw + face.DrawCount; ++index)
+		{
+			const StaticShadowDraw& draw = inputs.StaticDraws->Draws[index];
+			const StaticShadowKey& key = inputs.StaticKeys[draw.Key];
+			const uint32_t variant = reflected ? key.ReflectedVariant : key.Variant;
+			nvrhi::GraphicsState state;
+			state.pipeline = Pipelines[variant].Pipeline;
+			state.framebuffer = &framebuffer;
+			state.viewport.addViewportAndScissorRect(viewport);
+			state.bindings = { viewSets[variant / 3] };
+			if (materialSets[draw.Key] != nullptr)
+				state.bindings.push_back(materialSets[draw.Key]);
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Vertices).setSlot(0));
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
+			state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(key.Indices).setFormat(nvrhi::Format::R32_UINT));
+			commandList.setGraphicsState(state);
+			DrawConstants push{};
+			push.FirstInstance = draw.First;
+			push.Flags = DrawConstantsStaticInstances;
+			commandList.setPushConstants(&push, sizeof(push));
+			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(key.IndexCount).setInstanceCount(draw.Count).setStartIndexLocation(key.IndexOffset));
+			++counters.DrawCalls;
+			counters.Triangles += key.IndexCount / 3 * draw.Count;
+		}
 	}
 
 	Result<ShadowRenderResult> ShadowPass::Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording,
@@ -605,7 +836,16 @@ namespace Engine {
 				|| (inputs.Instances != nullptr && inputs.Instances->getDesc().structStride == sizeof(InstanceRecord)
 					&& inputs.Instances->getDesc().byteSize >= (static_cast<uint64_t>(casters.Draws.back().Instance) + 1) * sizeof(InstanceRecord)),
 			"Shadow casters need the view's Instances buffer holding their records");
+		// M43: static draws need their records, the view's indices and the view's Instances, which every set binds.
+		const bool hasStatic = inputs.StaticDraws != nullptr && !inputs.StaticDraws->Draws.empty();
+		ENGINE_CORE_ASSERT(!hasStatic || (inputs.StaticInstances != nullptr && inputs.InstanceIndices != nullptr && inputs.Instances != nullptr),
+			"Static shadow casters need the static records, the view's instance indices and its Instances buffer");
 		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::IBindingSet*> materialSets, m_State->ResolveMaterialSets(bindings, casters));
+		std::vector<nvrhi::IBindingSet*> staticMaterialSets;
+		if (hasStatic)
+		{
+			ENGINE_TRY_ASSIGN(staticMaterialSets, m_State->ResolveStaticMaterialSets(bindings, inputs.StaticKeys));
+		}
 		State& state = *m_State;
 		state.Boxes.clear();
 		for (const ShadowCasterDraw& draw : casters.Draws)
@@ -617,6 +857,20 @@ namespace Engine {
 		state.EveryDraw.resize(casters.Draws.size());
 		std::iota(state.EveryDraw.begin(), state.EveryDraw.end(), 0U);
 		nvrhi::ITexture& noise = inputs.DissolveNoise != nullptr ? *inputs.DissolveNoise : *state.NeutralNoise;
+		// M43: a face's static draws (none without them).
+		const StaticShadowFace noFace{};
+		const auto cascadeFace = [&inputs, hasStatic, &noFace](uint32_t index) -> const StaticShadowFace&
+		{
+			return hasStatic ? inputs.StaticDraws->Cascades[index] : noFace;
+		};
+		const auto spotFace = [&inputs, hasStatic, &noFace](size_t index) -> const StaticShadowFace&
+		{
+			return hasStatic ? inputs.StaticDraws->Spots[index] : noFace;
+		};
+		const auto pointFace = [&inputs, hasStatic, &noFace](size_t index, uint32_t face) -> const StaticShadowFace&
+		{
+			return hasStatic ? inputs.StaticDraws->Points[index][face] : noFace;
+		};
 
 		// Every slot this record uses, written with one command before any draw: cascades in slots [0, 4), spot tiles from
 		// slot MaxShadowCascades, point faces from ShadowCasterFirstPointSlot. Each slot is ShadowCasterSlotStride bytes, so
@@ -683,13 +937,17 @@ namespace Engine {
 				ENGINE_CORE_ASSERT(framebuffer && framebuffer->getDesc().depthAttachment.texture == inputs.CascadeTarget
 						&& framebuffer->getDesc().depthAttachment.subresources.baseArraySlice == index,
 					"Cascade framebuffer {} does not attach slice {} of the cascade target", index, index);
+				const StaticShadowFace& face = cascadeFace(index);
+				if (casters.Draws.empty() && face.DrawCount == 0)
+					continue;
+				ENGINE_TRY_ASSIGN(const auto viewSets, state.GetViewSets(bindings, inputs, noise, index));
+				const nvrhi::Viewport viewport(static_cast<float>(desc.width), static_cast<float>(desc.height));
 				if (!casters.Draws.empty())
 				{
 					Utils::CullShadowView(casters, state.EveryDraw, constants[index].ViewProjection, constants[index].Bias.z != 0.0f, state.FaceVisible[0]);
-					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *framebuffer,
-						nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, index,
-						state.FaceVisible[0], state.BatchOf, scope.Counters, false));
+					state.RecordView(commandList, casters, materialSets, viewSets, *framebuffer, viewport, state.FaceVisible[0], state.BatchOf, scope.Counters, false);
 				}
+				state.RecordStaticFace(commandList, inputs, staticMaterialSets, viewSets, face, *framebuffer, viewport, scope.Counters, false);
 			}
 			result.DrawCalls += scope.Counters.DrawCalls;
 			result.Triangles += scope.Counters.Triangles;
@@ -718,6 +976,9 @@ namespace Engine {
 				Utils::HashShadowValue(signature, tile.NearClip);
 				Utils::HashShadowValue(signature, tile.FarClip);
 				Utils::HashShadowView(signature, casters, tile.ViewProjection, state.TileVisible[index]);
+				// M43: the tile's visible static casters, after its dynamic ones.
+				if (spotFace(index).DrawCount != 0)
+					signature.UpdateU64(spotFace(index).Signature);
 			}
 			const uint64_t atlas = Utils::FinishShadowSignature(signature);
 			const bool cached = inputs.Cache != nullptr && inputs.Cache->Atlas == atlas;
@@ -734,12 +995,17 @@ namespace Engine {
 				const float left = static_cast<float>(tile.X + SpotShadowGuardTexels);
 				const float top = static_cast<float>(tile.Y + SpotShadowGuardTexels);
 				const float size = static_cast<float>(tile.Size - 2 * SpotShadowGuardTexels);
+				const StaticShadowFace& face = spotFace(index);
+				if (casters.Draws.empty() && face.DrawCount == 0)
+					continue;
+				ENGINE_TRY_ASSIGN(const auto viewSets, state.GetViewSets(bindings, inputs, noise, slot));
+				const nvrhi::Viewport viewport(left, left + size, top, top + size, 0, 1);
 				if (!casters.Draws.empty())
 				{
-					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *inputs.AtlasFramebuffer,
-						nvrhi::Viewport(left, left + size, top, top + size, 0, 1), *inputs.CasterConstants, slot, state.TileVisible[index], state.BatchOf,
-						scope.Counters, false));
+					state.RecordView(commandList, casters, materialSets, viewSets, *inputs.AtlasFramebuffer, viewport, state.TileVisible[index], state.BatchOf,
+						scope.Counters, false);
 				}
+				state.RecordStaticFace(commandList, inputs, staticMaterialSets, viewSets, face, *inputs.AtlasFramebuffer, viewport, scope.Counters, false);
 			}
 			if (!cached && inputs.Cache != nullptr)
 				inputs.Cache->Atlas = atlas;
@@ -789,6 +1055,9 @@ namespace Engine {
 				{
 					Utils::CullShadowView(casters, state.Candidates, light.FaceViewProjections[face], false, state.FaceVisible[face]);
 					Utils::HashShadowView(signature, casters, light.FaceViewProjections[face], state.FaceVisible[face]);
+					// M43: the face's visible static casters, after its dynamic ones.
+					if (pointFace(index, face).DrawCount != 0)
+						signature.UpdateU64(pointFace(index, face).Signature);
 				}
 				const uint64_t map = Utils::FinishShadowSignature(signature);
 				uint64_t* held = nullptr;
@@ -811,12 +1080,17 @@ namespace Engine {
 							&& framebuffer->getDesc().depthAttachment.subresources.baseArraySlice == layer,
 						"Point shadow framebuffer {} does not attach layer {} of its tier's point shadow target", layer, layer);
 					const uint32_t slot = ShadowCasterFirstPointSlot + static_cast<uint32_t>(index) * PointShadowFaceCount + face;
+					const StaticShadowFace& staticFace = pointFace(index, face);
+					if (casters.Draws.empty() && staticFace.DrawCount == 0)
+						continue;
+					ENGINE_TRY_ASSIGN(const auto viewSets, state.GetViewSets(bindings, inputs, noise, slot));
+					const nvrhi::Viewport viewport(static_cast<float>(desc.width), static_cast<float>(desc.height));
 					if (!casters.Draws.empty())
 					{
-						ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *framebuffer,
-							nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, slot,
-							state.FaceVisible[face], state.BatchOf, scope.Counters, true));
+						state.RecordView(commandList, casters, materialSets, viewSets, *framebuffer, viewport, state.FaceVisible[face], state.BatchOf, scope.Counters,
+							true);
 					}
+					state.RecordStaticFace(commandList, inputs, staticMaterialSets, viewSets, staticFace, *framebuffer, viewport, scope.Counters, true);
 				}
 				if (held != nullptr)
 					*held = map;

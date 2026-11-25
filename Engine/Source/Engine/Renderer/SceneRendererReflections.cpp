@@ -127,7 +127,8 @@ namespace Engine {
 			{
 				for (const Detail::SceneRendererDraw& draw : draws)
 				{
-					if (draw.Entity != item.Entity)
+					// M43: a static draw is never a mirror's glass (the static set holds no PlanarReflection's entity).
+					if (draw.StaticInstances != 0 || draw.Entity != item.Entity)
 						continue;
 					const std::optional<PlanarReflectionScreenRect> drawn = ComputePlanarReflectionScreenRect(draw.Bounds, snapshot.Meshes[draw.SnapshotIndex].World,
 						frame.Camera);
@@ -190,6 +191,8 @@ namespace Engine {
 		{
 			for (const Detail::SceneRendererDraw& draw : draws)
 			{
+				if (draw.StaticInstances != 0)
+					continue; // M43: a static draw's record is the static set's, and never a glass's
 				for (uint32_t slot = 0; slot < drawn; ++slot)
 				{
 					if (draw.Entity != ReflectionSlots[slot].Entity)
@@ -372,6 +375,9 @@ namespace Engine {
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+				// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static records and the view's indices into them.
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
 			};
 			auto prepassSet = ViewBindings.GetOrCreate(*Device, prepassDesc, *Pipelines->Layouts.PrepassView);
 			if (prepassSet)

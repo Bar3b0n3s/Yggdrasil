@@ -467,7 +467,7 @@ namespace Engine {
 				.Size = sizeof(DrawConstants),
 				.Fields = {
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, FirstInstance),
-					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, Flags),
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding1),
 				},
 				.Program = "Scene",
@@ -725,6 +725,19 @@ namespace Engine {
 				.Program = "Smoke",
 				.Entry = "CSMain",
 				.Permutation = { { .Key = "SMOKE_SATURATE", .Value = "0" } },
+			},
+			{
+				// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the element of a view's InstanceIndices structured
+				// buffer (t22), which a static draw's vertex shader reads (Common/Instances.slang); first of phase 8's structs.
+				.Name = "InstanceIndex",
+				.Size = sizeof(InstanceIndex),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(InstanceIndex, Record),
+					ENGINE_TEST_SHARED_FIELD(InstanceIndex, Reserved),
+				},
+				.Program = "Scene",
+				.Entry = "VSMain",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
 			},
 		};
 	}

@@ -257,6 +257,28 @@ namespace Engine {
 
 	struct PhysicsSystem::State
 	{
+		// --- M43: the owner lists (Docs/Decisions/0061-m43-static-scenery.md decision 3) ------------------------------
+		// A tick visits only the moving bodies and the bodies whose transforms changed: the scene's world-change list
+		// (Scene::OpenWorldChangeList) and what it collected since the last PreStep (`ChangedTransformsAll`: every entity,
+		// when it overflowed); the lists derived from Bodies and Characters, made again when a body or character was created,
+		// removed or reshaped (`OwnerListsStale`), each kept in canonical order of its live entities until the structure
+		// revision moves: the owners of kinematic bodies, of dynamic bodies and of characters; the body owners; the bodies
+		// (handle values) that bake each shape-input entity in, and the bodies with asset inputs, with the asset manager's
+		// version revision at which their asset inputs were last all found current (AssetManager::GetVersionRevision; none
+		// before the first check).
+		uint32_t WorldChanges = 0;
+		std::vector<entt::entity> ChangedTransforms;
+		bool ChangedTransformsAll = false;
+		bool OwnerListsStale = true;
+		std::optional<uint64_t> OwnerListsStructure{};
+		std::vector<entt::entity> KinematicOwners;
+		std::vector<entt::entity> WriteBackOwners; // dynamic bodies' and characters' owners
+		std::vector<entt::entity> CharacterOwners;
+		std::set<UUID> BodyOwners;
+		std::map<entt::entity, std::vector<uint32_t>> ShapeInputBodies;
+		std::vector<uint32_t> AssetInputBodies;
+		std::optional<uint64_t> AssetInputsCurrentAt{};
+
 		// --- Composition, sync and events -----------------------------------------------------------------------------
 		PhysicsSystemSpecification Specification{};
 		PhysicsLayerTable Layers{};
@@ -320,6 +342,16 @@ namespace Engine {
 		void Rebuild(bool hierarchyChanged, std::set<UUID>& woken);
 		void RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken);
 		[[nodiscard]] std::set<UUID> FindShapeChanges(bool hierarchyChanged) const;
+		// Whether an asset input of `entry` (a mesh collider's mesh, a terrain's heightfield) has another version now.
+		[[nodiscard]] bool HasAssetInputChanged(const PhysicsBodyEntry& entry) const;
+		// M43: the owners of the bodies whose shape inputs were written since the last PreStep or whose asset inputs changed
+		// version, as FindShapeChanges(false) finds them over every body; the asset inputs are compared only after the asset
+		// manager's version revision moved (AssetInputsCurrentAt).
+		[[nodiscard]] std::set<UUID> FindWrittenShapeChanges();
+		// M43: the owner lists made again when stale or when the structure revision moved since.
+		void RefreshOwnerLists();
+		// M43: `owners` set to the live, distinct handles of `ids`, in canonical order.
+		void CollectOwnerHandles(const std::vector<UUID>& ids, std::vector<entt::entity>& owners) const;
 		[[nodiscard]] std::vector<PhysicsShapeInput> CaptureShapeInputs(const PhysicsBodyPlan& plan) const;
 		[[nodiscard]] std::vector<PhysicsAssetInput> CaptureAssetInputs(const PhysicsBodyPlan& plan) const;
 		[[nodiscard]] bool CreateBody(const PhysicsBodyPlan& plan, std::optional<std::pair<glm::vec3, glm::vec3>> velocities);

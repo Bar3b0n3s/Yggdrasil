@@ -7,6 +7,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -120,6 +121,18 @@ namespace Engine {
 	// The layout of `scene`'s UI at `sceneSize` scene pixels (each component >= 1, asserted): see the file comment. A UiRect
 	// with no canvas ancestor is not laid out (project.validate reports UI_ELEMENT_WITHOUT_CANVAS). Pure.
 	[[nodiscard]] UiLayoutTable ComputeUiLayout(const Scene& scene, glm::uvec2 sceneSize);
+
+	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): ComputeUiLayout's table and the number of entities its scan
+	// iterated, the UiCanvas view's entities and the entities of the enabled canvases' trees (0 for a scene without a canvas),
+	// which the play session's UI phases add to the scene's EntitiesVisited (UiSystem).
+	struct UiLayoutPass
+	{
+		UiLayoutTable Table{};
+		size_t VisitedEntities = 0;
+	};
+
+	// ComputeUiLayout with its scan's count. Pure.
+	[[nodiscard]] UiLayoutPass ComputeUiLayoutPass(const Scene& scene, glm::uvec2 sceneSize);
 
 	// The magnitude ComputeUiClipRect clamps a pixel coordinate to before it converts it to int32: 2^30, exact in float and far
 	// beyond any scene resolution, so a rectangle that passes int32's range (large lengths, scales and nesting) clips like

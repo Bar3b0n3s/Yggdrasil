@@ -65,12 +65,18 @@ namespace Engine {
 		{
 			Scope<Scene> scene = editor.CreateScene(std::move(name));
 			const Entity floor = scene->CreateEntity("Floor");
-			floor.GetComponent<TransformComponent>().Scale = glm::vec3(4.0f);
+			floor.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Scale = glm::vec3(4.0f);
+			});
 			floor.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::PlaneMesh);
 			if (sunlit)
 			{
 				const Entity sun = scene->CreateEntity("Sun");
-				sun.GetComponent<TransformComponent>().Rotation = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				sun.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Rotation = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				});
 				sun.AddComponent<DirectionalLightComponent>();
 			}
 			const Entity volume = scene->CreateEntityWithID(RoomVolumeId, "Volume");
@@ -80,7 +86,10 @@ namespace Engine {
 			grid.ProbeCountY = 2;
 			grid.ProbeCountZ = 2;
 			const Entity mirror = scene->CreateEntityWithID(RoomMirrorId, "Mirror");
-			mirror.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 1.0f, 0.0f);
+			mirror.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 1.0f, 0.0f);
+			});
 			mirror.AddComponent<ReflectionProbeComponent>().Resolution = 32;
 			return scene;
 		}
@@ -442,7 +451,10 @@ namespace Engine {
 				for (const float x : { -1.5f, 0.5f, 1.5f })
 				{
 					const Entity mirror = scene.CreateEntity("Mirror");
-					mirror.GetComponent<TransformComponent>().Translation = glm::vec3(x, 0.5f, 0.0f);
+					mirror.Patch<TransformComponent>([x](TransformComponent& transform)
+					{
+						transform.Translation = glm::vec3(x, 0.5f, 0.0f);
+					});
 					mirror.AddComponent<ReflectionProbeComponent>().Resolution = 32;
 				}
 				const Result<LightingBakeResult> larger = BakeLighting(editor, room, {});

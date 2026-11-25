@@ -78,6 +78,9 @@ Texture2D<float4> PlanarReflections0 : register(t17, space0);
 Texture2D<float4> PlanarReflections1 : register(t18, space0);
 Texture2D<float4> PlanarReflections2 : register(t19, space0);
 Texture2D<float4> PlanarReflections3 : register(t20, space0);
+// M43: the mesh draws' static records and their indices, which the terrain does not read (it shares the forward set).
+StructuredBuffer<InstanceRecord> StaticInstances : register(t21, space0);
+StructuredBuffer<InstanceIndex> InstanceIndices : register(t22, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);

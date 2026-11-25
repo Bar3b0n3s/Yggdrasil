@@ -4,6 +4,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
 #include "Engine/Core/Profiler.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Scene/AnimationSystem.h"
 #include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
@@ -36,6 +37,7 @@
 #include "Engine/Scene/Private/AnimationTargets.h"
 #include "Engine/Scene/Private/SpriteDrawing.h"
 #include "Engine/Scene/Private/TilemapDrawing.h"
+#include "Engine/Scene/RenderStaticCache.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiExtraction.h"
@@ -49,6 +51,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 // Simulation path (§4.12): only + - * /, sqrt (glm's normalize, cross, inverse and mat4_cast are built from them) and
 // Core/DetMath, so a snapshot is bit-identical in every configuration.
@@ -538,7 +541,8 @@ namespace Engine {
 		}
 
 		// M26 (decision 22): each terrain's PickId after the meshes' (RenderSnapshot::Terrains): its entity's entry when its
-		// MeshRenderer made one, so the table never lists an entity twice, else a new entry appended in the terrains' order.
+		// MeshRenderer made one, so the table never lists an entity twice, else a new entry appended in the terrains' order
+		// (M43: also for an entity whose mesh is a static item, which makes no entry).
 		static void AssignTerrainPickIds(RenderSnapshot& snapshot)
 		{
 			for (TerrainItem& terrain : snapshot.Terrains)
@@ -552,6 +556,50 @@ namespace Engine {
 				else
 					terrain.PickId = static_cast<uint32_t>(found - snapshot.PickTable.begin()) + 1;
 			}
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): appends the live, effectively enabled holders of T.
+		template<typename T>
+		static void AppendHolders(const entt::registry& registry, std::vector<entt::entity>& entities)
+		{
+			for (const entt::entity entity : registry.view<T>(entt::exclude<PendingDestroyTag, HierarchyDisabledTag>))
+				entities.push_back(entity);
+		}
+
+		// M43: the entities ExtractRenderSnapshot's per-entity pass visits, in canonical order (§5.1), each once: the live,
+		// effectively enabled holders of every component the pass reads, as each component's view sorted by canonical key
+		// (Scene::CollectCanonical's way, over the union), except an entity whose MeshRenderer the scene's static cache
+		// `cache` (null without one) holds as an item and that holds nothing else the pass reads. Every entity the
+		// whole-scene walk drew or lit from is among them, in the walk's order, so a scene without Static extracts as before,
+		// and a static entity costs a view entry and one cache lookup, never a visit.
+		static void CollectExtractedEntities(const Scene& scene, const RenderStaticCache* cache, std::vector<entt::entity>& entities)
+		{
+			const entt::registry& registry = scene.GetRegistry();
+			entities.clear();
+			for (const entt::entity entity : registry.view<MeshRendererComponent>(entt::exclude<PendingDestroyTag, HierarchyDisabledTag>))
+			{
+				if (cache == nullptr || !cache->HoldsItem(entity))
+					entities.push_back(entity);
+			}
+			// The other drawn and lit components of the pass below (M47 appends its Water after the terrains).
+			AppendHolders<DirectionalLightComponent>(registry, entities);
+			AppendHolders<PointLightComponent>(registry, entities);
+			AppendHolders<SpotLightComponent>(registry, entities);
+			AppendHolders<TextComponent>(registry, entities);
+			AppendHolders<EnvironmentComponent>(registry, entities);
+			AppendHolders<PostProcessComponent>(registry, entities);
+			AppendHolders<FogComponent>(registry, entities);
+			AppendHolders<SpriteRendererComponent>(registry, entities);
+			AppendHolders<Light2DComponent>(registry, entities);
+			AppendHolders<TilemapRendererComponent>(registry, entities);
+			AppendHolders<ParticleEmitterComponent>(registry, entities);
+			AppendHolders<IrradianceVolumeComponent>(registry, entities);
+			AppendHolders<ReflectionProbeComponent>(registry, entities);
+			AppendHolders<PlanarReflectionComponent>(registry, entities);
+			AppendHolders<TerrainComponent>(registry, entities);
+			std::ranges::sort(entities);
+			entities.erase(std::unique(entities.begin(), entities.end()), entities.end());
+			scene.SortCanonical(entities);
 		}
 
 		// The camera of `request` in `snapshot`. Errors: those of ExtractRenderSnapshot for Entity and Explicit requests.
@@ -608,20 +656,17 @@ namespace Engine {
 
 	ConstEntity FindPrimaryCamera(const Scene& scene)
 	{
-		ConstEntity primary;
-		for (const UUID id : scene.GetCanonicalOrder())
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the Camera view in canonical order, collected at each call
+		// (a handful of entities), so the first match is the whole-scene walk's and is never stale.
+		std::vector<entt::entity> cameras;
+		scene.CollectCanonical<CameraComponent>(cameras);
+		for (const entt::entity handle : cameras)
 		{
-			const ConstEntity entity = scene.FindEntityByID(id);
-			if (!entity.IsValid() || !Utils::IsEffectivelyEnabled(entity))
-				continue;
-			const CameraComponent* camera = entity.TryGetComponent<CameraComponent>();
-			if (camera != nullptr && camera->Primary)
-			{
-				primary = entity;
-				break;
-			}
+			const ConstEntity entity(handle, &scene);
+			if (Utils::IsEffectivelyEnabled(entity) && entity.GetComponent<CameraComponent>().Primary)
+				return entity;
 		}
-		return primary;
+		return {};
 	}
 
 	RenderOutputSettings GetCameraOutputSettings(ConstEntity camera)
@@ -750,8 +795,16 @@ namespace Engine {
 		// tilemaps' canonical positions, from which the tilemaps are placed among the sprites below.
 		std::vector<Utils::SpriteDrawKey> spriteKeys;
 		std::vector<uint32_t> tilemapPositions;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the scene's static set, brought up to date and shared by
+		// every view, and the entities the pass below visits: the holders of what it draws or lights from, in canonical order
+		// (CollectExtractedEntities), never the static set's. canonicalPosition counts the entities the pass visits: it rises
+		// in canonical order as the whole-scene walk's count did, and the 2D draw order only compares positions.
+		snapshot.StaticSet = scene.RefreshStaticSet();
+		const RenderStaticCache* staticCache = scene.GetStaticCache();
+		std::vector<entt::entity> extracted;
+		Utils::CollectExtractedEntities(scene, staticCache, extracted);
 		uint32_t canonicalPosition = 0;
-		scene.ForEachCanonical([&snapshot, &environment, &post, &fog, &request, &spriteKeys, &tilemapPositions, &canonicalPosition](ConstEntity entity)
+		const auto extractEntity = [&snapshot, &environment, &post, &fog, &request, &spriteKeys, &tilemapPositions, &canonicalPosition, staticCache](ConstEntity entity)
 		{
 			if (!Utils::IsEffectivelyEnabled(entity))
 				return;
@@ -766,7 +819,9 @@ namespace Engine {
 				return *world;
 			};
 
-			if (const MeshRendererComponent* renderer = entity.TryGetComponent<MeshRendererComponent>(); renderer != nullptr && renderer->Visible && renderer->Mesh.IsValid())
+			// M43: a MeshRenderer the static set holds is drawn from there.
+			if (const MeshRendererComponent* renderer = entity.TryGetComponent<MeshRendererComponent>();
+				renderer != nullptr && renderer->Visible && renderer->Mesh.IsValid() && (staticCache == nullptr || !staticCache->HoldsItem(entity.GetHandle())))
 			{
 				MeshDrawItem item;
 				item.World = getWorld();
@@ -942,7 +997,9 @@ namespace Engine {
 			// order, in every view (an edit scene's included: terrain is edited in the scene view).
 			if (const TerrainComponent* terrain = entity.TryGetComponent<TerrainComponent>(); terrain != nullptr && terrain->Heightfield.IsValid())
 				snapshot.Terrains.push_back(Utils::MakeTerrainItem(*terrain, getWorld(), id));
-		});
+		};
+		for (const entt::entity handle : extracted)
+			extractEntity(ConstEntity(handle, &scene));
 		Utils::AssignTerrainPickIds(snapshot);
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});

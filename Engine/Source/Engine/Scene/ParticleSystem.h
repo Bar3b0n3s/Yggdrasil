@@ -4,6 +4,8 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
 
+#include <entt/entity/fwd.hpp>
+
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -68,8 +70,8 @@ namespace Engine {
 	private:
 		float m_FixedDelta = 0.0f;
 		ParticleSystemStats m_Stats{};
-		uint64_t m_Incarnations = 0;    // M33: the last incarnation an anchored state took
-		std::vector<UUID> m_Emitters{}; // the step's emitters in canonical order, kept to reuse its capacity
+		uint64_t m_Incarnations = 0;            // M33: the last incarnation an anchored state took
+		std::vector<entt::entity> m_Emitters{}; // the step's emitters in canonical order (M43: the view), kept to reuse its capacity
 	};
 
 	// ParticleEmitter:Emit: queues `count` particles (1 to MaxParticlesPerEmitter) for the emitter's next Particles phase,

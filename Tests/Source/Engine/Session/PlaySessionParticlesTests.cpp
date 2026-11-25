@@ -368,6 +368,39 @@ namespace Engine {
 			(*session)->Tick();
 			CHECK_FALSE(sparks.HasComponent<ParticleStateComponent>());
 		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the phase gathers the ParticleEmitter view sorted by
+		// canonical key, so states take their incarnations in canonical order whatever order the emitters were added in, and a
+		// phase visits the emitters only (a disabled one too, which it passes by), and nothing in a scene without emitters.
+		TEST_CASE("ParticleSystem: a phase visits only the emitters and anchors their states in canonical order")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			const Entity first = scene.CreateEntity("First");
+			const Entity second = scene.CreateEntity("Second");
+			const Entity disabled = scene.CreateEntity("Disabled");
+			for (int index = 0; index < 8; ++index)
+				static_cast<void>(scene.CreateEntity("Plain"));
+			ParticleSystem particles(1.0f / 60.0f);
+			uint64_t visited = scene.GetEntitiesVisited();
+			particles.Step(scene, 1);
+			CHECK(scene.GetEntitiesVisited() == visited);
+
+			const ParticleEmitterComponent emitter{ .Rate = 0.0f, .MaxParticles = 8 };
+			disabled.AddComponent<ParticleEmitterComponent>(emitter);
+			second.AddComponent<ParticleEmitterComponent>(emitter);
+			first.AddComponent<ParticleEmitterComponent>(emitter);
+			disabled.SetActive(false);
+			visited = scene.GetEntitiesVisited();
+			particles.Step(scene, 1);
+			CHECK(scene.GetEntitiesVisited() - visited == 3);
+			REQUIRE(first.HasComponent<ParticleStateComponent>());
+			REQUIRE(second.HasComponent<ParticleStateComponent>());
+			CHECK(first.GetComponent<ParticleStateComponent>().Incarnation == 1);
+			CHECK(second.GetComponent<ParticleStateComponent>().Incarnation == 2);
+			CHECK_FALSE(disabled.HasComponent<ParticleStateComponent>());
+			CHECK(particles.GetStats().Emitters == 2);
+		}
 	}
 
 }

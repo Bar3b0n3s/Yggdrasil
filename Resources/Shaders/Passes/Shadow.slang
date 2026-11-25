@@ -12,6 +12,9 @@
 // texture coordinates times DissolveNoiseScale, sampled at level 0) lies below its DissolveAmount. A Mask material's alpha
 // is sampled at the instance's UVOffset too, so a scrolling cut-out's shadow holes move with it. The vertex shader hands
 // them the record's index (flat). A fading instance keeps its whole shadow.
+// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): instance i of a static draw is the static set's record
+// StaticInstances[InstanceIndices[Draw.FirstInstance + i].Record] (t21 and t22), every record read through
+// Common/Instances.slang, as Scene.slang reads them.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"
@@ -24,6 +27,8 @@
 
 ConstantBuffer<ShadowCasterConstants> Caster : register(b0, space0);
 StructuredBuffer<InstanceRecord> Instances : register(t10, space0);
+StructuredBuffer<InstanceRecord> StaticInstances : register(t21, space0); // M43: the static set's records
+StructuredBuffer<InstanceIndex> InstanceIndices : register(t22, space0);  // M43: the view's indices into them
 [[vk::push_constant]] ConstantBuffer<DrawConstants> Draw;
 #if ALPHA_MASK
 Texture2D<float> DissolveNoise : register(t16, space0); // M31: the dissolve noise (Renderer/ShadowPass.h)
@@ -31,6 +36,9 @@ SamplerState AnisoWrap : register(s2, space0);
 ConstantBuffer<MaterialConstants> Material : register(b0, space1);
 Texture2D<float4> BaseColorMap : register(t0, space1);
 #endif
+
+// The instance records over the declarations above (M43, Docs/Decisions/0061-m43-static-scenery.md decision 3).
+#include "Common/Instances.slang"
 
 struct VertexInput
 {
@@ -50,7 +58,7 @@ struct VertexOutput
 	// SV_Position.z. Read only when Caster.Bias.z pancakes (orthographic directional maps, w = 1).
 	noperspective float Depth : TEXCOORD1;
 #if ALPHA_MASK
-	nointerpolation uint Instance : INSTANCE; // M31: the record's index in Instances
+	nointerpolation uint Instance : INSTANCE; // M31: the record's instance index (M43: Common/Instances.slang's)
 #endif
 };
 
@@ -59,9 +67,10 @@ struct VertexOutput
 VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	VertexOutput output;
-	float4 clip = mul(Caster.ViewProjection, mul(Instances[Draw.FirstInstance + instance].World, float4(input.Position, 1.0)));
+	const uint index = GetInstanceIndex(instance);
+	float4 clip = mul(Caster.ViewProjection, mul(LoadInstanceRecord(index).World, float4(input.Position, 1.0)));
 #if ALPHA_MASK
-	output.Instance = Draw.FirstInstance + instance;
+	output.Instance = index;
 #endif
 	output.Position = clip;
 	output.Depth = clip.z / clip.w;
@@ -90,7 +99,7 @@ ShadowPixel PSMain(VertexOutput input)
 	ShadowPixel output;
 	output.Coverage = 1;
 #if ALPHA_MASK
-	const InstanceRecord record = Instances[input.Instance];
+	const InstanceRecord record = LoadInstanceRecord(input.Instance);
 	const bool parameters = (record.Flags & DrawFlagMaterialParameters) != 0;
 	float2 uv = ((Material.Flags & MaterialFlagBaseColorUV1) != 0 ? input.TexCoord1 : input.TexCoord) * Material.UVScale + Material.UVOffset;
 	if (parameters)

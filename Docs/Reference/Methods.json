@@ -3501,6 +3501,9 @@
 							"PrefabLink": {
 								"$ref": "#/$defs/PrefabLink"
 							},
+							"Static": {
+								"$ref": "#/$defs/Static"
+							},
 							"MeshRenderer": {
 								"$ref": "#/$defs/MeshRenderer"
 							},
@@ -3912,6 +3915,17 @@
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Static": {
+						"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+						"type": "object",
+						"properties": {
+							"Scope": {
+								"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+								"enum": ["Subtree", "EntityOnly", "NotStatic"]
 							}
 						},
 						"additionalProperties": false
@@ -8442,6 +8456,9 @@
 							"PrefabLink": {
 								"$ref": "#/$defs/PrefabLink"
 							},
+							"Static": {
+								"$ref": "#/$defs/Static"
+							},
 							"MeshRenderer": {
 								"$ref": "#/$defs/MeshRenderer"
 							},
@@ -8860,6 +8877,17 @@
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Static": {
+						"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+						"type": "object",
+						"properties": {
+							"Scope": {
+								"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+								"enum": ["Subtree", "EntityOnly", "NotStatic"]
 							}
 						},
 						"additionalProperties": false
@@ -19760,6 +19788,9 @@
 							"PrefabLink": {
 								"$ref": "#/$defs/PrefabLink"
 							},
+							"Static": {
+								"$ref": "#/$defs/Static"
+							},
 							"MeshRenderer": {
 								"$ref": "#/$defs/MeshRenderer"
 							},
@@ -20167,6 +20198,17 @@
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Static": {
+						"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+						"type": "object",
+						"properties": {
+							"Scope": {
+								"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+								"enum": ["Subtree", "EntityOnly", "NotStatic"]
 							}
 						},
 						"additionalProperties": false
@@ -30400,6 +30442,24 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"transformsUpdated": {
+						"description": "World matrices the play session's last tick and the frame phase after it recomputed: the subtrees of the transforms written since the previous update, physics' write-back of every awake or parented dynamic body and every character included; 0 for a tick that writes no transform; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"entitiesVisited": {
+						"description": "Entities the per-tick passes of the play session's last tick visited, summed: the owners of kinematic, dynamic and character bodies, the bodies whose transforms were written, scripted entities, audio sources, animators, skinned meshes, emitters, sprite animators, bone attachments and UI canvas trees. Static scenery adds none, so the count does not grow with the static entities; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"staticCellRebuilds": {
+						"description": "Static cells the play session's last tick's frame-phase extraction rebuilt or removed (a write to a static entity rebuilds its cell there); 0 when that frame phase did not extract; an editor view's, a capture's or a query's extraction never counts; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -30590,6 +30650,30 @@
 								"items": {
 									"type": "string"
 								}
+							},
+							"staticItems": {
+								"description": "Mesh items of the frame's static set: the MeshRenderers of entities a Static makes static scenery (skinned, mirrored-glass and scrolling items stay dynamic), which render extraction does not visit and the renderer prepares once per cell.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"staticCells": {
+								"description": "Cells of the frame's static set: 32 m squares on the XZ plane, each holding the static items whose origin lies in it.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"staticCellsVisible": {
+								"description": "Static cells the view's camera did not cull whole: the view's static work follows them, testing only their items.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"dynamicItems": {
+								"description": "Mesh items render extraction visited for the frame: every MeshRenderer that is not static scenery.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false

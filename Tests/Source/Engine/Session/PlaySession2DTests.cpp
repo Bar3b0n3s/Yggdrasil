@@ -32,8 +32,9 @@ namespace Engine {
 			std::vector<PlaySessionPhase> Phases{};
 		};
 
-		// At the start of the 3D post-step of tick `Tick`, writes `Translation` into the local Transform of `Target` directly,
-		// as the 3D write-back and a 3D contact callback write transforms, after the step's transform update.
+		// At the start of the 3D post-step of tick `Tick`, writes `Translation` into the local Transform of `Target` through the
+		// registry, without counting a scene revision, as the 3D write-back and a 3D contact callback write transforms, after
+		// the step's transform update.
 		class PostStepWriter final : public IPlaySessionObserver
 		{
 		public:
@@ -43,7 +44,10 @@ namespace Engine {
 					return;
 				const Entity target = session.GetScene().FindEntityByID(Target);
 				REQUIRE(target.IsValid());
-				session.GetScene().GetRegistry().get<TransformComponent>(target.GetHandle()).Translation = Translation;
+				session.GetScene().GetRegistry().patch<TransformComponent>(target.GetHandle(), [this](TransformComponent& transform)
+				{
+					transform.Translation = Translation;
+				});
 			}
 
 			UUID Target{};

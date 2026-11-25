@@ -45,12 +45,15 @@
 #include <tuple>
 #include <utility>
 #include <variant>
+#include <vector>
 
 // The play session's 2D physics (Physics2DSystem.h): PhysicsSystem.cpp's design in the plane, rule for rule. Rebuilds compose
 // the 2D bodies again (Scene/Private/Physics2DComposition.h) when an EnTT signal or the hierarchy says they may have changed,
-// and compare each body's shape inputs bit for bit every PreStep; pairs are keyed by owners and counted by sub-shape
-// contacts, with M20's pending enter, dormant contacts and collider pairs; callbacks run with Dispatching set; every pose
-// handed to the world passes the physics range first. What differs:
+// and each PreStep compares bit for bit the shape inputs of the bodies that bake in a Transform written since the last one;
+// pairs are keyed by owners and counted by sub-shape contacts, with M20's pending enter, dormant contacts and collider pairs;
+// callbacks run with Dispatching set; every pose handed to the world passes the physics range first; since M43 a tick visits
+// only the moving bodies and the bodies whose transforms changed (Physics2DSystemState.h's owner lists,
+// Docs/Decisions/0061-m43-static-scenery.md decision 3). What differs:
 //   - The world is created at the first 2D body (EnsureWorld); before it the system answers as an empty world, and a scene
 //     that holds no 2D component and has no world makes PreStep return at once whatever changed (an entity enabled or
 //     disabled), so a 3D game pays nothing per tick.
@@ -191,6 +194,29 @@ namespace Engine {
 			return Same2DBits(a.Position, b.Position) && Same2DBits(a.Angle, b.Angle);
 		}
 
+		// Whether `local` holds, bit for bit, the parts of `input`'s captured transform that its shape baked in.
+		static bool Same2DShapeInputParts(const PhysicsShapeInput& input, const TransformComponent& local)
+		{
+			switch (input.Parts)
+			{
+				case PhysicsShapeInputParts::Scale:
+					return Same2DBits(local.Scale, input.Local.Scale);
+				case PhysicsShapeInputParts::ScaleRotation:
+					return Same2DBits(local.Scale, input.Local.Scale) && Same2DBits(local.Rotation, input.Local.Rotation);
+				case PhysicsShapeInputParts::Whole:
+					break;
+			}
+			return Same2DBits(local.Translation, input.Local.Translation) && Same2DBits(local.Rotation, input.Local.Rotation)
+				&& Same2DBits(local.Scale, input.Local.Scale);
+		}
+
+		// Whether a shape input's entity is gone, or holds other values of the parts its shape baked in.
+		static bool Is2DShapeInputChanged(const entt::registry& registry, const PhysicsShapeInput& input)
+		{
+			const TransformComponent* local = registry.valid(input.Entity) ? registry.try_get<TransformComponent>(input.Entity) : nullptr;
+			return local == nullptr || !Same2DShapeInputParts(input, *local);
+		}
+
 		static std::unexpected<Error> MakeNo2DBodyError(UUID entity)
 		{
 			return std::unexpected(Error(ErrorCode::NotFound, std::format("entity {} has no 2D physics body", entity))
@@ -271,10 +297,12 @@ namespace Engine {
 			TransformComponent& transform = entity.GetComponent<TransformComponent>();
 			transform.Translation = translation;
 			transform.Rotation = rotation;
+			entity.GetScene()->MarkTransformWritten(entity);
 		}
 
 		// Writes `pose` as the entity's world X and Y and a world rotation about Z alone, keeping its world Z, through the
-		// parent's current world inverse, directly (a runtime write); returns the local Translation and Rotation it wrote.
+		// parent's current world inverse, directly (a runtime write, marked written: Scene::MarkTransformWritten); returns the
+		// local Translation and Rotation it wrote.
 		static std::pair<glm::vec3, glm::quat> Write2DWorldPose(Entity entity, const Physics2DPose& pose)
 		{
 			TransformComponent& transform = entity.GetComponent<TransformComponent>();
@@ -292,6 +320,7 @@ namespace Engine {
 				transform.Translation = glm::vec3(pose.Position, transform.Translation.z);
 				transform.Rotation = rotation;
 			}
+			entity.GetScene()->MarkTransformWritten(entity);
 			return { transform.Translation, transform.Rotation };
 		}
 
@@ -561,7 +590,8 @@ namespace Engine {
 	bool Physics2DSystem::State::HasHierarchyChanged()
 	{
 		const Scene& scene = *Specification.RuntimeScene;
-		if (scene.GetRevision() == SeenRevision)
+		// M43: the hierarchy changes only with the structure, so a data write never rescans it.
+		if (scene.GetStructureRevision() == SeenRevision)
 			return false;
 		const std::vector<std::pair<UUID, UUID>> previous = std::move(SeenHierarchy);
 		RecordHierarchy();
@@ -571,7 +601,7 @@ namespace Engine {
 	void Physics2DSystem::State::RecordHierarchy()
 	{
 		const Scene& scene = *Specification.RuntimeScene;
-		SeenRevision = scene.GetRevision();
+		SeenRevision = scene.GetStructureRevision();
 		SeenHierarchy.clear();
 		const std::span<const UUID> order = scene.GetCanonicalOrder();
 		SeenHierarchy.reserve(order.size());
@@ -954,20 +984,6 @@ namespace Engine {
 	std::set<UUID> Physics2DSystem::State::FindShapeChanges(bool hierarchyChanged) const
 	{
 		const entt::registry& registry = Specification.RuntimeScene->GetRegistry();
-		const auto sameParts = [](const PhysicsShapeInput& input, const TransformComponent& local)
-		{
-			switch (input.Parts)
-			{
-				case PhysicsShapeInputParts::Scale:
-					return Utils::Same2DBits(local.Scale, input.Local.Scale);
-				case PhysicsShapeInputParts::ScaleRotation:
-					return Utils::Same2DBits(local.Scale, input.Local.Scale) && Utils::Same2DBits(local.Rotation, input.Local.Rotation);
-				case PhysicsShapeInputParts::Whole:
-					break;
-			}
-			return Utils::Same2DBits(local.Translation, input.Local.Translation) && Utils::Same2DBits(local.Rotation, input.Local.Rotation)
-				&& Utils::Same2DBits(local.Scale, input.Local.Scale);
-		};
 		std::set<UUID> owners;
 		for (const auto& [handle, entry] : Bodies)
 		{
@@ -976,23 +992,106 @@ namespace Engine {
 			{
 				const std::vector<PhysicsShapeInput> current = CaptureShapeInputs(entry.Plan);
 				changed = !std::equal(current.begin(), current.end(), entry.ShapeInputs.begin(), entry.ShapeInputs.end(),
-					[&sameParts](const PhysicsShapeInput& now, const PhysicsShapeInput& then)
+					[](const PhysicsShapeInput& now, const PhysicsShapeInput& then)
 				{
-					return now.Entity == then.Entity && now.Parts == then.Parts && sameParts(then, now.Local);
+					return now.Entity == then.Entity && now.Parts == then.Parts && Utils::Same2DShapeInputParts(then, now.Local);
 				});
 			}
 			else
 			{
-				changed = std::ranges::any_of(entry.ShapeInputs, [&registry, &sameParts](const PhysicsShapeInput& input)
+				changed = std::ranges::any_of(entry.ShapeInputs, [&registry](const PhysicsShapeInput& input)
 				{
-					const TransformComponent* local = registry.valid(input.Entity) ? registry.try_get<TransformComponent>(input.Entity) : nullptr;
-					return local == nullptr || !sameParts(input, *local);
+					return Utils::Is2DShapeInputChanged(registry, input);
 				});
 			}
 			if (changed)
 				owners.insert(entry.Owner);
 		}
 		return owners;
+	}
+
+	std::set<UUID> Physics2DSystem::State::FindWrittenShapeChanges()
+	{
+		if (ChangedTransformsAll)
+		{
+			Specification.RuntimeScene->AddEntitiesVisited(Bodies.size());
+			return FindShapeChanges(false);
+		}
+		RefreshOwnerLists();
+		const entt::registry& registry = Specification.RuntimeScene->GetRegistry();
+		// The bodies that bake a written entity in, each checked as FindShapeChanges checks it: a body none of whose shape
+		// inputs was written since the last PreStep holds the values it captured.
+		std::vector<uint32_t> candidates;
+		for (const entt::entity entity : ChangedTransforms)
+		{
+			if (const auto found = ShapeInputBodies.find(entity); found != ShapeInputBodies.end())
+				candidates.insert(candidates.end(), found->second.begin(), found->second.end());
+		}
+		std::ranges::sort(candidates);
+		const auto [first, last] = std::ranges::unique(candidates);
+		candidates.erase(first, last);
+		Specification.RuntimeScene->AddEntitiesVisited(candidates.size());
+		std::set<UUID> owners;
+		for (const uint32_t handle : candidates)
+		{
+			const auto body = Bodies.find(handle);
+			if (body == Bodies.end())
+				continue;
+			const Physics2DBodyEntry& entry = body->second;
+			const bool changed = std::ranges::any_of(entry.ShapeInputs, [&registry](const PhysicsShapeInput& input)
+			{
+				return Utils::Is2DShapeInputChanged(registry, input);
+			});
+			if (changed)
+				owners.insert(entry.Owner);
+		}
+		return owners;
+	}
+
+	void Physics2DSystem::State::RefreshOwnerLists()
+	{
+		const Scene& scene = *Specification.RuntimeScene;
+		if (!OwnerListsStale && OwnerListsStructure == scene.GetStructureRevision())
+			return;
+		if (OwnerListsStale)
+		{
+			BodyOwners.clear();
+			ShapeInputBodies.clear();
+		}
+		std::vector<UUID> kinematic;
+		std::vector<UUID> writeBack;
+		for (const auto& [handle, entry] : Bodies)
+		{
+			if (OwnerListsStale)
+			{
+				BodyOwners.insert(entry.Owner);
+				for (const PhysicsShapeInput& input : entry.ShapeInputs)
+					ShapeInputBodies[input.Entity].push_back(handle);
+			}
+			if (entry.Plan.MotionType == PhysicsMotionType::Kinematic)
+				kinematic.push_back(entry.Owner);
+			else if (entry.Plan.MotionType == PhysicsMotionType::Dynamic && entry.Origin == PhysicsBodyOrigin::RigidBody)
+				writeBack.push_back(entry.Owner);
+		}
+		CollectOwnerHandles(kinematic, KinematicOwners);
+		CollectOwnerHandles(writeBack, WriteBackOwners);
+		OwnerListsStale = false;
+		OwnerListsStructure = scene.GetStructureRevision();
+	}
+
+	void Physics2DSystem::State::CollectOwnerHandles(const std::vector<UUID>& ids, std::vector<entt::entity>& owners) const
+	{
+		const Scene& scene = *Specification.RuntimeScene;
+		owners.clear();
+		for (const UUID id : ids)
+		{
+			if (const ConstEntity entity = scene.FindEntityByID(id); entity.IsValid())
+				owners.push_back(entity.GetHandle());
+		}
+		std::ranges::sort(owners);
+		const auto [first, last] = std::ranges::unique(owners);
+		owners.erase(first, last);
+		scene.SortCanonical(owners);
 	}
 
 	std::vector<PhysicsShapeInput> Physics2DSystem::State::CaptureShapeInputs(const Physics2DBodyPlan& plan) const
@@ -1160,6 +1259,7 @@ namespace Engine {
 				GatheredColliders[collider.Entity] = handle;
 		}
 		entry.ShapeInputs = CaptureShapeInputs(plan);
+		OwnerListsStale = true; // M43
 	}
 
 	void Physics2DSystem::State::RemoveBody(uint32_t handle, std::set<UUID>& woken)
@@ -1177,6 +1277,7 @@ namespace Engine {
 				GatheredColliders.erase(gathered);
 		}
 		Bodies.erase(found);
+		OwnerListsStale = true; // M43
 	}
 
 	bool Physics2DSystem::State::ReplaceShape(Physics2DBodyEntry& entry, const Physics2DBodyPlan& plan, std::set<UUID>& woken)
@@ -1350,7 +1451,10 @@ namespace Engine {
 	{
 		State& state = *m_State;
 		if (state.Specification.RuntimeScene != nullptr)
+		{
 			state.DisconnectSignals();
+			state.Specification.RuntimeScene->CloseWorldChangeList(state.WorldChanges);
+		}
 		// The bodies, then the world; no events.
 		if (state.World != nullptr)
 		{
@@ -1394,6 +1498,11 @@ namespace Engine {
 		state.Gravity = specification.Gravity;
 		state.CollisionSteps = std::max<uint32_t>(1, (60 + specification.FixedHz - 1) / specification.FixedHz);
 		state.ConnectSignals();
+		// M43: the world matrices changed from here on. Opened before any body exists, whether the world is made below or at a
+		// later first 2D body: every body is placed from the matrices current at its creation, so the changes collected since
+		// cover it. A PreStep without a world and a 2D component takes nothing, so a 3D game's list fills until it overflows
+		// once and then costs nothing; the PreStep that next takes it then visits every body owner, as before M43.
+		state.WorldChanges = specification.RuntimeScene->OpenWorldChangeList();
 
 		// Every 2D body in canonical order, so queries work at tick 0; the world only when one is made.
 		std::set<UUID> woken;
@@ -1426,6 +1535,10 @@ namespace Engine {
 		const auto deltaTime = static_cast<float>(step.FixedDelta);
 		std::set<UUID> woken;
 
+		// M43: the transforms changed since the last PreStep (the world-change list, Scene::TakeWorldChanges).
+		state.ChangedTransforms.clear();
+		state.ChangedTransformsAll = !scene.TakeWorldChanges(state.WorldChanges, state.ChangedTransforms);
+
 		// Rebuilds, and the partners of destroyed bodies woken so the step reports what still touches. A tilemap with a new
 		// version (a tilemap.paint edit, a reimport) rebuilds the plans of its colliders, as a component change of them.
 		const bool hierarchyChanged = state.HasHierarchyChanged();
@@ -1436,20 +1549,47 @@ namespace Engine {
 		}
 		if (state.ComponentsChanged || hierarchyChanged)
 			state.Rebuild(hierarchyChanged, woken);
-		else if (const std::set<UUID> changed = state.FindShapeChanges(false); !changed.empty())
+		else if (const std::set<UUID> changed = state.FindWrittenShapeChanges(); !changed.empty())
 			state.RefreshShapes(changed, woken);
 		state.ComponentsChanged = false;
 		state.ChangedEntities.clear();
 
-		// Kinematic moves and teleports, in canonical order of the owners.
+		// Kinematic moves and teleports, in canonical order of the owners. M43: the kinematic bodies' owners and the owners
+		// whose transforms changed since the last PreStep; any other owner's bodies would do nothing here (a Static body's
+		// world matrix is still the one it was placed at, a Dynamic body's local pose the one it wrote back or was placed
+		// from).
 		if (state.World != nullptr && !state.Bodies.empty())
 		{
-			const std::vector<UUID> order(scene.GetCanonicalOrder().begin(), scene.GetCanonicalOrder().end());
-			for (const UUID id : order)
+			state.RefreshOwnerLists();
+			std::vector<entt::entity> owners = state.KinematicOwners;
+			if (state.ChangedTransformsAll)
 			{
-				const Entity entity = scene.FindEntityByID(id);
+				for (const UUID id : state.BodyOwners)
+				{
+					if (const Entity entity = scene.FindEntityByID(id); entity.IsValid())
+						owners.push_back(entity.GetHandle());
+				}
+			}
+			else
+			{
+				for (const entt::entity entity : state.ChangedTransforms)
+				{
+					if (registry.valid(entity) && !registry.all_of<PendingDestroyTag>(entity)
+						&& state.BodyOwners.contains(registry.get<IDComponent>(entity).ID))
+						owners.push_back(entity);
+				}
+			}
+			std::ranges::sort(owners);
+			const auto [duplicate, ownersEnd] = std::ranges::unique(owners);
+			owners.erase(duplicate, ownersEnd);
+			scene.SortCanonical(owners);
+			scene.AddEntitiesVisited(owners.size());
+			for (const entt::entity handle : owners)
+			{
+				const Entity entity(handle, &scene);
 				if (!entity.IsValid() || entity.HasComponent<HierarchyDisabledTag>())
 					continue;
+				const UUID id = entity.GetUUID();
 				for (const PhysicsBodyOrigin origin : Utils::Body2DOrigins)
 				{
 					Physics2DBodyEntry* entry = state.FindOwnedBody(id, origin);
@@ -1635,15 +1775,18 @@ namespace Engine {
 			return;
 		Scene& scene = *state.Specification.RuntimeScene;
 
-		// Write-back, in canonical order: Dynamic bodies that are awake or have a parent.
+		// Write-back, in canonical order: Dynamic bodies that are awake or have a parent. M43: over the owners of dynamic
+		// RigidBody2D bodies only.
 		if (!state.Bodies.empty())
 		{
-			const std::vector<UUID> order(scene.GetCanonicalOrder().begin(), scene.GetCanonicalOrder().end());
-			for (const UUID id : order)
+			state.RefreshOwnerLists();
+			scene.AddEntitiesVisited(state.WriteBackOwners.size());
+			for (const entt::entity handle : state.WriteBackOwners)
 			{
-				const Entity entity = scene.FindEntityByID(id);
+				const Entity entity(handle, &scene);
 				if (!entity.IsValid() || entity.HasComponent<HierarchyDisabledTag>())
 					continue;
+				const UUID id = entity.GetUUID();
 				if (Physics2DBodyEntry* entry = state.FindOwnedBody(id, PhysicsBodyOrigin::RigidBody);
 					entry != nullptr && entry->Plan.MotionType == PhysicsMotionType::Dynamic
 					&& (!state.World->IsSleeping(entry->Handle) || entity.GetParent().IsValid()))
@@ -2281,6 +2424,7 @@ namespace Engine {
 			{
 				transform.Translation = glm::vec3(position, transform.Translation.z);
 			}
+			scene.MarkTransformWritten(target);
 		}
 		const glm::mat4 world = TransformSystem::ComputeWorldMatrix(target);
 		const Physics2DPose placed = Utils::GetPlanarPose(target, world);
@@ -2628,9 +2772,17 @@ namespace Engine {
 			return;
 
 		const Scene& scene = *state.Specification.RuntimeScene;
+		// M43: the owners of bodies in canonical order (the live ones, as the canonical order holds them).
+		std::vector<UUID> ids;
+		ids.reserve(state.BodiesByOwner.size());
+		for (const auto& owned : state.BodiesByOwner)
+			ids.push_back(owned.first.first);
+		std::vector<entt::entity> owners;
+		state.CollectOwnerHandles(ids, owners);
 		std::vector<std::byte> bytes;
-		for (const UUID id : scene.GetCanonicalOrder())
+		for (const entt::entity handle : owners)
 		{
+			const UUID id = scene.GetRegistry().get<IDComponent>(handle).ID;
 			for (const PhysicsBodyOrigin origin : Utils::Body2DOrigins)
 			{
 				const Physics2DBodyEntry* entry = state.FindOwnedBody(id, origin);

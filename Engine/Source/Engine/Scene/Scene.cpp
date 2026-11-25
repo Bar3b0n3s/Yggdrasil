@@ -10,9 +10,11 @@
 #include "Engine/Scene/Components/NameComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderStaticCache.h"
 #include "Engine/Scene/TransformSystem.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -38,6 +40,12 @@ namespace Engine {
 	}
 
 	namespace Utils {
+
+		// M43: a world-change list holds at most this many entries an entity of the scene (at least MinWorldChangeEntries)
+		// before it overflows, so a consumer that stops taking (a physics world held by the world pause) costs bounded memory
+		// and then rescans everything once.
+		constexpr size_t WorldChangeEntriesPerEntity = 4;
+		constexpr size_t MinWorldChangeEntries = 4096;
 
 		static ErrorIssue MakeIssue(std::string message, std::string hint, std::vector<std::string> suggestions)
 		{
@@ -231,9 +239,18 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(m_Specification.Registry == nullptr || m_Specification.Registry->IsFrozen(),
 			"A scene needs a frozen type registry (TypeRegistry::Freeze)");
 		ENGINE_CORE_ASSERT(m_Specification.IdGenerator != nullptr, "A scene needs a UUID generator");
+		// M43: every TransformComponent write the registry reports (creation, Entity::Patch, EnTT's patch and replace).
+		m_Registry.on_construct<TransformComponent>().connect<&Scene::OnTransformWritten>(*this);
+		m_Registry.on_update<TransformComponent>().connect<&Scene::OnTransformWritten>(*this);
 	}
 
-	Scene::~Scene() = default;
+	Scene::~Scene()
+	{
+		// The static cache disconnects its signals and closes its world-change list, so it goes first.
+		m_StaticCache.reset();
+		m_Registry.on_construct<TransformComponent>().disconnect(this);
+		m_Registry.on_update<TransformComponent>().disconnect(this);
+	}
 
 	Scope<Scene> Scene::Create(const SceneSpecification& specification)
 	{
@@ -285,6 +302,11 @@ namespace Engine {
 
 		const std::vector<entt::entity> subtree = CollectSubtreeForDestruction(entity.GetHandle());
 		RecordDestruction(subtree);
+		// M43: the tree loses the subtree (a root its whole segment), while the hierarchy still names its root.
+		if (m_Registry.get<RelationshipComponent>(entity.GetHandle()).Parent.IsValid())
+			MarkSegmentDirty(entity.GetHandle());
+		else
+			ReleaseSegment(entity.GetHandle());
 
 		std::vector<UUID>& siblings = GetChildList(m_Registry.get<RelationshipComponent>(entity.GetHandle()).Parent);
 		std::erase(siblings, entity.GetUUID());
@@ -309,6 +331,7 @@ namespace Engine {
 		}
 
 		++m_Revision;
+		++m_StructureRevision;
 		m_CanonicalOrderDirty = true;
 	}
 
@@ -344,7 +367,15 @@ namespace Engine {
 		m_RootEntities.clear();
 		m_PendingDestroys.clear();
 		m_PendingIndex.clear();
+		m_Segments.clear();
+		m_FreeSegments.clear();
+		m_CanonicalKeys.clear();
+		m_TransformWrites.clear();
+		m_TransformWritten.clear();
+		m_SegmentsDirty = false;
+		m_SegmentOrdinalsDirty = false;
 		++m_Revision;
+		++m_StructureRevision;
 		m_CanonicalOrderDirty = true;
 	}
 
@@ -506,6 +537,19 @@ namespace Engine {
 			RecordChildOrderBeforeChange(newParentID);
 		RecordFirstTouch(child.GetHandle());
 
+		// M43: the segments, while the hierarchy is still the old one: a root moved among the roots changes only the
+		// ordinals, a root moved under a parent gives up its segment, and a child leaves its tree's segment.
+		const bool wasRoot = !oldParentID.IsValid();
+		if (!wasRoot)
+			MarkSegmentDirty(child.GetHandle());
+		else if (!toRoot)
+			ReleaseSegment(child.GetHandle());
+		else
+		{
+			m_SegmentOrdinalsDirty = true;
+			m_CanonicalOrderDirty = true;
+		}
+
 		std::erase(GetChildList(oldParentID), childID);
 		std::vector<UUID>& newSiblings = GetChildList(newParentID);
 		newSiblings.insert(newSiblings.begin() + static_cast<std::ptrdiff_t>(targetIndex), childID);
@@ -523,8 +567,18 @@ namespace Engine {
 			RecordComponentName(child.GetHandle(), TypeKeyOf<TransformComponent>());
 		}
 		RefreshHierarchyDisabled(child.GetHandle());
+		RefreshHierarchyStatic(child.GetHandle());
+		// M43: the new tree's segment (a new one for a child that became a root), and the moved subtree's world matrices,
+		// which a move that keeps the local transform changes.
+		if (!toRoot)
+			MarkSegmentDirty(child.GetHandle());
+		else if (!wasRoot)
+			AllocateSegment(child.GetHandle(), false);
+		if (!sameParent)
+			RecordTransformWrite(child.GetHandle());
 
 		++m_Revision;
+		++m_StructureRevision;
 		m_CanonicalOrderDirty = true;
 		return {};
 	}
@@ -535,6 +589,95 @@ namespace Engine {
 		if (m_CanonicalOrderDirty)
 			RebuildCanonicalOrder();
 		return m_CanonicalOrder;
+	}
+
+	CanonicalKey Scene::GetCanonicalKey(ConstEntity entity) const
+	{
+		AssertMainThread();
+		ENGINE_CORE_ASSERT(entity.IsValid() && entity.GetScene() == this, "GetCanonicalKey needs a valid entity of scene '{}'",
+			m_Specification.Name);
+		RefreshCanonicalSegments();
+		const CanonicalKeySlot& slot = ClaimKeySlot(entity.GetHandle());
+		return CanonicalKey{ .Root = m_Segments[slot.Segment].Ordinal, .Index = slot.Index };
+	}
+
+	void Scene::SortCanonical(std::vector<entt::entity>& entities) const
+	{
+		AssertMainThread();
+		if (entities.size() < 2)
+			return;
+		RefreshCanonicalSegments();
+		std::vector<std::pair<uint64_t, entt::entity>> keyed;
+		keyed.reserve(entities.size());
+		for (const entt::entity entity : entities)
+		{
+			ENGINE_CORE_ASSERT(m_Registry.valid(entity) && !m_Registry.all_of<PendingDestroyTag>(entity),
+				"SortCanonical needs live entities of scene '{}'", m_Specification.Name);
+			const CanonicalKeySlot& slot = ClaimKeySlot(entity);
+			keyed.emplace_back((static_cast<uint64_t>(m_Segments[slot.Segment].Ordinal) << 32) | slot.Index, entity);
+		}
+		std::ranges::sort(keyed, {}, &std::pair<uint64_t, entt::entity>::first);
+		for (size_t index = 0; index < keyed.size(); ++index)
+		{
+			ENGINE_CORE_ASSERT(index == 0 || keyed[index - 1].first != keyed[index].first, "SortCanonical was given an entity twice");
+			entities[index] = keyed[index].second;
+		}
+	}
+
+	void Scene::MarkTransformWritten(Entity entity)
+	{
+		AssertMainThread();
+		ENGINE_CORE_ASSERT(entity.IsReadable() && entity.GetScene() == this, "MarkTransformWritten needs a readable entity of scene '{}'",
+			m_Specification.Name);
+		RecordTransformWrite(entity.GetHandle());
+	}
+
+	uint32_t Scene::OpenWorldChangeList()
+	{
+		AssertMainThread();
+		for (size_t index = 0; index < m_WorldChangeLists.size(); ++index)
+		{
+			if (!m_WorldChangeLists[index].Open)
+			{
+				m_WorldChangeLists[index] = WorldChangeList{ .Open = true };
+				return static_cast<uint32_t>(index);
+			}
+		}
+		m_WorldChangeLists.push_back(WorldChangeList{ .Open = true });
+		return static_cast<uint32_t>(m_WorldChangeLists.size() - 1);
+	}
+
+	void Scene::CloseWorldChangeList(uint32_t list)
+	{
+		AssertMainThread();
+		ENGINE_CORE_ASSERT(list < m_WorldChangeLists.size() && m_WorldChangeLists[list].Open, "World change list {} is not open", list);
+		m_WorldChangeLists[list] = WorldChangeList{};
+	}
+
+	bool Scene::TakeWorldChanges(uint32_t list, std::vector<entt::entity>& entities)
+	{
+		AssertMainThread();
+		ENGINE_CORE_ASSERT(list < m_WorldChangeLists.size() && m_WorldChangeLists[list].Open, "World change list {} is not open", list);
+		WorldChangeList& changes = m_WorldChangeLists[list];
+		if (changes.Overflowed)
+		{
+			changes.Overflowed = false;
+			return false;
+		}
+		entities.insert(entities.end(), changes.Entities.begin(), changes.Entities.end());
+		changes.Entities.clear();
+		return true;
+	}
+
+	Ref<const RenderStaticSet> Scene::RefreshStaticSet() const
+	{
+		AssertMainThread();
+		return m_StaticCache != nullptr ? m_StaticCache->Refresh() : nullptr;
+	}
+
+	uint64_t Scene::GetStaticCellRebuilds() const
+	{
+		return m_StaticCache != nullptr ? m_StaticCache->GetStaticCellRebuilds() : 0;
 	}
 
 	size_t Scene::GetEntityCount() const
@@ -582,9 +725,26 @@ namespace Engine {
 
 		RecordComponentName(entity, component);
 		if (component == TypeKeyOf<RelationshipComponent>())
+		{
+			// Only the scene changes the hierarchy, through SetParent, which keeps its segments itself; a write that reaches
+			// here cannot be attributed to one tree, so every segment is made again.
 			m_CanonicalOrderDirty = true;
+			ResetSegments();
+			++m_StructureRevision;
+		}
 		if (component == TypeKeyOf<DisabledTag>())
+		{
 			RefreshHierarchyDisabled(entity);
+			++m_StructureRevision;
+		}
+		if (component == TypeKeyOf<StaticComponent>())
+		{
+			// M43 (W43.2): the render static cache exists from the scene's first Static on. It is made before the tags are, so
+			// its first refresh, which builds every cell, covers them.
+			if (m_StaticCache == nullptr && kind == ComponentChangeKind::Added)
+				m_StaticCache = CreateScope<RenderStaticCache>(*this);
+			RefreshHierarchyStatic(entity);
+		}
 	}
 
 	void Scene::AssertMainThread() const
@@ -630,11 +790,18 @@ namespace Engine {
 		m_Registry.emplace<TransformComponent>(handle);
 		m_EntityIndex.emplace(id, handle);
 		GetChildList(parentID).push_back(id);
+		// M43: a new root appends a segment; a new child changes its tree's.
+		if (parent == entt::null)
+			AllocateSegment(handle, true);
+		else
+			MarkSegmentDirty(parent);
 		RefreshHierarchyDisabled(handle);
+		RefreshHierarchyStatic(handle);
 
 		if (m_ChangeTracker.IsTracking())
 			m_ChangeTracker.RecordCreated(id);
 		++m_Revision;
+		++m_StructureRevision;
 		m_CanonicalOrderDirty = true;
 		return Entity(handle, this);
 	}
@@ -708,21 +875,187 @@ namespace Engine {
 
 	void Scene::RebuildCanonicalOrder() const
 	{
+		// M43: the segments in root order, each rebuilt alone when its tree changed.
+		RefreshCanonicalSegments();
 		m_CanonicalOrder.clear();
 		m_CanonicalOrder.reserve(m_EntityIndex.size());
-
-		// Depth-first pre-order: the stack holds the entities still to visit, each list pushed in reverse so the first
-		// child is visited first.
-		std::vector<UUID> stack(m_RootEntities.rbegin(), m_RootEntities.rend());
-		while (!stack.empty())
+		for (const UUID root : m_RootEntities)
 		{
-			const UUID id = stack.back();
-			stack.pop_back();
-			m_CanonicalOrder.push_back(id);
-			const std::vector<UUID>& children = m_Registry.get<RelationshipComponent>(FindHandle(id)).Children;
-			stack.insert(stack.end(), children.rbegin(), children.rend());
+			const CanonicalSegment& segment = m_Segments[ClaimKeySlot(FindHandle(root)).Segment];
+			m_CanonicalOrder.insert(m_CanonicalOrder.end(), segment.Order.begin(), segment.Order.end());
 		}
 		m_CanonicalOrderDirty = false;
+	}
+
+	Scene::CanonicalKeySlot& Scene::ClaimKeySlot(entt::entity entity) const
+	{
+		const auto index = static_cast<size_t>(entt::to_entity(entity));
+		if (index >= m_CanonicalKeys.size())
+			m_CanonicalKeys.resize(index + 1);
+		CanonicalKeySlot& slot = m_CanonicalKeys[index];
+		if (slot.Handle != entity)
+			slot = CanonicalKeySlot{ .Handle = entity };
+		return slot;
+	}
+
+	entt::entity Scene::FindRootHandle(entt::entity entity) const
+	{
+		entt::entity current = entity;
+		for (UUID parent = m_Registry.get<RelationshipComponent>(current).Parent; parent.IsValid();
+			parent = m_Registry.get<RelationshipComponent>(current).Parent)
+			current = FindHandle(parent);
+		return current;
+	}
+
+	void Scene::AllocateSegment(entt::entity root, bool appended)
+	{
+		uint32_t index = 0;
+		if (!m_FreeSegments.empty())
+		{
+			index = m_FreeSegments.back();
+			m_FreeSegments.pop_back();
+		}
+		else
+		{
+			index = static_cast<uint32_t>(m_Segments.size());
+			m_Segments.emplace_back();
+		}
+		CanonicalSegment& segment = m_Segments[index];
+		segment = CanonicalSegment{ .Root = m_Registry.get<IDComponent>(root).ID, .Dirty = true, .Live = true };
+		CanonicalKeySlot& slot = ClaimKeySlot(root);
+		slot.Segment = index;
+		slot.Index = 0;
+		// A root appended to an ordered root list takes the last ordinal; any other placement renumbers them.
+		if (appended && !m_SegmentOrdinalsDirty)
+			segment.Ordinal = static_cast<uint32_t>(m_RootEntities.size() - 1);
+		else
+			m_SegmentOrdinalsDirty = true;
+		m_SegmentsDirty = true;
+		m_CanonicalOrderDirty = true;
+	}
+
+	void Scene::ReleaseSegment(entt::entity root)
+	{
+		const uint32_t index = ClaimKeySlot(root).Segment;
+		ENGINE_CORE_ASSERT(index < m_Segments.size() && m_Segments[index].Live && m_Segments[index].Root == m_Registry.get<IDComponent>(root).ID,
+			"The canonical segment of root {} is not its own", m_Registry.get<IDComponent>(root).ID);
+		m_Segments[index] = CanonicalSegment{};
+		m_FreeSegments.push_back(index);
+		m_SegmentOrdinalsDirty = true;
+		m_CanonicalOrderDirty = true;
+	}
+
+	void Scene::MarkSegmentDirty(entt::entity entity)
+	{
+		const entt::entity root = FindRootHandle(entity);
+		const uint32_t index = ClaimKeySlot(root).Segment;
+		ENGINE_CORE_ASSERT(index < m_Segments.size() && m_Segments[index].Live && m_Segments[index].Root == m_Registry.get<IDComponent>(root).ID,
+			"The canonical segment of root {} is not its own", m_Registry.get<IDComponent>(root).ID);
+		m_Segments[index].Dirty = true;
+		m_SegmentsDirty = true;
+		m_CanonicalOrderDirty = true;
+	}
+
+	void Scene::ResetSegments()
+	{
+		m_Segments.clear();
+		m_FreeSegments.clear();
+		m_SegmentOrdinalsDirty = true;
+		for (const UUID root : m_RootEntities)
+			AllocateSegment(FindHandle(root), false);
+		m_SegmentsDirty = true;
+		m_CanonicalOrderDirty = true;
+	}
+
+	void Scene::RefreshCanonicalSegments() const
+	{
+		if (m_SegmentOrdinalsDirty)
+		{
+			for (size_t ordinal = 0; ordinal < m_RootEntities.size(); ++ordinal)
+				m_Segments[ClaimKeySlot(FindHandle(m_RootEntities[ordinal])).Segment].Ordinal = static_cast<uint32_t>(ordinal);
+			m_SegmentOrdinalsDirty = false;
+		}
+		if (!m_SegmentsDirty)
+			return;
+		std::vector<entt::entity> stack;
+		for (size_t index = 0; index < m_Segments.size(); ++index)
+		{
+			CanonicalSegment& segment = m_Segments[index];
+			if (!segment.Live || !segment.Dirty)
+				continue;
+			// Depth-first pre-order: the stack holds the entities still to visit, each child list pushed in reverse so the
+			// first child is visited first.
+			segment.Order.clear();
+			stack.assign(1, FindHandle(segment.Root));
+			while (!stack.empty())
+			{
+				const entt::entity handle = stack.back();
+				stack.pop_back();
+				CanonicalKeySlot& slot = ClaimKeySlot(handle);
+				slot.Segment = static_cast<uint32_t>(index);
+				slot.Index = static_cast<uint32_t>(segment.Order.size());
+				const RelationshipComponent& relationship = m_Registry.get<RelationshipComponent>(handle);
+				segment.Order.push_back(m_Registry.get<IDComponent>(handle).ID);
+				for (auto child = relationship.Children.rbegin(); child != relationship.Children.rend(); ++child)
+					stack.push_back(FindHandle(*child));
+			}
+			segment.Dirty = false;
+		}
+		m_SegmentsDirty = false;
+	}
+
+	void Scene::OnTransformWritten(entt::registry& /*registry*/, entt::entity entity)
+	{
+		RecordTransformWrite(entity);
+	}
+
+	void Scene::RecordTransformWrite(entt::entity entity)
+	{
+		const auto index = static_cast<size_t>(entt::to_entity(entity));
+		if (index >= m_TransformWritten.size())
+			m_TransformWritten.resize(index + 1, entt::null);
+		if (m_TransformWritten[index] == entity)
+			return;
+		// A destroyed entity's entry at the same index is replaced; its stale handle in m_TransformWrites is skipped.
+		m_TransformWritten[index] = entity;
+		m_TransformWrites.push_back(entity);
+	}
+
+	bool Scene::IsTransformWritten(entt::entity entity) const
+	{
+		const auto index = static_cast<size_t>(entt::to_entity(entity));
+		return index < m_TransformWritten.size() && m_TransformWritten[index] == entity;
+	}
+
+	void Scene::ClearTransformWrites()
+	{
+		for (const entt::entity entity : m_TransformWrites)
+		{
+			const auto index = static_cast<size_t>(entt::to_entity(entity));
+			if (m_TransformWritten[index] == entity)
+				m_TransformWritten[index] = entt::null;
+		}
+		m_TransformWrites.clear();
+	}
+
+	void Scene::PublishWorldChanges(std::span<const entt::entity> changed, size_t recomputed)
+	{
+		m_TransformsUpdated += recomputed;
+		if (changed.empty())
+			return;
+		const size_t capacity = std::max(Utils::MinWorldChangeEntries, Utils::WorldChangeEntriesPerEntity * m_EntityIndex.size());
+		for (WorldChangeList& list : m_WorldChangeLists)
+		{
+			if (!list.Open || list.Overflowed)
+				continue;
+			if (list.Entities.size() + changed.size() > capacity)
+			{
+				list.Overflowed = true;
+				list.Entities = {};
+				continue;
+			}
+			list.Entities.insert(list.Entities.end(), changed.begin(), changed.end());
+		}
 	}
 
 	void Scene::RefreshHierarchyDisabled(entt::entity root)
@@ -744,6 +1077,53 @@ namespace Engine {
 
 			for (const UUID child : m_Registry.get<RelationshipComponent>(handle).Children)
 				stack.emplace_back(FindHandle(child), disabled);
+		}
+	}
+
+	void Scene::RefreshHierarchyStatic(entt::entity root)
+	{
+		const entt::registry& registry = m_Registry;
+		const auto* statics = registry.storage<StaticComponent>();
+		const auto* tags = registry.storage<HierarchyStaticTag>();
+		if ((statics == nullptr || statics->empty()) && (tags == nullptr || tags->empty()))
+			return;
+
+		// What `root`'s ancestors pass down: the first Static above it with Scope Subtree (static) or NotStatic (not static);
+		// EntityOnly is passed by (StaticComponent.h).
+		bool inherited = false;
+		for (UUID ancestor = m_Registry.get<RelationshipComponent>(root).Parent; ancestor.IsValid();)
+		{
+			const entt::entity handle = FindHandle(ancestor);
+			if (const StaticComponent* component = m_Registry.try_get<StaticComponent>(handle);
+				component != nullptr && component->Scope != StaticScope::EntityOnly)
+			{
+				inherited = component->Scope == StaticScope::Subtree;
+				break;
+			}
+			ancestor = m_Registry.get<RelationshipComponent>(handle).Parent;
+		}
+
+		// (entity, what its ancestors pass down), depth-first.
+		std::vector<std::pair<entt::entity, bool>> stack = { { root, inherited } };
+		while (!stack.empty())
+		{
+			const auto [handle, passed] = stack.back();
+			stack.pop_back();
+			bool isStatic = passed;
+			bool passes = passed;
+			if (const StaticComponent* component = m_Registry.try_get<StaticComponent>(handle))
+			{
+				isStatic = component->Scope != StaticScope::NotStatic;
+				if (component->Scope != StaticScope::EntityOnly)
+					passes = component->Scope == StaticScope::Subtree;
+			}
+			if (isStatic && !m_Registry.all_of<HierarchyStaticTag>(handle))
+				m_Registry.emplace<HierarchyStaticTag>(handle);
+			else if (!isStatic && m_Registry.all_of<HierarchyStaticTag>(handle))
+				m_Registry.remove<HierarchyStaticTag>(handle);
+
+			for (const UUID child : m_Registry.get<RelationshipComponent>(handle).Children)
+				stack.emplace_back(FindHandle(child), passes);
 		}
 	}
 

@@ -75,6 +75,25 @@ namespace Engine {
 
 	struct Physics2DSystem::State
 	{
+		// --- M43: the owner lists (Docs/Decisions/0061-m43-static-scenery.md decision 3) ------------------------------
+		// PhysicsSystem::State's, without characters and asset inputs (a tilemap's new version rebuilds through
+		// TilemapInputs): a tick visits only the moving bodies and the bodies whose transforms changed. The scene's
+		// world-change list (Scene::OpenWorldChangeList), opened at Create before any body exists, so it covers every body the
+		// lazily created world later holds, and what it collected since the last PreStep (`ChangedTransformsAll`: every
+		// entity, when it overflowed); the lists derived from Bodies, made again when a body was created, removed or reshaped
+		// (`OwnerListsStale`), each kept in canonical order of its live entities until the structure revision moves: the
+		// owners of kinematic bodies and of dynamic RigidBody2D bodies; the body owners; the bodies (handle values) that bake
+		// each shape-input entity in.
+		uint32_t WorldChanges = 0;
+		std::vector<entt::entity> ChangedTransforms;
+		bool ChangedTransformsAll = false;
+		bool OwnerListsStale = true;
+		std::optional<uint64_t> OwnerListsStructure{};
+		std::vector<entt::entity> KinematicOwners;
+		std::vector<entt::entity> WriteBackOwners; // dynamic RigidBody2D bodies' owners
+		std::set<UUID> BodyOwners;
+		std::map<entt::entity, std::vector<uint32_t>> ShapeInputBodies;
+
 		// --- Composition, sync and events -----------------------------------------------------------------------------
 		Physics2DSystemSpecification Specification{};
 		PhysicsLayerTable Layers{};
@@ -107,8 +126,8 @@ namespace Engine {
 		std::vector<PhysicsDiagnostic> PendingListenerDiagnostics;
 
 		// What PreStep rebuilds from: a 2D physics component (or a 3D one on an entity holding a 2D one, a TilemapRenderer on
-		// an entity whose TilemapCollider takes its tilemap, or DisabledTag) changed, and on which entities; the scene revision
-		// and the hierarchy at the last look.
+		// an entity whose TilemapCollider takes its tilemap, or DisabledTag) changed, and on which entities; the scene's
+		// structure revision (M43: a data write never moves it) and the hierarchy at the last look.
 		bool ComponentsChanged = false;
 		std::set<UUID> ChangedEntities;
 		uint64_t SeenRevision = 0;
@@ -145,6 +164,13 @@ namespace Engine {
 		void Rebuild(bool hierarchyChanged, std::set<UUID>& woken);
 		void RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken);
 		[[nodiscard]] std::set<UUID> FindShapeChanges(bool hierarchyChanged) const;
+		// M43: the owners of the bodies whose shape inputs were written since the last PreStep, as FindShapeChanges(false)
+		// finds them over every body.
+		[[nodiscard]] std::set<UUID> FindWrittenShapeChanges();
+		// M43: the owner lists made again when stale or when the structure revision moved since.
+		void RefreshOwnerLists();
+		// M43: `owners` set to the live, distinct handles of `ids`, in canonical order.
+		void CollectOwnerHandles(const std::vector<UUID>& ids, std::vector<entt::entity>& owners) const;
 		[[nodiscard]] std::vector<PhysicsShapeInput> CaptureShapeInputs(const Physics2DBodyPlan& plan) const;
 		// The TilemapInputs of `composition`'s creatable plans as the asset manager holds them now.
 		[[nodiscard]] std::vector<Physics2DTilemapInput> CaptureTilemapInputs(const Physics2DComposition& composition) const;

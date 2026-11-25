@@ -172,15 +172,19 @@ namespace Engine {
 
 	}
 
-	void UiSystem::LayoutStep(const Scene& scene, glm::uvec2 sceneSize)
+	void UiSystem::LayoutStep(Scene& scene, glm::uvec2 sceneSize)
 	{
-		m_StepLayout = ComputeUiLayout(scene, sceneSize);
+		UiLayoutPass pass = ComputeUiLayoutPass(scene, sceneSize);
+		scene.AddEntitiesVisited(pass.VisitedEntities);
+		m_StepLayout = std::move(pass.Table);
 		m_FrameLayoutCurrent = false;
 	}
 
-	void UiSystem::LayoutFrame(const Scene& scene, glm::uvec2 sceneSize)
+	void UiSystem::LayoutFrame(Scene& scene, glm::uvec2 sceneSize)
 	{
-		m_FrameLayout = ComputeUiLayout(scene, sceneSize);
+		UiLayoutPass pass = ComputeUiLayoutPass(scene, sceneSize);
+		scene.AddEntitiesVisited(pass.VisitedEntities);
+		m_FrameLayout = std::move(pass.Table);
 		m_FrameLayoutCurrent = true;
 		// M28 (decision 5): a presentation text outlives neither its element nor the element's UiText.
 		std::erase_if(m_PresentationTexts, [&scene](const auto& entry)

@@ -571,7 +571,10 @@ namespace Engine {
 					.WorldWidth = 400,
 					.WorldHeight = 200,
 					.PixelsPerUnit = 100.0f });
-			canvas.GetComponent<TransformComponent>().Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			canvas.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			});
 			TransformSystem::Update(scene);
 			Entity panel = AddElement(scene, "Panel", canvas, MakeTopLeftRect(glm::vec2(10.0f, 5.0f), glm::vec2(50.0f, 25.0f)));
 			// Beyond the canvas's 400-pixel width: laid out but not visible, whatever the scene image.
@@ -592,6 +595,54 @@ namespace Engine {
 			// the bottom-right one.
 			CHECK(glm::vec3(layout.World * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)) == glm::vec3(-1.0f, 3.0f, 3.0f));
 			CHECK(glm::vec3(layout.World * glm::vec4(400.0f, 200.0f, 0.0f, 1.0f)) == glm::vec3(3.0f, 1.0f, 3.0f));
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the scan walks each canvas's tree from the UiCanvas view
+		// instead of the whole scene, and still lists canvases and elements in canonical order: after a reparent and a sibling
+		// move, with canvases whose components were added against that order, and through an entity without a UiRect.
+		TEST_CASE("UiLayout: canvases and elements follow a reparent and a sibling move, and an entity without a UiRect passes its parent on")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity first = scene.CreateEntity("First");
+			Entity second = scene.CreateEntity("Second");
+			static_cast<void>(scene.CreateEntity("Unrelated"));
+			// The second canvas's component first, so the view's storage order is not the canonical order.
+			second.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			first.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity group = scene.CreateEntity("Group", first);
+			Entity grouped = AddElement(scene, "Grouped", group, UiRectComponent{});
+			Entity loose = AddElement(scene, "Loose", first, UiRectComponent{});
+			Entity other = AddElement(scene, "Other", second, UiRectComponent{});
+
+			UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			REQUIRE(table.Canvases.size() == 2);
+			CHECK(table.Canvases[0].Canvas == first.GetUUID());
+			CHECK(table.Canvases[1].Canvas == second.GetUUID());
+			REQUIRE(table.Nodes.size() == 3);
+			CHECK(table.Nodes[0].Entity == grouped.GetUUID());
+			CHECK(table.Nodes[1].Entity == loose.GetUUID());
+			CHECK(table.Nodes[2].Entity == other.GetUUID());
+			// Group has no UiRect: Grouped is a top-level element of the canvas.
+			CHECK(RequireNode(table, grouped).Parent == first.GetUUID());
+			CHECK(RequireNode(table, grouped).Depth == 1);
+
+			// Second to the front of the roots, Loose before Group, and Other into the first canvas below Loose.
+			REQUIRE(scene.SetParent(second, Entity{}, 0u).has_value());
+			REQUIRE(scene.SetParent(loose, first, 0u).has_value());
+			REQUIRE(scene.SetParent(other, loose).has_value());
+			table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			REQUIRE(table.Canvases.size() == 2);
+			CHECK(table.Canvases[0].Canvas == second.GetUUID());
+			CHECK(table.Canvases[0].NodeCount == 0);
+			CHECK(table.Canvases[1].Canvas == first.GetUUID());
+			REQUIRE(table.Nodes.size() == 3);
+			CHECK(table.Nodes[0].Entity == loose.GetUUID());
+			CHECK(table.Nodes[1].Entity == other.GetUUID());
+			CHECK(table.Nodes[2].Entity == grouped.GetUUID());
+			CHECK(RequireNode(table, other).Parent == loose.GetUUID());
+			CHECK(RequireNode(table, other).Depth == 2);
+			CHECK(RequireNode(table, other).Canvas == first.GetUUID());
 		}
 	}
 

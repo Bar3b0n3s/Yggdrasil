@@ -10,13 +10,17 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/StaticScenery.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 // Simulation path (§4.12): only + - * / and sqrt (glm's matrix products, inverses and quat_cast are built from them) and
@@ -196,6 +200,43 @@ namespace Engine {
 			return rotation;
 		}
 
+		// Whether two matrices hold the same bits (M43: the change test of Update and its Debug check; a NaN equals itself).
+		static bool SameMatrixBits(const glm::mat4& first, const glm::mat4& second)
+		{
+			return std::memcmp(&first, &second, sizeof(glm::mat4)) == 0;
+		}
+
+#if defined(ENGINE_DEBUG)
+		// M43's Debug full-recompute check: every entity's world matrix computed afresh in canonical order, as the full pass
+		// before change tracking did, must equal the incremental one bit for bit.
+		static void VerifyWorldMatrices(Scene& scene)
+		{
+			const entt::registry& registry = scene.GetRegistry();
+			std::unordered_map<entt::entity, glm::mat4> computed;
+			computed.reserve(scene.GetEntityCount());
+			for (const UUID id : scene.GetCanonicalOrder())
+			{
+				const ConstEntity entity = std::as_const(scene).FindEntityByID(id);
+				const entt::entity handle = entity.GetHandle();
+				glm::mat4 world = TransformSystem::ComputeLocalMatrix(registry.get<TransformComponent>(handle));
+				const UUID parent = registry.get<RelationshipComponent>(handle).Parent;
+				if (parent.IsValid())
+				{
+					// Parents precede their children in canonical order.
+					const auto parentWorld = computed.find(std::as_const(scene).FindEntityByID(parent).GetHandle());
+					ENGINE_CORE_VERIFY(parentWorld != computed.end(), "The parent of entity {} follows it in canonical order", id);
+					world = parentWorld->second * world;
+				}
+				computed.emplace(handle, world);
+				const WorldTransformComponent* cached = registry.try_get<WorldTransformComponent>(handle);
+				ENGINE_CORE_VERIFY(cached != nullptr && SameMatrixBits(cached->Matrix, world),
+					"Stale world matrix of entity '{}' ({}) in scene '{}': a TransformComponent was written past change tracking (write it "
+					"through Entity::Patch, or call Scene::MarkTransformWritten after a direct write; Lint banned-transform-write)",
+					scene.GetEntityPath(entity), id, scene.GetName());
+			}
+		}
+#endif
+
 		// An angle in degrees in (-180, 180] from atan2's [-pi, pi].
 		static float ToHalfOpenDegrees(double radians)
 		{
@@ -207,19 +248,83 @@ namespace Engine {
 
 	}
 
-	void TransformSystem::Update(Scene& scene)
+	std::span<const entt::entity> TransformSystem::Update(Scene& scene)
 	{
+		scene.AssertMainThread();
 		entt::registry& registry = scene.GetRegistry();
-		// Parents precede their children in canonical order, so each parent's world matrix is already current.
-		for (const UUID id : scene.GetCanonicalOrder())
+		std::vector<entt::entity>& changed = scene.m_LastWorldChanges;
+		changed.clear();
+
+		// The topmost written entities: a written entity under a written ancestor is recomputed with the ancestor's subtree.
+		// Pending destruction is left out, as the full pass over the canonical order left it.
+		std::vector<entt::entity> tops;
+		for (const entt::entity entity : scene.m_TransformWrites)
 		{
-			const entt::entity handle = scene.FindEntityByID(id).GetHandle();
-			glm::mat4 world = ComputeLocalMatrix(registry.get<TransformComponent>(handle));
-			const UUID parent = registry.get<RelationshipComponent>(handle).Parent;
-			if (parent.IsValid())
-				world = registry.get<WorldTransformComponent>(scene.FindEntityByID(parent).GetHandle()).Matrix * world;
-			registry.emplace_or_replace<WorldTransformComponent>(handle, world);
+			if (!registry.valid(entity) || registry.all_of<PendingDestroyTag>(entity))
+				continue;
+			bool topmost = true;
+			for (UUID parent = registry.get<RelationshipComponent>(entity).Parent; parent.IsValid();)
+			{
+				const entt::entity handle = scene.FindHandle(parent);
+				if (scene.IsTransformWritten(handle))
+				{
+					topmost = false;
+					break;
+				}
+				parent = registry.get<RelationshipComponent>(handle).Parent;
+			}
+			if (topmost)
+				tops.push_back(entity);
 		}
+
+		// Each subtree depth-first, parents first: World = ParentWorld * Local, the full pass's products in its order.
+		size_t recomputed = 0;
+		std::vector<std::pair<entt::entity, glm::mat4>> stack;
+		for (const entt::entity top : tops)
+		{
+			const UUID parent = registry.get<RelationshipComponent>(top).Parent;
+			glm::mat4 world = ComputeLocalMatrix(registry.get<TransformComponent>(top));
+			if (parent.IsValid())
+				world = registry.get<WorldTransformComponent>(scene.FindHandle(parent)).Matrix * world;
+			stack.emplace_back(top, world);
+			while (!stack.empty())
+			{
+				const auto [handle, matrix] = stack.back();
+				stack.pop_back();
+				++recomputed;
+				if (WorldTransformComponent* current = registry.try_get<WorldTransformComponent>(handle))
+				{
+					if (!Utils::SameMatrixBits(current->Matrix, matrix))
+					{
+						current->Matrix = matrix;
+						changed.push_back(handle);
+					}
+					else if (scene.IsTransformWritten(handle))
+					{
+						changed.push_back(handle);
+					}
+				}
+				else
+				{
+					registry.emplace<WorldTransformComponent>(handle, matrix);
+					changed.push_back(handle);
+				}
+				const std::vector<UUID>& children = registry.get<RelationshipComponent>(handle).Children;
+				for (auto child = children.rbegin(); child != children.rend(); ++child)
+				{
+					const entt::entity childHandle = scene.FindHandle(*child);
+					stack.emplace_back(childHandle, matrix * ComputeLocalMatrix(registry.get<TransformComponent>(childHandle)));
+				}
+			}
+		}
+
+		scene.ClearTransformWrites();
+		scene.PublishWorldChanges(changed, recomputed);
+#if defined(ENGINE_DEBUG)
+		Utils::VerifyWorldMatrices(scene);
+		VerifyHierarchyStaticTags(scene);
+#endif
+		return changed;
 	}
 
 	glm::mat4 TransformSystem::ComputeLocalMatrix(const TransformComponent& transform)

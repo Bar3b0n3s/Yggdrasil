@@ -54,10 +54,16 @@ namespace Engine {
 				Scene& scene = fixture.GetScene();
 				scene.SetName("Main");
 				Entity camera = scene.CreateEntity("Camera");
-				camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 1.5f, 5.0f);
+				camera.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 1.5f, 5.0f);
+				});
 				camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true, .Clear = ClearMode::Color, .ClearColor = glm::vec3(0.1f, 0.1f, 0.12f) });
 				Entity sun = scene.CreateEntity("Sun");
-				sun.GetComponent<TransformComponent>().Rotation = glm::quat(glm::radians(glm::vec3(-50.0f, -30.0f, 0.0f)));
+				sun.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Rotation = glm::quat(glm::radians(glm::vec3(-50.0f, -30.0f, 0.0f)));
+				});
 				sun.AddComponent<DirectionalLightComponent>();
 				Entity cube = scene.CreateEntity("Cube");
 				cube.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);

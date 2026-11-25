@@ -669,6 +669,77 @@
 					"Line": 19
 				}
 			]
+		},
+		{
+			"Name": "TransformDirectWrite",
+			"Description": "A TransformComponent written outside Banned.TransformWriteFiles past change tracking (Docs/Decisions/0061-m43-static-scenery.md decision 3): an assignment through a mutable GetComponent access, a mutable reference bound to it, a compound assignment through a registry get, a mutable pointer from TryGetComponent in an if initializer, an increment, an address taken into a mutable pointer, a view of the mutable component, a get and a try_get of several components that name it, a group that owns it and a group that reaches it through its get list. A const reference, a copy, a comparison and a pointer to const through the same accesses, a get of several components and a group that name it const, a write through Patch, and a direct write in Scene/PhysicsSystem.cpp (a file of the list) are the allowed controls.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 30
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 31
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 39
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 40
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 42
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 43
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 51
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 60
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 62
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 63
+				},
+				{
+					"Code": "banned-transform-write",
+					"File": "Engine/Source/Engine/Scene/Mover.cpp",
+					"Line": 64
+				}
+			]
 		}
 	]
 }

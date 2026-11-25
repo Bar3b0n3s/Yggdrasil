@@ -605,6 +605,58 @@ namespace Engine {
 			CHECK(findings.GetMatchCount() == MaxAnimationSystemDiagnostics);
 			CHECK(reached.GetMatchCount() == 1);
 		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the phase reads the Animator and SkinnedMesh views sorted
+		// by canonical key, so Animators step and SkinnedMeshes are reported in canonical order whatever order their components
+		// were added in, the order follows a sibling move, and a step visits those entities only (the scene's EntitiesVisited).
+		TEST_CASE("AnimationSystem: Animators and SkinnedMeshes go in canonical order whatever order their components were added in, and a step visits only them")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			const AssetHandle faceHandle(0x3e50000000000031);
+			assets.Publish(faceHandle, MakeFace(3), "Assets/Models/Hero.gltf");
+			Entity first = scene.CreateEntity("First");
+			Entity second = scene.CreateEntity("Second");
+			const Entity firstOrphan = scene.CreateEntity("FirstOrphan");
+			const Entity secondOrphan = scene.CreateEntity("SecondOrphan");
+			for (int index = 0; index < 8; ++index)
+				static_cast<void>(scene.CreateEntity("Prop"));
+			second.AddComponent<AnimatorComponent>(MakeAnimator());
+			first.AddComponent<AnimatorComponent>(MakeAnimator());
+			for (const Entity orphan : { secondOrphan, firstOrphan })
+			{
+				orphan.AddComponent<MeshRendererComponent>(MakeMeshRenderer(faceHandle));
+				orphan.AddComponent<SkinnedMeshComponent>();
+			}
+			TransformSystem::Update(scene);
+			RecordingListener listener;
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			(*system)->SetEventListener(&listener);
+			const Test::ExpectLog noAnimator(LogLevel::Warn, AnimationNoAnimatorCode);
+			const uint64_t visited = scene.GetEntitiesVisited();
+			(*system)->Step(SimStep{ .Tick = 0, .FixedDelta = 0.8, .Time = 0.0 });
+			// Two Animators and two SkinnedMeshes; the props are not visited.
+			CHECK(scene.GetEntitiesVisited() - visited == 4);
+			REQUIRE(listener.Events.size() == 6);
+			CHECK(listener.Events[0].Entity == first.GetUUID());
+			CHECK(listener.Events[3].Entity == second.GetUUID());
+			const std::span<const AnimationSceneIssue> issues = (*system)->GetDiagnostics();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].Entity == firstOrphan.GetUUID());
+			CHECK(issues[1].Entity == secondOrphan.GetUUID());
+			CHECK(noAnimator.GetMatchCount() == 2);
+
+			// A sibling move that puts Second first reorders the next step's events.
+			REQUIRE(scene.SetParent(second, Entity{}, 0u).has_value());
+			listener.Events.clear();
+			(*system)->Step(SimStep{ .Tick = 1, .FixedDelta = 0.8, .Time = 0.8 });
+			REQUIRE_FALSE(listener.Events.empty());
+			CHECK(listener.Events.front().Entity == second.GetUUID());
+			CHECK(listener.Events.back().Entity == first.GetUUID());
+		}
 	}
 
 }

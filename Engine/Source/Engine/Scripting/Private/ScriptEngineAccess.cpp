@@ -37,6 +37,12 @@ namespace Engine {
 			return *engine.m_State->Vm;
 		}
 
+		std::span<const UUID> ScriptEngineAccess::FindSceneEntities(ScriptEngine& engine, std::string_view name, bool tags)
+		{
+			engine.m_State->AssertOwner();
+			return engine.m_State->FindSceneEntities(name, tags);
+		}
+
 		Status ScriptEngineAccess::PushInstance(ScriptCall& call, UUID entity)
 		{
 			if (call.Engine == nullptr)

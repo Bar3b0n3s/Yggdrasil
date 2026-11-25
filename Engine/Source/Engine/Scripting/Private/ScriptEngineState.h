@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/TaskScheduler.h"
@@ -14,6 +15,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -136,6 +138,25 @@ namespace Engine {
 			std::map<AssetHandle, Ref<const ScriptData>> Scripts{};
 		};
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the index of Scene.FindByName, FindAllByName, FindByTag
+		// and FindAllByTag over the host's scene (fixed for the VM and outliving it, ScriptEngineSpecification::Host): every
+		// live entity (disabled ones included, those pending destruction excluded) under its name and under each of its tags,
+		// in canonical order, as the whole-scene walk those functions made found them. Rebuilt by the first lookup after the
+		// scene's structure revision moved or a Name or Tags component was constructed or written (EnTT's signals, which every
+		// write through Entity::Patch, the reflected setters and the serializer raises; connected by the first lookup and
+		// disconnected by ~State). Lookup structures only: nothing is output by iterating them.
+		struct SceneLookup
+		{
+			Scene* Connected = nullptr; // the scene whose signals are connected; null before the first lookup
+			uint64_t StructureRevision = 0;
+			bool Dirty = true;
+			std::map<std::string, std::vector<UUID>, std::less<>> Names{};
+			std::map<std::string, std::vector<UUID>, std::less<>> Tags{};
+
+			// on_construct and on_update of NameComponent and TagsComponent.
+			void OnNameOrTagsWritten(entt::registry& registry, entt::entity entity);
+		};
+
 		struct PendingFailure
 		{
 			ScriptError Error{};
@@ -148,11 +169,14 @@ namespace Engine {
 		~State();
 		void AssertOwner() const;
 		// Instance keys in canonical entity order and slot order, keeping removed instances at their last canonical anchor
-		// until teardown. Linear in the scene with no per-entity allocation; a no-op while the scene revision and instance
-		// membership are unchanged.
+		// until teardown. M43: O(k log k) in the k entities with instances (their live entities sorted by canonical key),
+		// never a walk of the scene; a no-op while the scene's structure revision and instance membership are unchanged.
 		void RefreshLifecycleOrder();
 		// Sorted IDs of every entity with an instance, for allocation-free membership tests during canonical walks.
 		[[nodiscard]] std::vector<UUID> SortedInstanceIDs() const;
+		// M43: the live entities of the host's scene named `name` (with `tags`: tagged `name`), in canonical order, from
+		// Lookup, which it refreshes first. The span is valid until the next call.
+		[[nodiscard]] std::span<const UUID> FindSceneEntities(std::string_view name, bool tags);
 		// The keys of the entity's instances, in slot order.
 		[[nodiscard]] std::vector<InstanceKey> InstancesOf(UUID entity) const;
 		// The instance's table when a script can address it (it has its table and is not being torn down; a fault-disabled
@@ -239,10 +263,13 @@ namespace Engine {
 		Scope<Sandbox> Vm{};
 		Scope<TaskScheduler> Scheduler{};
 		std::map<InstanceKey, Instance> Instances{};
+		SceneLookup Lookup{};
 		// Instance keys in last canonical entity order and slot order, retaining removed keys until their pending script
 		// teardown has completed. A new instance is appended until the next refresh places it, so one destroyed before
 		// then still tears down.
 		std::vector<InstanceKey> LifecycleOrder{};
+		// The scene's structure revision (Scene::GetStructureRevision, M43) LifecycleOrder was refreshed at: a data write
+		// leaves the order as it is, a structural change refreshes it.
 		uint64_t LifecycleRevision = 0;
 		bool LifecycleDirty = true; // instance membership changed since the last refresh
 		// Instances whose entity was observed inactive and that were not enabled since. Kept per slot, so a slot torn down
