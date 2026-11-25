@@ -181,6 +181,20 @@ class StageTests(unittest.TestCase):
                                                 test_script.parse_arguments(["--suite", "unit", "--config", config]))
                 self.assertGreater(runner.timeouts[f"unit {config}"], own)
 
+    def test_each_gpu_step_outlasts_the_bounds_test_py_gives_its_runs(self) -> None:
+        # Each gpu step runs one Tests run per API cap, so its bound stays above the sum of theirs (phase 8's gate,
+        # 2026-11-25: the stage stopped the Debug step at 3,600 s, in its second cap's run).
+        runner = RecordingRunner(parse("--stages", "gpu"))
+        CI.run_stage(runner, CI.STAGE_BY_NAME["gpu"], runner.arguments.configs)
+        self.assertEqual(sorted(runner.timeouts), ["gpu Debug", "gpu Release"])
+        for config in ("Debug", "Release"):
+            with self.subTest(config=config), contextlib.redirect_stderr(io.StringIO()):
+                arguments = test_script.parse_arguments(["--suite", "gpu", "--config", config])
+                runs = test_script.plan_runs("gpu", config, arguments)
+                self.assertEqual(len(runs), len(test_script.VULKAN_API_CAPS))
+                own = sum(test_script.tests_timeout(run, arguments) for run in runs)
+                self.assertGreater(runner.timeouts[f"gpu {config}"], own)
+
     def test_contract_mode_allows_skips_in_the_export_stage(self) -> None:
         runner = RecordingRunner(parse("--stages", "export", "--contract", "--configs", "Release"))
         CI.run_stage(runner, CI.STAGE_BY_NAME["export"], runner.arguments.configs)

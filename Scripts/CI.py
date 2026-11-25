@@ -235,7 +235,13 @@ TIMEOUTS = {
     # 1,800 s it stopped M25's gate (2026-11-13) in the Debug run of 4,723 cases, which had taken 1,546 s beside the
     # phase's other worktrees and 2,734 s under heavier load.
     "unit": 3900.0,
-    "gpu": 3600.0,
+    # Above the sum of the bounds Test.py gives the two Tests runs of each gpu step, one per API cap
+    # (DEBUG_GPU_TIMEOUT_SECONDS, 3,600 s each, for the Debug step and SUITE_TIMEOUT_SECONDS, 1,800 s each, for the
+    # Release step; Docs/Decisions/0039-script-budget-cpu-time.md decision 5 and its 2026-11-25 amendment), plus 300 s
+    # for Test.py's own setup, listings and report, as for the unit stage. At 3,600 s it stopped phase 8's gate
+    # (2026-11-25) in the Debug step's second cap, after the first had reached Test.py's former 1,800 s bound with 497
+    # of its about 702 cases run.
+    "gpu": 7500.0,
     "golden": 1800.0,
     "feature": 3600.0,
     "automation": 3600.0,

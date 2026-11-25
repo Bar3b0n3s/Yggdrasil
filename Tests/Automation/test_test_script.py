@@ -3,12 +3,12 @@ the run's own directory, bin/TestResults/<report stem>/UserData, so its log and 
 never reach the user's real user-data folder (AGENTS.md "Tests"; the "Milestone review" of
 Docs/Decisions/0029-m18-contract.md): that test runs the Tests binary of the automation suite's configuration. A run
 that ends with a non-zero exit code and no crash report names the last test case its process started and its last log
-lines (Architecture §15.2). The automation suite's run is bounded by its configuration's default unless --timeout is
-given (Docs/Decisions/0039-script-budget-cpu-time.md decision 5): those tests and the ones of a run without a report
-start no process. A sharded unit run (--parallel, Lib/shards.py) runs every case of its selection in exactly one
-shard, n shards at a time, merges the shards' reports, keeps the skip check, names a failed shard and bounds each shard
-by its expected time: the plan and the run are tested on stand-in processes, and the shards' --first and --last on the
-real Tests binary. No editor.
+lines (Architecture §15.2). The automation suite's run and each gpu run, one per API cap, are bounded by their
+configuration's default unless --timeout is given (Docs/Decisions/0039-script-budget-cpu-time.md decision 5 and its
+amendments): those tests and the ones of a run without a report start no process. A sharded unit run (--parallel,
+Lib/shards.py) runs every case of its selection in exactly one shard, n shards at a time, merges the shards' reports,
+keeps the skip check, names a failed shard and bounds each shard by its expected time: the plan and the run are tested
+on stand-in processes, and the shards' --first and --last on the real Tests binary. No editor.
 """
 
 from __future__ import annotations
@@ -242,6 +242,10 @@ class SuiteBoundTests(unittest.TestCase):
     # The Debug unit suite takes about 880 s unloaded; it took 1,212 s beside the phase's other worktrees and passed
     # 1,800 s under heavier load.
     UNLOADED_DEBUG_UNIT_SECONDS = 880.0
+    # One cap of the Debug gpu suite needs about 2,550 s: 3.6 s a case for its about 702 cases at phase 8's gate
+    # (2026-11-25), whose Vulkan 1.4 run reached the 1,800 s every run had after 497 of them (the same decision's
+    # 2026-11-25 amendment).
+    MEASURED_DEBUG_GPU_CAP_SECONDS = 2550.0
 
     def automation_bound(self, config: str, *options: str) -> float:
         """The timeout run_automation gives the suite's runner in `config`, which a stand-in run_streamed records."""
@@ -284,8 +288,46 @@ class SuiteBoundTests(unittest.TestCase):
         self.assertGreaterEqual(test_script.DEBUG_UNIT_TIMEOUT_SECONDS, 3 * self.UNLOADED_DEBUG_UNIT_SECONDS)
         self.assertEqual(self.run_tests_bound("unit", "Debug"), test_script.DEBUG_UNIT_TIMEOUT_SECONDS)
         self.assertEqual(self.run_tests_bound("unit", "Release"), test_script.SUITE_TIMEOUT_SECONDS)
-        self.assertEqual(self.run_tests_bound("gpu", "Debug"), test_script.SUITE_TIMEOUT_SECONDS)
+        self.assertEqual(self.run_tests_bound("golden", "Debug"), test_script.SUITE_TIMEOUT_SECONDS)
         self.assertEqual(self.run_tests_bound("unit", "Debug", "--timeout", "90"), 90.0)
+
+    def gpu_run_bounds(self, config: str, *options: str) -> dict[str, float]:
+        """The timeout run_tests gives the Tests process of each gpu run in `config`, by API cap, which a stand-in
+        run_streamed records; each run ends as timed out, before any listing."""
+        bounds: dict[str, float] = {}
+
+        def timed_out_run(command: list[str], **settings: Any) -> ProcessResult:
+            cap = next(option.split("=", 1)[1] for option in command if option.startswith("--vulkan-api="))
+            bounds[cap] = settings["timeout"]
+            return ProcessResult(command, None, True, settings["timeout"], "")
+
+        results = Path(tempfile.mkdtemp(prefix="TestScriptGpuBound-")).resolve()
+        self.addCleanup(shutil.rmtree, results, ignore_errors=True)
+        stand_in = results / test_script.paths.executable_name("Tests")
+        stand_in.write_bytes(b"")
+        with contextlib.redirect_stderr(io.StringIO()):
+            arguments = test_script.parse_arguments(["--suite", "gpu", "--config", config, *options])
+        console = Console()
+        console.stream = io.StringIO()
+        with mock.patch.object(test_script.paths, "TEST_RESULTS_ROOT", results), \
+                mock.patch.object(test_script, "tests_executable", return_value=stand_in), \
+                mock.patch.object(test_script, "run_streamed", timed_out_run):
+            steps = [test_script.run_tests(run, arguments, console)
+                     for run in test_script.plan_runs("gpu", config, arguments)]
+        self.assertEqual([step.status for step in steps], [Status.TIMEOUT] * len(steps))
+        return bounds
+
+    def test_each_debug_gpu_run_is_bounded_above_its_measured_time(self) -> None:
+        # Phase 8's gate (2026-11-25): the Debug gpu suite outgrew the 1,800 s every run had; each API cap's run gets
+        # its own bound in Debug, and the Release runs keep 1,800 s.
+        self.assertGreater(test_script.DEBUG_GPU_TIMEOUT_SECONDS, self.MEASURED_DEBUG_GPU_CAP_SECONDS)
+        self.assertGreater(test_script.DEBUG_GPU_TIMEOUT_SECONDS, test_script.SUITE_TIMEOUT_SECONDS)
+        caps = list(test_script.VULKAN_API_CAPS)
+        self.assertEqual(self.gpu_run_bounds("Debug"), dict.fromkeys(caps, test_script.DEBUG_GPU_TIMEOUT_SECONDS))
+        self.assertEqual(self.gpu_run_bounds("Release"), dict.fromkeys(caps, test_script.SUITE_TIMEOUT_SECONDS))
+        self.assertEqual(self.gpu_run_bounds("Debug", "--vulkan-api", "1.3"),
+                         {"1.3": test_script.DEBUG_GPU_TIMEOUT_SECONDS})
+        self.assertEqual(self.gpu_run_bounds("Debug", "--timeout", "90"), dict.fromkeys(caps, 90.0))
 
     def test_a_given_timeout_bounds_every_run(self) -> None:
         self.assertEqual(self.automation_bound("Debug", "--timeout", "90"), 90.0)
