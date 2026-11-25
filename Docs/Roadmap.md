@@ -1191,7 +1191,7 @@ Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
 - **`Wind {Direction, Strength, GustStrength, GustFrequency, Turbulence}`,** one per scene.
   - Material version 3's `Wind` block (`Enabled`, `Bend`, `Branch`, `Flutter`, `Stiffness`) and the mesh's `_WIND` weights bend, sway and flutter vegetation; the demos' materials are upgraded.
   - The view's `WindConstants` (b8) carry the wind's phases, computed in double precision, and the record's `WindResponse` with `DrawFlagWind` the material's block; binding 3 of every mesh pipeline is the wind stream, or a shared stream of zeros.
-  - The displacement uses `NoContraction` arithmetic without division or transcendental functions, its response saturating at 10 m/s, so the prepass, the forward pass and the selection mask compute bit-identical positions, and the motion vectors follow the sway.
+  - The displacement uses `NoContraction` arithmetic without division or transcendental functions, its response saturating at 10 m/s / (1 − `Stiffness`) (10 m/s for a supple plant, `Stiffness` 0; never for `Stiffness` 1), so the prepass, the forward pass and the selection mask compute bit-identical positions, and the motion vectors follow the sway.
   - `Wind:Sample(position, time?)` reads the gusted velocity at the world's clock, in double precision with IEEE-exact operations, so every configuration gives the same bits.
 - **Validation.** `ASSET_LOD_INVALID` (Warning): an authored or generated level dropped at import, or a malformed `MSFT_lod`, with its reason.
 - **Stats and perf.**
