@@ -462,8 +462,6 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		// lighting.bake {irradianceVolumes, reflectionProbes} (decision 8): each option bakes its kind alone, leaving the other
-		// kind's files and Data as they were, and an effectively disabled probe is never baked.
 		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): under an enabled Sky the room's volume
 		// bakes relightable (version 2 with its relight block, Relightable in the result; its reflection probe as before), two
 		// bakes write the same bytes, and a renderer that relights the baked volume at the bake's own sky shades a white quad
@@ -567,6 +565,8 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
+		// lighting.bake {irradianceVolumes, reflectionProbes} (decision 8): each option bakes its kind alone, leaving the other
+		// kind's files and Data as they were, and an effectively disabled probe is never baked.
 		TEST_CASE("LightingBake: each option bakes its kind alone, and a disabled probe is left out" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;

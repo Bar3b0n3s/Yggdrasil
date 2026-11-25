@@ -53,6 +53,7 @@ namespace Engine {
 		constexpr AssetHandle BakedVolumeHandle{ 0x9b02 };
 		constexpr AssetHandle ChromeHandle{ 0x9b03 };
 		constexpr AssetHandle ReflectionHandle{ 0x9b04 };
+		constexpr AssetHandle OuterVolumeHandle{ 0x9b05 };
 		// Y00, the constant SH basis function.
 		constexpr double ShConstant = 0.28209479177387814;
 
@@ -126,6 +127,34 @@ namespace Engine {
 			return CreateRef<IrradianceVolumeData>(std::move(volume));
 		}
 
+		// A 2 x 2 x 2 volume of `size` metres whose probe i has the relight block `blocks[i]` and, as its bake, that block relit
+		// at `sky` (RelightIrradianceSH9, what lighting.bake writes).
+		AssetRef<Asset> MakeBakedVolume(float size, const std::array<IrradianceProbeRelight, 8>& blocks, const ProbeSH9& sky)
+		{
+			IrradianceVolumeData volume;
+			volume.Size = glm::vec3(size);
+			for (const IrradianceProbeRelight& block : blocks)
+			{
+				volume.Probes.push_back(IrradianceProbe{ .SH9 = RelightIrradianceSH9(block.Local, block.Transfer, sky) });
+				volume.Relight.push_back(block);
+			}
+			return CreateRef<IrradianceVolumeData>(std::move(volume));
+		}
+
+		// Probe 3, at (1, 1, 0) of a 2 x 2 x 2 grid, sees the sky through the cave's mouth; the other seven see none of it (`open`
+		// false: none of the eight). Each holds the lamp `lamp`.
+		std::array<IrradianceProbeRelight, 8> MakeCornerBlocks(const ProbeSH9& lamp, bool open)
+		{
+			std::array<IrradianceProbeRelight, 8> blocks{};
+			for (size_t probe = 0; probe < blocks.size(); ++probe)
+			{
+				blocks[probe].Local = lamp;
+				if (open && probe == 3)
+					blocks[probe].Transfer = MakeCaveTransfer();
+			}
+			return blocks;
+		}
+
 		// An environment whose specular cube is a uniform `radiance` (8², 4 levels), with a black skybox and no irradiance.
 		AssetRef<Asset> MakeUniformEnvironment(double radiance)
 		{
@@ -162,9 +191,43 @@ namespace Engine {
 			return snapshot;
 		}
 
-		IrradianceVolumeItem MakeVolumeItem(AssetHandle data)
+		// The volume `data` of `size` metres about `centre` (by default 4 m about the quad).
+		IrradianceVolumeItem MakeVolumeItem(AssetHandle data, const glm::vec3& centre = glm::vec3(0.0f, 0.0f, -3.0f), float size = 4.0f, UUID entity = UUID(31))
 		{
-			return IrradianceVolumeItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)), .Size = glm::vec3(4.0f), .Data = data, .BlendDistance = 0.0f, .Entity = UUID(31) };
+			return IrradianceVolumeItem{ .World = glm::translate(glm::mat4(1.0f), centre), .Size = glm::vec3(size), .Data = data, .BlendDistance = 0.0f, .Entity = entity };
+		}
+
+		// A reflection probe of the uniform environment `data`, its 30 m box about `centre` (around the quad), not box-projected.
+		ReflectionProbeItem MakeReflectionItem(AssetHandle data, const glm::vec3& centre)
+		{
+			return ReflectionProbeItem{ .World = glm::translate(glm::mat4(1.0f), centre),
+				.Size = glm::vec3(30.0f),
+				.Data = data,
+				.BoxProjection = false,
+				.BlendDistance = 0.0f,
+				.Entity = UUID(32) };
+		}
+
+		// The chrome quad's scene (ChromeHandle published): MakeRelitSnapshot's sky with the quad of the chrome material, casting
+		// no shadow, so it shows its reflection alone (a metal has no diffuse term).
+		RenderSnapshot MakeChromeSnapshot(Test::SceneRendererIntegrationFixture& fixture, float elevation, uint64_t frame)
+		{
+			RenderSnapshot snapshot = MakeRelitSnapshot(fixture, elevation);
+			snapshot.Meshes[0].Materials = { ChromeHandle };
+			snapshot.Meshes[0].CastShadows = false;
+			snapshot.FrameIndex = frame;
+			return snapshot;
+		}
+
+		// Publishes the chrome material and, as ReflectionHandle, a uniform environment of radiance 0.5.
+		void PublishChrome(Test::SceneRendererIntegrationFixture& fixture)
+		{
+			auto chrome = CreateRef<MaterialData>();
+			chrome->BaseColor = glm::vec4(1.0f);
+			chrome->Metallic = 1.0f;
+			chrome->Roughness = 0.2f;
+			fixture.Assets().Publish(ChromeHandle, chrome);
+			fixture.Assets().Publish(ReflectionHandle, MakeUniformEnvironment(0.5));
 		}
 
 		// The mean linear green of SceneColor's centre square of half the view's size (the quad).
@@ -434,63 +497,147 @@ namespace Engine {
 
 		// Decision 3: a reflection probe whose centre lies in a relit volume takes its Intensity times the luminance ratio of the
 		// volume's relit to its baked constant term at the probe nearest that centre. Baked at noon, a chrome quad reflecting
-		// the probe's uniform cube keeps its noon reflection at noon and dims at night by that ratio; a probe outside every relit
-		// volume keeps its bake's brightness at night.
+		// the probe's uniform cube keeps its noon reflection at noon and dims at night by that ratio. The volume's probes differ
+		// (the W45.3 review's finding 2): only probe 3, at (1, 1, 0), sees the sky, so a centre nearest it dims while one
+		// nearest a closed probe keeps its bake, and inside a larger relightable volume whose probes are all closed the smaller
+		// one's probe still decides; a probe outside every relit volume keeps its bake's brightness at night.
 		TEST_CASE("ProbeRelight: a reflection probe inside a relit volume dims with it" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			GraphicsDevice& device = gpu.GetDevice();
 			Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
-			auto chrome = CreateRef<MaterialData>();
-			chrome->BaseColor = glm::vec4(1.0f);
-			chrome->Metallic = 1.0f;
-			chrome->Roughness = 0.2f;
-			fixture.Assets().Publish(ChromeHandle, chrome);
-			fixture.Assets().Publish(ReflectionHandle, MakeUniformEnvironment(0.5));
-			const auto snapshotAt = [&fixture](float elevation, uint64_t frame)
-			{
-				RenderSnapshot snapshot = MakeRelitSnapshot(fixture, elevation);
-				snapshot.Meshes[0].Materials = { ChromeHandle };
-				snapshot.Meshes[0].CastShadows = false;
-				snapshot.Post.SsrEnabled = false;
-				snapshot.FrameIndex = frame;
-				return snapshot;
-			};
-			// The noon sky's radiance, from a render without probes, bakes the volume (its coefficients at that sky).
-			fixture.Submit(snapshotAt(70.0f, 30));
+			PublishChrome(fixture);
+			// The noon sky's radiance, from a render without probes, bakes the volumes (their coefficients at that sky).
+			fixture.Submit(MakeChromeSnapshot(fixture, 70.0f, 30));
 			const ProbeSH9 noonSky = ReadSkyRadiance(device, fixture.Renderer());
 			const ProbeSH9 lamp = MakeLamp(glm::vec3(0.02f));
-			const IrradianceProbeRelight block{ .Local = lamp, .Transfer = MakeCaveTransfer() };
-			const ProbeSH9 baked = RelightIrradianceSH9(lamp, block.Transfer, noonSky);
-			fixture.Assets().Publish(RelitVolumeHandle, MakeVolume(baked, block, true));
-			const auto render = [&fixture, &device, &snapshotAt](float elevation, uint64_t frame, const glm::vec3& centre)
+			const std::array<IrradianceProbeRelight, 8> blocks = MakeCornerBlocks(lamp, true);
+			fixture.Assets().Publish(RelitVolumeHandle, MakeBakedVolume(4.0f, blocks, noonSky));
+			fixture.Assets().Publish(OuterVolumeHandle, MakeBakedVolume(12.0f, MakeCornerBlocks(lamp, false), noonSky));
+			const auto render = [&fixture, &device](float elevation, uint64_t frame, const glm::vec3& centre, bool outer)
 			{
-				RenderSnapshot snapshot = snapshotAt(elevation, frame);
+				RenderSnapshot snapshot = MakeChromeSnapshot(fixture, elevation, frame);
 				snapshot.IrradianceVolumes.push_back(MakeVolumeItem(RelitVolumeHandle));
-				snapshot.ReflectionProbes.push_back(ReflectionProbeItem{ .World = glm::translate(glm::mat4(1.0f), centre),
-					.Size = glm::vec3(30.0f),
-					.Data = ReflectionHandle,
-					.BoxProjection = false,
-					.BlendDistance = 0.0f,
-					.Entity = UUID(32) });
+				if (outer)
+					snapshot.IrradianceVolumes.push_back(MakeVolumeItem(OuterVolumeHandle, glm::vec3(0.0f, 0.0f, -3.0f), 12.0f, UUID(33)));
+				snapshot.ReflectionProbes.push_back(MakeReflectionItem(ReflectionHandle, centre));
 				fixture.Submit(snapshot);
 				return MeanCentreGreen(device, fixture.Renderer());
 			};
-			// Inside: the probe's centre in the volume's box (4 m about (0, 0, -3)); outside: 7 m behind it, its box still around
+			// The volume's box is 4 m about (0, 0, -3): (1.5, 1.5, -4.5) is nearest probe 3, (-1.5, -1.5, -4.5) nearest the closed
+			// probe 0; (0, 0, -10) is outside it (and outside the outer volume, 12 m about the same centre), its box still around
 			// the quad.
-			const glm::vec3 inside(0.0f, 0.0f, -3.0f);
+			const glm::vec3 nearOpen(1.5f, 1.5f, -4.5f);
+			const glm::vec3 nearClosed(-1.5f, -1.5f, -4.5f);
 			const glm::vec3 outside(0.0f, 0.0f, -10.0f);
-			const double noon = render(70.0f, 31, inside);
-			const double night = render(-30.0f, 32, inside);
+			const double noon = render(70.0f, 31, nearOpen, false);
+			const double night = render(-30.0f, 32, nearOpen, false);
 			const ProbeSH9 nightSky = ReadSkyRadiance(device, fixture.Renderer());
-			const float expected = ComputeReflectionRelightScale(RelightIrradianceSH9(lamp, block.Transfer, nightSky)[0], baked[0]);
-			const double kept = render(-30.0f, 33, outside);
-			INFO("noon " << noon << ", night " << night << " (expected scale " << expected << "), outside at night " << kept);
+			const ProbeSH9 baked3 = RelightIrradianceSH9(lamp, blocks[3].Transfer, noonSky);
+			const float expected = ComputeReflectionRelightScale(RelightIrradianceSH9(lamp, blocks[3].Transfer, nightSky)[0], baked3[0]);
+			const double closedNight = render(-30.0f, 33, nearClosed, false);
+			const double nestedNight = render(-30.0f, 34, nearOpen, true);
+			const double kept = render(-30.0f, 35, outside, false);
+			INFO("noon " << noon << ", night " << night << " (expected scale " << expected << "), nearest a closed probe at night " << closedNight
+						 << ", inside the outer volume at night " << nestedNight << ", outside at night " << kept);
 			CHECK(noon > 0.0);
 			CHECK(expected < 0.5f);
-			CHECK(night / noon == doctest::Approx(expected).epsilon(0.03));
-			CHECK(kept == doctest::Approx(noon).epsilon(0.01));
+			CHECK(night / noon == doctest::Approx(expected).epsilon(0.03).scale(0.0));
+			CHECK(closedNight == doctest::Approx(noon).epsilon(0.01).scale(0.0));
+			CHECK(nestedNight == doctest::Approx(night).epsilon(0.01).scale(0.0));
+			CHECK(kept == doctest::Approx(noon).epsilon(0.01).scale(0.0));
+			device.RunGarbageCollection();
+		}
+
+		// The W45.3 review's finding 3: the relit volume around a reflection probe's centre is behind the camera, out of the
+		// view, while the probe's box holds the quad in front of it. The view keeps the volume for the reflection's relight, so
+		// the reflection dims at night by the same ratio as with the volume in view, and the volume is relit off screen.
+		TEST_CASE("ProbeRelight: a reflection probe keeps its relit scale while the volume around its centre is out of view" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+			PublishChrome(fixture);
+			fixture.Submit(MakeChromeSnapshot(fixture, 70.0f, 50));
+			const ProbeSH9 noonSky = ReadSkyRadiance(device, fixture.Renderer());
+			const ProbeSH9 lamp = MakeLamp(glm::vec3(0.02f));
+			const std::array<IrradianceProbeRelight, 8> blocks = MakeCornerBlocks(lamp, true);
+			fixture.Assets().Publish(RelitVolumeHandle, MakeBakedVolume(4.0f, blocks, noonSky));
+			// The volume 4 m about (0, 0, 5), behind the camera at the origin looking down -Z; the probe's centre nearest its probe
+			// 3, (1.5, 1.5, 3.5).
+			const auto render = [&fixture, &device](float elevation, uint64_t frame)
+			{
+				RenderSnapshot snapshot = MakeChromeSnapshot(fixture, elevation, frame);
+				snapshot.IrradianceVolumes.push_back(MakeVolumeItem(RelitVolumeHandle, glm::vec3(0.0f, 0.0f, 5.0f)));
+				snapshot.ReflectionProbes.push_back(MakeReflectionItem(ReflectionHandle, glm::vec3(1.5f, 1.5f, 3.5f)));
+				fixture.Submit(snapshot);
+				return MeanCentreGreen(device, fixture.Renderer());
+			};
+			const double noon = render(70.0f, 51);
+			const double night = render(-30.0f, 52);
+			CHECK(fixture.Renderer().GetRenderStats().RelitIrradianceVolumes == 1U);
+			const ProbeSH9 nightSky = ReadSkyRadiance(device, fixture.Renderer());
+			const ProbeSH9 baked3 = RelightIrradianceSH9(lamp, blocks[3].Transfer, noonSky);
+			const float expected = ComputeReflectionRelightScale(RelightIrradianceSH9(lamp, blocks[3].Transfer, nightSky)[0], baked3[0]);
+			INFO("noon " << noon << ", night " << night << " (expected scale " << expected << ")");
+			CHECK(noon > 0.0);
+			CHECK(expected < 0.5f);
+			CHECK(night / noon == doctest::Approx(expected).epsilon(0.03).scale(0.0));
+			device.RunGarbageCollection();
+		}
+
+		// The W45.3 review's finding 2: the view relights its volumes when the Sky's Intensity changes, which the sky's key leaves
+		// out (SkyUpdates 0), and a view whose copy holds relit probes takes their bakes again once the Sky is gone. The cave's
+		// volume and its black reflection probe, as the cave case: the quad shows its probes' diffuse light alone.
+		TEST_CASE("ProbeRelight: a relit volume follows the Sky's Intensity and takes its bake again without the Sky" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+			const ProbeSH9 lamp = MakeLamp(glm::vec3(0.005f));
+			const IrradianceProbeRelight block{ .Local = lamp, .Transfer = MakeCaveTransfer() };
+			fixture.Assets().Publish(RelitVolumeHandle, MakeVolume(lamp, block, true));
+			fixture.Assets().Publish(BakedVolumeHandle, MakeVolume(lamp, block, false));
+			fixture.Assets().Publish(ReflectionHandle, MakeUniformEnvironment(0.0));
+			const auto render = [&fixture, &device](AssetHandle volume, float intensity, bool sky, uint64_t frame)
+			{
+				RenderSnapshot snapshot = MakeRelitSnapshot(fixture, 70.0f);
+				snapshot.Sky.Intensity = intensity;
+				snapshot.Sky.Enabled = sky;
+				snapshot.IrradianceVolumes.push_back(MakeVolumeItem(volume));
+				snapshot.ReflectionProbes.push_back(MakeReflectionItem(ReflectionHandle, glm::vec3(0.0f, 0.0f, -10.0f)));
+				snapshot.FrameIndex = frame;
+				fixture.Submit(snapshot);
+				return MeanCentreGreen(device, fixture.Renderer());
+			};
+			// The probes' bake is the lamp's light alone (MakeVolume's coefficients).
+			const double lampAlone = render(BakedVolumeHandle, 1.0f, true, 40);
+			const double noon = render(RelitVolumeHandle, 1.0f, true, 41);
+			CHECK(fixture.Renderer().GetRenderStats().RelitIrradianceVolumes == 1U);
+			CHECK(render(RelitVolumeHandle, 1.0f, true, 42) == noon);
+			CHECK(fixture.Renderer().GetRenderStats().RelitIrradianceVolumes == 0U);
+			// Half the Sky's Intensity: the sky's light is not regenerated, the volume is relit, and the quad's light from the
+			// sky halves.
+			const double half = render(RelitVolumeHandle, 0.5f, true, 43);
+			RenderStats stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.SkyUpdates == 0U);
+			CHECK(stats.RelitIrradianceVolumes == 1U);
+			INFO("the lamp alone " << lampAlone << ", noon " << noon << ", at half Intensity " << half);
+			CHECK(noon > 2.0 * lampAlone);
+			// Relative tolerances (scale 0): doctest's default scale of 1 would accept any difference below the epsilon here.
+			CHECK(half - lampAlone == doctest::Approx(0.5 * (noon - lampAlone)).epsilon(0.05).scale(0.0));
+			// Without the Sky, the view's copy of the relit volume takes its bake again: the lamp's light, as the volume baked
+			// without a relight block gives without the Sky.
+			const double withoutSky = render(RelitVolumeHandle, 0.5f, false, 44);
+			stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.RelitIrradianceVolumes == 0U);
+			CHECK(stats.SkyUpdates == 0U);
+			const double bakedWithoutSky = render(BakedVolumeHandle, 0.5f, false, 45);
+			INFO("without the Sky " << withoutSky << ", the baked volume without the Sky " << bakedWithoutSky);
+			CHECK(withoutSky == bakedWithoutSky);
 			device.RunGarbageCollection();
 		}
 	}

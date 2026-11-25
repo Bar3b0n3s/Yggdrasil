@@ -44,6 +44,7 @@ namespace Engine {
 		stats.CachedSpotShadows = view.CachedSpotShadows;
 		stats.PlanarReflections = view.PlanarReflections;
 		stats.DroppedPlanarReflections = view.DroppedPlanarReflections;
+		stats.SkyUpdates = view.SkyUpdates;
 		if (view.SsrAreaAvailable)
 		{
 			stats.SsrTiles = view.SsrTiles;

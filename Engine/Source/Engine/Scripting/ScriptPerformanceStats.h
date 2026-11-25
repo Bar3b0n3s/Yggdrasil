@@ -47,6 +47,9 @@ namespace Engine {
 		// DroppedPlanarReflections).
 		uint32_t PlanarReflections = 0;
 		uint32_t DroppedPlanarReflections = 0;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: after M43's members): 1 when
+		// the frame regenerated its Sky's image-based light, else 0 (RenderStats::SkyUpdates).
+		uint32_t SkyUpdates = 0;
 	};
 
 }

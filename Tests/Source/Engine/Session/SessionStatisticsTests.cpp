@@ -81,6 +81,7 @@ namespace Engine {
 			view.SkinnedMeshes = 5;
 			view.PlanarReflections = 3; // M42
 			view.DroppedPlanarReflections = 2;
+			view.SkyUpdates = 1; // M45
 			view.Passes.push_back({ .Name = "Forward", .CpuMilliseconds = 1.0, .GpuMilliseconds = 2.0, .GpuAvailable = true, .DrawCalls = 10, .Dispatches = 0, .Triangles = 300 });
 			view.Passes.push_back({ .Name = "Shadows", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.5, .GpuAvailable = false, .DrawCalls = 4, .Dispatches = 0, .Triangles = 120 });
 			view.Passes.push_back({ .Name = "Skinning", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.25, .GpuAvailable = true, .DrawCalls = 0, .Dispatches = 5, .Triangles = 0 });
@@ -93,6 +94,7 @@ namespace Engine {
 			CHECK(stats.SkinnedMeshes == 5);
 			CHECK(stats.PlanarReflections == 3);
 			CHECK(stats.DroppedPlanarReflections == 2);
+			CHECK(stats.SkyUpdates == 1);
 			CHECK(stats.DrawCalls == 14);
 			CHECK(stats.Triangles == 420);
 			// Only the passes with a GPU sample add to the GPU time.
@@ -174,6 +176,7 @@ return Script.Define("Readout", Readout)
 			host.View.SsrTiles = 80;
 			host.View.SsrTracedTiles = 12;
 			host.View.SsrTracedPixels = 700;
+			host.View.SkyUpdates = 1; // M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3)
 			PlaySessionSpecification specification{};
 			specification.Registry = &fixture.GetTypes();
 			specification.Assets = &fixture.GetAssetManager();
@@ -203,6 +206,10 @@ return Script.Define("Readout", Readout)
 				{});
 			REQUIRE(rows);
 			CHECK(rows->Value.Get() == Json::array({ 512, 4, 6, 80, 12, 700 }));
+			// M45's SkyUpdates reaches the readout.
+			const auto sky = session->GetScripts()->Evaluate("return Application.GetStats().SkyUpdates", {});
+			REQUIRE(sky);
+			CHECK(sky->Value.Get() == Json(1));
 		}
 
 		TEST_CASE("PlaySession: the performance readout without a host reports the session's counters with no render")

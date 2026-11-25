@@ -29,7 +29,13 @@ resolution (ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also 
 (Assets/Perf/Mirrors.scene: three built-in Quad mirrors on its walls at the default half resolution, facing a
 perspective camera across a floor of props lit by a shadowed sun and a shadowed point light; reflections/Mirrors3/gpuMs:
 the sum of the PlanarReflection<k> rows, each a mirror's whole view; budget 2.0 ms, World Tree's brief 23's target),
-captured only when the view drew all three.
+captured only when the view drew all three; and (M45, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3) the
+sky of a generated cove (Assets/Perf/Sky.scene: a Sky naming a shadowed Sun and a Moon light, with a cloud layer, over a
+ground of props in a relightable 8 x 4 x 8 IrradianceVolume baked by lighting.bake at the part's start, its camera
+showing the horizon): sky/Static/gpuMs, the SkyLuts, SkyIbl and Sky rows while the sun stands still (budget 0.3 ms),
+captured only when the view's sky light was not regenerated; and sky/Turning/gpuMs, the same rows and ProbeRelight with
+the sun turned every tick by the scene's script (Assets/Perf/SkySunTurner.luau; Skerries' brief S03's time-lapse, budget
+0.6 ms), captured only when the view regenerated the sky's light and relit the volume.
 --only selects some of the parts (playCopy, scenes, navigation, replay, look), a development aid for one measurement.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
@@ -113,6 +119,24 @@ MIRROR_SCENE = "Assets/Perf/Mirrors.scene"
 MIRROR_METRIC = "reflections/Mirrors3/gpuMs"
 MIRROR_COUNT = 3
 MIRROR_PASSES = ("PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3")
+# M45: the sky's cove (module docstring), its sun's turner, its two metrics and the rows each sums.
+SKY_SCENE = "Assets/Perf/Sky.scene"
+SKY_TURNER = "Assets/Perf/SkySunTurner.luau"
+SKY_TURNER_SOURCE = """--!strict
+-- Turns the perf cove's Sun a quarter of a degree every tick (Scripts/Perf.py's sky/Turning/gpuMs).
+local SkySunTurner = {}
+
+function SkySunTurner.OnFixedUpdate(self: ScriptInstance, dt: number)
+\tself.Entity.Transform:Rotate(vector.create(0.25, 0, 0))
+end
+
+return Script.Define("SkySunTurner", SkySunTurner)
+"""
+SKY_STATIC_METRIC = "sky/Static/gpuMs"
+SKY_TURNING_METRIC = "sky/Turning/gpuMs"
+SKY_STATIC_PASSES = ("SkyLuts", "SkyIbl", "Sky")
+SKY_TURNING_PASSES = ("SkyLuts", "SkyIbl", "ProbeRelight", "Sky")
+SKY_PROBE_COUNTS = (8, 4, 8)
 DEVICE_PROBE_TIMEOUT_SECONDS = 120.0
 CALL_TIMEOUT_SECONDS = 120.0
 STEP_TIMEOUT_SECONDS = 600.0
@@ -406,6 +430,51 @@ class Capture:
         self.metrics.append(metric)
         self.console.print(f"  {MIRROR_METRIC}: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
 
+    def sky_cost(self, client: Any) -> None:
+        """sky/Static/gpuMs and sky/Turning/gpuMs (module docstring); an engine error, a bake that is not relightable, a
+        view without GPU times, a still sky whose light was regenerated or a turning one whose light was not regenerated
+        with its volume relit makes the metric a warning."""
+        both = f"{SKY_STATIC_METRIC} and {SKY_TURNING_METRIC} not captured"
+        try:
+            self.call(client, "script.write", {"path": SKY_TURNER, "source": SKY_TURNER_SOURCE})
+            self.call(client, "scene.new", {"path": SKY_SCENE, "template": "Empty", "discardChanges": True})
+            self.call(client, "edit.batch", {"label": "Perf: sky", "ops": sky_cove_ops()}, timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            baked = self.call(client, "lighting.bake", {}, timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            volumes = baked.get("irradianceVolumes", []) if isinstance(baked, dict) else []
+            if len(volumes) != 1 or not volumes[0].get("relightable"):
+                self.warnings.append(f"sky: the cove's IrradianceVolume did not bake relightable; {both}")
+                return
+            still, still_view = self.play_samples(client, SKY_STATIC_PASSES)
+            # The scene stays open with its Sun's turner added, unsaved, as the fog's cost leaves its scene.
+            self.call(client, "entity.update",
+                      {"entity": "/Sun", "components": {"Script": {"Scripts": [{"Script": SKY_TURNER}]}}})
+            turning, turning_view = self.play_samples(client, SKY_TURNING_PASSES)
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"sky: {detail}; {both}")
+            return
+        if still_view.get("skyUpdates", 0) != 0:
+            self.warnings.append(f"{SKY_STATIC_METRIC}: the still sky's light was regenerated; not captured")
+        else:
+            self.sky_metric(SKY_STATIC_METRIC, still)
+        if turning_view.get("skyUpdates", 0) != 1 or turning_view.get("relitIrradianceVolumes", 0) != 1:
+            self.warnings.append(f"{SKY_TURNING_METRIC}: the turning sky's light was not regenerated with its volume "
+                                 f"relit; not captured")
+        else:
+            self.sky_metric(SKY_TURNING_METRIC, turning)
+
+    def sky_metric(self, name: str, samples: list[float]) -> None:
+        """The sky's metric `name` from `samples`; a warning without any."""
+        if not samples:
+            self.warnings.append(f"{name}: the game view reported no GPU times; not captured")
+            return
+        metric = perf.summarize(name, "ms", samples)
+        self.metrics.append(metric)
+        self.console.print(f"  {name}: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
+
     def set_glossy_tiles(self, client: Any, glossy: int) -> None:
         """Gives the floor's first `glossy` tiles (in ssr_tile_names' order) the glossy material and the rest the
         rough."""
@@ -591,6 +660,42 @@ def mirror_room_ops() -> list[dict[str, Any]]:
     return ops
 
 
+def sky_cove_ops() -> list[dict[str, Any]]:
+    """edit.batch ops of the sky's cove: a perspective camera at (0, 2, 9) looking a little above the horizon, so the
+    sky fills about half the view, a 40 m ground with 8 props, a shadowed Sun 40 degrees up and a Moon light, a Sky
+    naming them with a cloud layer (Clouds 0.35), automatic exposure, and a 16 x 4 x 16 m IrradianceVolume of 8 x 4 x 8
+    probes over the props."""
+    ops: list[dict[str, Any]] = [
+        {"method": "entity.create", "params": {"name": "Rendering", "components": {
+            "PostProcess": {"ExposureMode": "Auto", "SsaoEnabled": False}}}},
+        {"method": "entity.create", "params": {"name": "Camera", "components": {
+            "Transform": {"Translation": [0, 2, 9], "EulerAngles": [4, 0, 0]},
+            "Camera": {"Primary": True, "Projection": "Perspective", "VerticalFov": 60, "Clear": "Skybox"}}}},
+        {"method": "entity.create", "params": {"name": "Sun", "components": {
+            "Transform": {"EulerAngles": [-40, -30, 0]},
+            "DirectionalLight": {"Intensity": 4, "LightAngle": 0.53, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Moon", "components": {
+            "Transform": {"EulerAngles": [-35, 150, 0]},
+            "DirectionalLight": {"Color": [0.75, 0.82, 1], "Intensity": 0.02, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Sky", "components": {
+            "Sky": {"Sun": "/Sun", "Moon": "/Moon", "Clouds": 0.35}}}},
+        {"method": "entity.create", "params": {"name": "Ground", "components": {
+            "Transform": {"Scale": [40, 1, 40]}, "MeshRenderer": {"Mesh": "engine://Meshes/Plane"}}}},
+        {"method": "entity.create", "params": {"name": "Volume", "components": {
+            "Transform": {"Translation": [0, 2, 0]},
+            "IrradianceVolume": {"Size": [16, 4, 16], "ProbeCountX": SKY_PROBE_COUNTS[0],
+                                 "ProbeCountY": SKY_PROBE_COUNTS[1], "ProbeCountZ": SKY_PROBE_COUNTS[2]}}}},
+    ]
+    for index in range(8):
+        row, column = divmod(index, 4)
+        mesh = "engine://Meshes/Sphere" if index % 2 else BUILTIN_CUBE_MESH
+        ops.append({"method": "entity.create", "params": {"name": f"Prop{index}", "components": {
+            "Transform": {"Translation": [-4.5 + column * 3.0, 0.5, -3.0 + row * 3.0],
+                          "EulerAngles": [0, index * 20.0, 0]},
+            "MeshRenderer": {"Mesh": mesh}}}})
+    return ops
+
+
 def run_editor(capture: Capture, editor: Path, project_file: Path, renderer: str, user_data: Path, work: Any,
                extra_arguments: tuple[str, ...] = ()) -> None:
     """Starts a headless editor with `renderer` (and `extra_arguments`) on `project_file`, runs `work(client, pid)`
@@ -677,6 +782,7 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
                     capture.fog_cost(client)
                     capture.ssr_cost(client)
                     capture.mirror_cost(client)
+                    capture.sky_cost(client)
 
                 run_editor(capture, editor, project_file, renderer, root / "LookUserData", look,
                            ("--headless-game-view",))

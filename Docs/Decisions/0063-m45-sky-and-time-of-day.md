@@ -270,12 +270,13 @@ Phase 8's reservation ledger, committed in `Docs/Decisions/0060-skerries-engine-
   - the end of `RecordAmbientStage` (`:2325`);
   - `RecordForwardStage`'s sky block (`:2447-2460`);
   - `SceneRendererReflections.cpp`'s slot fog (`:251`) and mirror sky (`:440-449`);
-  - `Private/SceneRendererState.h`'s sky members beside `DrawsSkybox` (`:404`, `:428-429`).
+  - `Private/SceneRendererState.h`'s sky members beside `DrawsSkybox` (`:404`, `:428-429`);
+  - amended on main (`70c4b7e8`, 2026-11-24, the W45.3 review's finding 4): the generation-change block (`:1336-1340`, the sky's keys and the probe copies, after M29's shadow-cache clear) and the `RenderStats` fill lines after M42's `PlanarReflectionEntities` (`:1475`; M47's follow).
 - **M45's for the phase, with the others' regions in train order:**
   - `Scene/RenderAnnotations.cpp`: M45's region is the illumination block (`:160-173`); M43's mesh loop (`:175-193`) lands first, M44's vehicle call goes after `:135`, and M47's outline after M45's region;
   - `Renderer/RenderPassDeclaration.h` (frozen): `SkyLighting` after `LightClusters` (`:189`), `Sky` directly after `Skybox` (`:204`), and the comment; M47's `Water` follows `Sky`, and its `Underwater` goes first in HdrPost;
   - `Renderer/ProbeCapture.{h,cpp}` (frozen header): M43's static set in captures (`MakeCaptureSnapshot`, `:282-319`) lands first; M45 adds `MakeRelightCaptureSnapshot` after it and the visibility read-back; M47 clears `Waters` after the planar clear (`:317`);
-  - `Renderer/SceneRenderer.h`: `GetSceneDepthTexture` beside `:427`.
+  - `Renderer/SceneRenderer.h`: `GetSceneDepthTexture` beside `:427`, and `GetSkyRadianceTotals` after it (amended on main, `70c4b7e8`, the W45.3 review's finding 4).
 - **M47's Water, which follows the sky:**
   - `RenderPassDeclaration.h`: M47's `Water` after `Sky` (above), since M47 lands after M45;
   - `SceneRenderer.cpp`: M47's water record follows M45's sky block;
@@ -489,7 +490,7 @@ W45.3 relights the irradiance volumes by the sky: decision 3's "Relit probes" ex
 - **The view** (`Private/ProbeShading`, `SceneRendererSky.cpp`): `PrepareProbeShading(..., relight)` takes `frame.Sky`; with it each kept volume brings its relight block (`ProbeShadingInputs::Relights`) and each reflection probe its entry (the smallest relightable volume whose box holds its centre, its probe nearest the centre in grid coordinates, rounded and clamped). The view's `IrradianceProbes` copy is UAV-capable. Row `ProbeRelight` (`RecordProbeRelight`, after `SkyIbl`): each relightable volume relit when the sky's light was regenerated (`SkyUpdates` 1), its `Intensity` changed (`ProbeViewResources::RelitIntensity`) or the copy holds the bakes (`HoldsRelight` false: copied again, after a reload too, or never relit); then, every frame the view has a reflection probe, the scales and `RecordSkyResultCopies` into `ProbeConstants`; recorded only when it runs. A copy that holds a relight no sky asks for (the Sky gone) takes its bakes again. `RenderStats::RelitIrradianceVolumes`: the volumes the render relit.
 - **The bake** (`LightingBake.{h,cpp}`): under an enabled Sky each volume's probe is a relight capture of `MakeRelightCaptureSnapshot`'s snapshot (made once per bake): `Local` its `ProjectCubeToIrradianceSH9`, `Transfer` its `ProjectCubeToSkyTransfer`, `SH9` = `RelightIrradianceSH9` at the bake's sky; reflection probes bake as before. `LightingBakeEntry::Relightable`; `lighting.bake`'s `LightingBakeProbe` appends `relightable` (M26's frozen wire format, decision 3's reviewed change; described; `test_lighting.py` checks it false without a Sky, W45.4's `test_sky.py` true under one).
 - **`PROBE_NOT_RELIGHTABLE`** (`Scene/SkyValidation.h`, the third of `SkyDiagnosticCodes`; both tables after `SKY_ENVIRONMENT_IGNORED`): `FindProbeSceneIssues` (`Scene/ProbeValidation.cpp`) reports, in a scene with an effectively enabled Sky, a volume whose data loads without a block and a reflection probe whose data loads and whose centre (`TransformSystem::ComputeWorldMatrix`) lies in no relightable volume's box (inclusive), each on `Data` with the bake as the hint; a probe that is not baked is `PROBE_NOT_BAKED` alone. The fixture (`MakeValidationFixtures.py`: a Sky and a volume whose data is a version 1 `.irradiance`), `validation-codes.md`'s row and §13.7's sentence.
-- **The golden** (`GoldenSky.jsonl`, after `SkyDay.scene`; two materials, `Plaster` and `Chrome`): `SkyProbes.scene`, a room of closed boxes (floor, ceiling, walls) with a window in its west wall and a cave mouth in its back wall, opening onto sand, a warm point lamp, a chrome ball, an `IrradianceVolume` (4 × 3 × 4 over the room) and a box-projected `ReflectionProbe`, under a `Sky` whose Sun stands 60° up in the west and whose Moon 40° up in the east, with automatic exposure; `lighting.bake` bakes it once into `Assets/Lighting/Scenes/GoldenSky/SkyProbes/`. `Golden: SkyProbes` (`SkyGoldenTests.cpp`): two 320 × 180 tiles, noon (the sun through the window) and midnight (the sun 40° down), the lights turned and driven in the snapshot as `SkyDay`'s, rendered twice to the same bytes. Closed boxes, not planes: a plane's back face draws nothing, so a probe would see the sky through a single-sided ceiling.
+- **The golden** (`GoldenSky.jsonl`, after `SkyDay.scene`; two materials, `Plaster` and `Chrome`): `SkyProbes.scene`, a room of closed boxes (floor, ceiling, walls) with a window in its west wall and a cave mouth in its back wall, opening onto sand, a warm point lamp, a chrome ball, an `IrradianceVolume` (4 × 3 × 4 over the room) and a box-projected `ReflectionProbe`, under a `Sky` whose Sun stands 60° up in the west and whose Moon 40° up in the east, with automatic exposure; `lighting.bake` bakes it once into `Assets/Lighting/Scenes/GoldenSky/SkyProbes/`. `Golden: SkyProbes` (`SkyGoldenTests.cpp`): two 320 × 180 tiles, noon (the sun through the window) and midnight (the sun 40° down), the lights turned and driven in the snapshot as `SkyDay`'s, rendered twice to the same bytes. **Corrected by the W45.3 review's finding 1** (see "After the lead's review" below): the shell as first built (0.2 m single-sided slabs, the volume's faces in their middle) put 44 of the 48 probes inside the slabs, where a probe sees through the slab's culled back faces, closed box or plane (this record first said closed boxes avoided it: they do not).
 - **Tests:** `IrradianceVolumeDataTests.cpp` ("IrradianceVolumeData: a relightable payload round-trips, a version 1 source still reads, and a volume without a relight block writes version 1"; the existing cases' layout lines, the version refused now 3 and 0, the block's refusals, the fuzz seed); `IrradianceVolumeImporterTests.cpp` (version 3 refused; the case's name says versions 1 and 2); `ProbeCaptureTests.cpp` ("ProbeCapture: an open probe's sky transfer is the identity and a closed one's is zero"; "ProbeCapture: a relight capture reads where each face sees the sky, and the sky's totals", gpu); `ProbeRelightTests.cpp` ("ProbeRelight: the transfer's upper triangle, the sky's totals and the reflection scale follow their rules", "ProbeRelight: an open probe relights to the sky's irradiance and a closed one to its local light", and gpu "ProbeRelight: the GPU relight matches its CPU reference", "ProbeRelight: a cave darkens at night and lights at noon with no bake between", "ProbeRelight: a reflection probe inside a relit volume dims with it"); `LightingBakeTests.cpp` ("LightingBake: a volume baked under a Sky is relightable, bakes byte-identically twice, and relights to its bake at the bake's sky", gpu); `ProbeValidationTests.cpp` ("ProbeValidation: a volume without a relight block under a Sky is reported"); the count and order lines (`ProjectValidatorTests.cpp`, 88 pipelines); `Golden: SkyProbes`.
 - **Documents:** Architecture §6.8 (format 2) and the importer's row, §13.7, §15.4 and §15.5; the header comments of `IrradianceVolumeData.h`, `ProbeCapture.h`, `SkyLighting.h`, `SceneRenderer.h` (the pipeline count, the two accessors), `RenderPassDeclaration.h`, `Private/ProbeShading.h`, `GpuResourceCache.h`, `LightingBake.h` and `LightingMethods.h`; game-debugging's `validation-codes.md`; the generated `Validation.md`, `Automation.md`, `Methods.json` and `catalog.json`. W45.4 writes §8.6's relit probes and the rest of decision 3's list.
 - **`Golden: SkyDay` changed** (W45.2's own golden, not one of main's 56): the review's nit 12 hides the stars behind the moon's disc, which the dawn and dusk tiles still showed through it: 6 pixels at the moon, at most 9/255; `SkyOvercast` is byte-identical.
@@ -505,12 +506,121 @@ W45.3 relights the irradiance volumes by the sky: decision 3's "Relit probes" ex
   - automation, Release: `test_two_bakes_write_byte_identical_probe_files` (`relightable` false without a Sky) passed.
   - `Lint.py`: 5 Python line-length findings, fixed, then its Python step passed; `Format.py --check`, `GenerateDocs.py --config Debug` then `--check`, `MakeValidationFixtures.py --check`: passed.
 
+### After the lead's review
+
+The lead's review of W45.3 (`bin/Reviews/P8/M45-W3-review.md`: 0 blocker, 0 major, 4 minor, 2 nit; the three departures accepted) is fixed with W45.4's checkpoint, before FeatureTest's regeneration:
+- **1, `SkyProbes` saw the sky through its shell** (the lead's option A; the review's inset, `Size` [5.6, 2.6, 5.6], would have left the room's walls, floor and ceiling outside the volume, lit by the open sky through the Environment's fallback, since `Common/Probes.slang` weighs a point outside a box 0):
+  - **The scene:** `SkyProbes.scene`'s shell is 0.6 m thick and `DoubleSided` (`Plaster.material`), and the volume (`Size` [6.6, 3.6, 6.6] about (0, 1.5, 0), still 4 × 3 × 4) runs its faces through the shell's middle, so its 44 outer probes sit 0.3 m inside the slabs and see their inside. The window is widened to 0.8 to 2.6 m, so the noon sun reaches the floor through the thicker wall, and a plaster pedestal near the room's middle takes the interior probes' light.
+  - **The bake** (parsed with `w45.4/parse_irradiance.py`, `logs/parse-skyprobes-2.log`): the 44 shell probes' sky transfer T00 is 0.00000 (their local terms at most 0.0047, the lamp on the shell's inside), the 4 interior probes' 0.0066, 0.0087, 0.0136 and 0.0157 (the sky through the window and the mouth); before, the shell probes' T00 reached 0.71.
+  - **The bands.** The first candidate showed faint horizontal bands (3 to 5 of 255) on the noon tile's dark back wall and the window's jamb. The lead's diagnostic (`w45.4/diag.py`, a temporary golden-suite case never committed, its variants under manual exposure) traced them:
+    - They go when the sun's colour or its shadows go, and stay without the reflection probe, with its box shrunk to [5.9, 2.9, 5.9], without the moon, and with the Sky disabled, so they predate M45.
+    - **The cause:** the flat normal texture's 128/255 decodes to 0.0039, which tilts every map-less surface's normal by about 0.3 degrees. The sun at azimuth -90 lay exactly in the plane of the back wall and the jamb, which so took a little of its light, banded by the cascade shadow's acne at that grazing angle.
+    - **The same diagnostic** showed the noon moon, above the horizon and unshadowed (only the cascade owner casts, Architecture §8.7), lighting the west wall through the shell.
+    - **The scene and the tiles now keep both lights off the walls' planes:** the noon sun at azimuth -75 with the moon below the horizon (-20 degrees), and the midnight moon at azimuth 75; the scene's own Sun and Moon, which the bake takes, are [-60, -75, 0] and [20, 75, 0]. Two Backlog §6 rows (the flat normal's bias, with its engine-side fix to decide; the unshadowed second directional light) and the look skill's "Light angles" record it.
+  - **`Golden: SkyProbes`** updated (`golden-update-2.log`) and reviewed by eye: at noon the room is lit through the window (the sun's patch on the floor, the bright openings) and by its lamp, its walls dark, with no bluish sky through the shell; at midnight the lamp alone, both openings dark. The noon tile's back wall is smooth (its row-banding measure 45.9 against the midnight tile's 45.4, the image's own noise; 101 before).
+  - **The cost:** the walls' darkening is the known cost of probes in walls (they interpolate mostly from the dark shell layer).
+  - **Records:** the look skill's recipe and a Backlog §6 row (M26's grid under a Sky; the engine-side fix to decide); this record's sentence on closed boxes is corrected.
+- **2, the relight rules' cases** (`ProbeRelightTests.cpp`, gpu):
+  - "ProbeRelight: a relit volume follows the Sky's Intensity and takes its bake again without the Sky": half the `Intensity` gives `SkyUpdates` 0, `RelitIrradianceVolumes` 1 and the quad's light from the sky halved; with the Sky disabled, the copy takes the bake again, equal to a Sky-less render of the volume baked without a block.
+  - "ProbeRelight: a reflection probe inside a relit volume dims with it" now bakes distinct probes (only probe 3, at (1, 1, 0), sees the sky). It checks a centre nearest that probe, one nearest a closed probe (no dimming), and the smaller of two nested relightable volumes.
+  - **Tolerances:** both cases compare with relative tolerances (`scale(0)`), since doctest's default scale of 1 accepts any difference below the epsilon at these magnitudes (the first proof found it).
+- **3, a reflection's relight no longer depends on the camera.** `PrepareProbeShading` collects the reflection probes first. In a view a Sky lights, it keeps a relightable volume the view culls when the volume's box holds a kept reflection probe's centre: after the view's own volumes, and only while a slot is free (not counted as dropped). No surface the camera sees lies in its box. `ProbeShading.h` and Architecture §8.6 say so. Case: "ProbeRelight: a reflection probe keeps its relit scale while the volume around its centre is out of view".
+- **4, the ledger:** amended on main by the lead (`70c4b7e8`); decision 8 cites it.
+- **5:** the golden-images skill names `SkyProbes`.
+- **6:** `LightingBakeTests.cpp`'s comment is back above its own case.
+- **The proofs.** Each check ran on a Release build of Tests with its rule reverted (`w45.4/proof.py`), at Vulkan 1.4, then the rules were restored:
+  - `gpu-proof-1.log`, without the `RelitIntensity` clause and the off-view volume: the Intensity case failed on its stats, and the off-view case failed (night over noon 1 against 0.411, nothing relit).
+  - `gpu-proof-2.log`, without `restoreBakes` and with probe 0 for every reflection: the Intensity case failed (0.0415 without the Sky against the bake's 0.0048), and the reflection case failed (night over noon 1 against 0.411).
+  - `gpu-proof-3.log`, the first set again after the tolerance fix: the Intensity case also failed on its image (0.0782 at half `Intensity`, noon's value).
+
+## The W45.4 record
+
+W45.4 adds the stats, FeatureTest's coverage in every mode, `test_sky.py`, Perf.py's two metrics and the documents; its checkpoint also carries the W45.3 review's fixes (the W45.3 record's "After the lead's review").
+
+- **Stats** (decision 3's "Stats"):
+  - **`stats.get`:** the view summary appends `skyUpdates` and `relitIrradianceVolumes` after M42's fields (after M43's at the merge; `StatsViewSummary`, `MakeStatsViewSummary`), both described.
+  - **The Stats panel:** a "Sky" row ("n updates / n relit volumes") after the planar reflections' (after M43's row at the merge).
+  - **The readout:** `PerformanceStats::SkyUpdates` after M42's members (after M43's five at the merge): `ScriptPerformanceStats.h`, `AddRenderStatistics`, `Application.GetStats`' field, its alias and its description.
+  - **Comments:** `RenderStats.h`'s and `SkyLighting.h`'s comments now give the key as the W45.2 review's finding 2 left it.
+  - **Tests:** "StatsGet: renderer summaries preserve exact frame identifiers and hide unavailable samples" and "SessionStatistics: AddRenderStatistics sums the view's passes and copies its light and skin counters" carry the fields, and "PlaySession: Application.GetStats reads the host's frame statistics and the session's counters outside the fixed step only" reads `SkyUpdates` through Luau.
+- **FeatureTest** (IdSeeds 4201 and 4202, in `Scaffolds.json` before `GoldenSky.jsonl`'s 4203; the suite in `Suites.jsonl`'s `Testing.Suites` after `PlanarReflections`'; the replay through the `Assets/Tests/Replays/*.replay` glob):
+  - **`Sky.jsonl`** makes `Assets/Scenes/Sky.scene`:
+    - a `Sky` with every field leaf off its default: `Sun` `/Sun`, `Moon` `/Moon`, `Intensity` 1.25, `DriveLights` false, `Haze` 1.5, `Overcast` 0.2, `GroundAlbedo` (0.25, 0.3, 0.2), `SunDisc` 2, `MoonSize` 1.5, `Stars` 3, `Latitude` 60, `NorthAngle` 30, `Clouds` 0.4, `CloudSpeed` (3, -2);
+    - its Sun (a shadow-casting `DirectionalLight`, intensity 4, `LightAngle` 0.53) and its Moon (a dim bluish one);
+    - no Environment (no finding), a camera that clears to the sky, automatic exposure, a ground and a hut;
+    - `Assets/Scripts/Sky/SunTurner.luau` on the Sun.
+
+    It also writes the `Sky` suite (`Assets/Tests/Sky/Sky.test.luau`), which reaches the Sky through the `entity.Sky` shortcut (gate 2's `api:Entity.Sky/read`). Its three cases:
+    - read every field back;
+    - write every field through the proxy (gate 4), with `Haze`, `Latitude` and `CloudSpeed` refused out of range;
+    - turn the sun from a task, 1.5 degrees a tick for 24 ticks with the clouds stilled, checking the readout's `SkyUpdates`: 1 while it turns where `RenderAvailable` holds (the exported Release and Dist runs), and 0 once it stands still, in every mode.
+  - **`SkyReplay.jsonl`** records `Assets/Tests/Replays/Sky.replay` on `Sky.scene`: 90 ticks, `F` (the `Fire` action) held from tick 10 to 70, with three expectations on the `SunTurner`'s `Turned` (0 at tick 5, 25 to 31 degrees at tick 40, 58 to 61 at tick 90), so it fails without its input.
+    - **Choice:** the `SunTurner` turns the Sun a degree a tick only while `Fire` is held (decision 3's "a held action quickens the sun's turn"). Without input the sun stands still, which the suite's still check needs.
+    - **No recording suite** is bound: none is needed, and the ledger's amended Suites row (`d49d221f`) stays unused.
+  - **Gates:**
+    - in each mode: 1 (`Sky` with every field leaf non-default, in a simulated scene), 2 (`api:Entity.Sky/read`) and 4 (every field read and written through the proxy);
+    - 6: W45.1's and W45.3's three fixtures;
+    - 7: the `stats.get` fields and the readout member, described;
+    - 1b, 3, 5, 8 and 9: nothing new.
+- **`Tests/Automation/test_sky.py`:**
+  - "the Sky changes through entity updates and Scene-view screenshots follow the sun" (a rendering editor):
+    - the Sky's values read back by `entity.get`;
+    - `Haze`, `CloudSpeed` and a second Sky refused;
+    - screenshots that differ between dawn and noon and with the Sky's own fields, and that come back byte for byte to the Sky-less image once the Sky is removed.
+  - "a relightable bake and the sky updates while a script turns the sun" (a rendering editor with `--headless-game-view`):
+    - `lighting.bake`'s `relightable` true under the Sky, and no `PROBE_NOT_RELIGHTABLE` after it;
+    - then the game view's `skyUpdates` and `relitIrradianceVolumes`: 0 while the sky stands still; 1 in a playing frame while an `OnUpdate` script turns the sun every frame, with the `ProbeRelight` row; and 0 again after `play.stop`;
+    - a bounded wait for each state, since the game view renders at the editor's frames.
+  - "validate reports an Environment beside a Sky" (`--renderer none`): `SKY_ENVIRONMENT_IGNORED`, a Warning, gone without the Sky.
+- **Perf** (`Scripts/Perf.py`'s `look` part, `sky_cost`; `Scripts/Lib/perf.py`'s `BUDGETS` +2; `test_perf.py`'s two cases):
+  - **The scene:** a generated `Assets/Perf/Sky.scene`, a cove of 8 props on a 40 m ground under a `Sky` naming a shadowed Sun 40 degrees up and a Moon light, with `Clouds` 0.35, automatic exposure and the camera showing the horizon, and a 16 × 4 × 16 m `IrradianceVolume` of 8 × 4 × 8 probes baked by `lighting.bake` at the part's start.
+  - **`sky/Static/gpuMs`** sums the `SkyLuts`, `SkyIbl` and `Sky` rows over the look part's 16 single rendered ticks, captured only when the last frame did not regenerate the light.
+  - **`sky/Turning/gpuMs`** sums those and `ProbeRelight`, with `Assets/Perf/SkySunTurner.luau` turning the Sun a quarter degree a tick, captured only when the last frame regenerated the light and relit the volume.
+  - **A bake that is not relightable** captures neither.
+  - **The numbers:** `Perf.py --config Release --only look` on `nvidia-62x` (`logs/perf-2.log`, `logs/Perf.json`; 16 samples each, warning-only): `sky/Static/gpuMs` median 0.075 ms (p95 0.099) against 0.3, and `sky/Turning/gpuMs` median 0.362 ms (p95 0.549) against 0.6, both within budget, so decision 4.8's fallbacks (fewer samples, a 128² cube, spreading over frames) are not needed.
+- **Documents:**
+  - **Architecture:**
+    - §8.2: `RenderSky` and the driving;
+    - §8.3: the key, the `ProbeRelight` row, the stats and the reload;
+    - §8.4: `CSProbeRelight`'s bindings;
+    - §8.6: the third copy, and "Relit probes": the bake, the departure on the bake's sky, the relight, the reflection scale, the off-view volume, all inside ADR 0028 decision 2's cut;
+    - §8.13;
+    - §8.14: the relight block in place 3, and the view's copy;
+    - §13.7: `skyUpdates` and `relitIrradianceVolumes`;
+    - §15.5: `Sky.scene` and `Sky.replay`.
+  - **The Roadmap:** the `test_sky.py` acceptance.
+  - **`Docs/Backlog.md`:**
+    - §2: seven rows (decision 1's "Out");
+    - §6: M45's group (decision 1's "Accepted at landing", the W45.2 review's two included, and M26's grid under a Sky) and the two rows the `SkyProbes` diagnostic found (the flat normal's bias; the unshadowed second directional light);
+    - the probe row, amended for relit volumes.
+  - **The skills:**
+    - game-building's `look`: the day recipe, where the probes sit, light angles;
+    - its `SKILL.md` index;
+    - game-debugging: the stats, the codes and the fields' symptoms;
+    - golden-images: `SkyProbes`;
+    - luau-gameplay's readout.
+  - **The generated references:** `Methods.json`, `ScriptAPI.md` and `Engine.d.luau`; `Automation.md` and `catalog.json` hold no `stats.get` field and stay as they were.
+- **Runs** (2026-11-25, logs in `bin/Reviews/P8/scratch/M45-builder/w45.4/logs/`):
+  - **Builds:** Debug and Release, 0 warnings (`build-debug-2.log`, `build-debug-3.log`, `build-release-6.log`).
+  - **unit, Debug, filtered** (`StatsGet:*`, `SessionStatistics:*`, the two readout cases, `DocExamples*`): 20 passed (`unit-1.log`).
+  - **unit, Debug, unfiltered** (`--parallel 4`, after the shared renderer change): 5,397 passed, with the 48 child-process targets skipped (`unit-full.log`).
+  - **The proofs** (Release builds of Tests with the rules reverted): `gpu-proof-1.log`, `gpu-proof-2.log` and `gpu-proof-3.log`, as the W45.3 record's "After the lead's review" gives them.
+  - **The `SkyProbes` diagnostic:** `golden-diag.log`, `golden-diag-2.log` and `diag/`, from a temporary case, removed before the builds that followed.
+  - **gpu and golden, Release** (`final-2.log`):
+    - the changed and nearby gpu cases (`ProbeRelight*`, the probe shading cases, the Sky bake, `SkyLighting*`, `SkyPass*`): 20 of 20 at Vulkan 1.4 and 1.3;
+    - 7 goldens matched: the three sky goldens (`SkyProbes`, the reviewed candidate of `golden-update-2.log`), and `Probes`, `PlanarReflections`, `Ssr` and `IblOnly`, each comparison as at main's phase-7 gate (largest differences 0/255, `IblOnly` 1/255).
+  - **`Scaffold.py` and `--check`:** passed (`scaffold-2.log`, `scaffold-check-2.log`).
+  - **automation, Release** (`test_sky`, `test_lighting`, `test_perf`, `--require-gpu`): 18 passed (`automation-2.log`).
+  - **`Perf.py --config Release --only look`:** passed, with the numbers above (`perf-2.log`).
+  - **feature, Debug:** passed, the six editor-mode gates evaluated and green, 468 of 469 rows passed and one quit as expected, the `Sky` suite's three cases and `Sky.replay` among them, and the project unchanged (`feature-2.log`, `Feature-Debug.json`). The exported Release and Dist runs, where the suite's `SkyUpdates` 1 is checked, are the gate's export suite.
+  - **Static checks:** `Lint.py` (0 findings, `lint-1.log`), `Format.py --check` (`format-2.log`), `GenerateDocs.py --config Debug` then `--check` (`gendocs-1.log`, `gendocs-check-1.log`) and `MakeValidationFixtures.py --check` (`fixtures-check-1.log`) all passed.
+
 ## Before milestone completion
 
 - [x] W45.1 committed, the copy's case passing (or the fallback recorded); [x] the lead's review pass taken and every finding fixed.
 - [x] W45.2 committed; [x] the lead's review pass taken and every finding fixed.
-- [x] W45.3 committed; [ ] the lead's review pass taken and every finding fixed.
-- [ ] W45.4 committed; [ ] the lead's review pass taken and every finding fixed.
+- [x] W45.3 committed; [x] the lead's review pass taken and every finding fixed.
+- [x] W45.4 committed; [ ] the lead's review pass taken and every finding fixed.
 - [ ] The landing: phase 8's batch in train order, third after M43 and M44, M45's hunks adapted in M43's files, M47's `Water` after `Sky`, FeatureTest regenerated, the gate `CI.py --require-clang-cl` green.
 - [ ] Architecture, the Roadmap, the skills, `Docs/Backlog.md` §2 and §6, and the generated references describe what landed.
 - [ ] S03's "How the game will check it" met in the goldens, the gpu cases, FeatureTest and Perf.py, and reported to the Skerries session through the product owner, with the corrections above.

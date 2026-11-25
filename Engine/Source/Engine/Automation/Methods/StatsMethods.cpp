@@ -106,6 +106,8 @@ namespace Engine {
 		result.CulledPlanarReflections = stats.CulledPlanarReflections;
 		for (const UUID& entity : stats.PlanarReflectionEntities)
 			result.PlanarReflectionEntities.push_back(entity.ToString());
+		result.SkyUpdates = stats.SkyUpdates;
+		result.RelitIrradianceVolumes = stats.RelitIrradianceVolumes;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -189,7 +191,16 @@ namespace Engine {
 				"Planar reflections the frame did not consider: out of view, seen from behind their reflecting side, or in a view that draws "
 				"none (a debug view or the wireframe); they cost nothing.")
 			.Field("planarReflectionEntities", &StatsViewSummary::PlanarReflectionEntities,
-				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.");
+				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.")
+			.Field("skyUpdates", &StatsViewSummary::SkyUpdates,
+				"1 when the frame regenerated its Sky's image-based light (its cube, specular prefilter and irradiance) because what it is "
+				"made of changed: the atmosphere (Haze, Overcast, GroundAlbedo), the Sun light's direction, colour or intensity, the Moon "
+				"light's, or the cloud layer's coverage or its drift past a 1 s step; else 0, and 0 without a Sky. Its cost is in the pass "
+				"row SkyIbl.")
+			.Field("relitIrradianceVolumes", &StatsViewSummary::RelitIrradianceVolumes,
+				"The irradiance volumes baked under a Sky (relightable) that the frame relit by its sky, because the sky's image-based "
+				"light was regenerated, its Intensity changed or the volumes' data was copied to the view again; 0 otherwise. Its cost is in "
+				"the pass row ProbeRelight.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

@@ -20,7 +20,7 @@
 	"EmissiveUVSet": "UV0",
 	"AlphaMode": "Opaque",
 	"AlphaCutoff": 0.5,
-	"DoubleSided": false,
+	"DoubleSided": true,
 	"UVScale": [1, 1],
 	"UVOffset": [0, 0]
 }

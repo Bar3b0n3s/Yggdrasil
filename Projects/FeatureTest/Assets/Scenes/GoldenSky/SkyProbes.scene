@@ -85,7 +85,7 @@
 			"Components": {
 				"Transform": {
 					"Translation": [0, 0, 0],
-					"Rotation": [-0.35355338, -0.61237246, -0.35355338, 0.61237246],
+					"Rotation": [-0.39667666, -0.52720284, -0.3043807, 0.6870642],
 					"Scale": [1, 1, 1]
 				},
 				"DirectionalLight": {
@@ -110,7 +110,7 @@
 			"Components": {
 				"Transform": {
 					"Translation": [0, 0, 0],
-					"Rotation": [-0.24184476, 0.66446304, 0.24184476, 0.66446304],
+					"Rotation": [0.13776436, 0.599513, -0.10571031, 0.78130054],
 					"Scale": [1, 1, 1]
 				},
 				"DirectionalLight": {
@@ -185,9 +185,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [0, -0.1, 0],
+					"Translation": [0, -0.3, 0],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [6.4, 0.2, 6.4]
+					"Scale": [7.2, 0.6, 7.2]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -206,9 +206,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [0, 3.1, 0],
+					"Translation": [0, 3.3, 0],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [6.4, 0.2, 6.4]
+					"Scale": [7.2, 0.6, 7.2]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -227,9 +227,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [0, 1.5, 3.1],
+					"Translation": [0, 1.5, 3.3],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [6.4, 3, 0.2]
+					"Scale": [7.2, 3, 0.6]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -248,9 +248,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [3.1, 1.5, 0],
+					"Translation": [3.3, 1.5, 0],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [0.2, 3, 6]
+					"Scale": [0.6, 3, 6]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -269,9 +269,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [-2, 1.5, -3.1],
+					"Translation": [-2.2, 1.5, -3.3],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [2.4, 3, 0.2]
+					"Scale": [2.8, 3, 0.6]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -290,9 +290,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [2, 1.5, -3.1],
+					"Translation": [2.2, 1.5, -3.3],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [2.4, 3, 0.2]
+					"Scale": [2.8, 3, 0.6]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -311,9 +311,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [0, 2.5, -3.1],
+					"Translation": [0, 2.5, -3.3],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [1.6, 1, 0.2]
+					"Scale": [1.6, 1, 0.6]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -332,9 +332,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [-3.1, 0.5, 0],
+					"Translation": [-3.3, 0.4, 0],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [0.2, 1, 6]
+					"Scale": [0.6, 0.8, 6]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -353,9 +353,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [-3.1, 2.6, 0],
+					"Translation": [-3.3, 2.8, 0],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [0.2, 0.8, 6]
+					"Scale": [0.6, 0.4, 6]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -374,9 +374,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [-3.1, 1.6, 1.75],
+					"Translation": [-3.3, 1.7, 1.75],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [0.2, 1.2, 2.5]
+					"Scale": [0.6, 1.8, 2.5]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -395,9 +395,9 @@
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [-3.1, 1.6, -1.75],
+					"Translation": [-3.3, 1.7, -1.75],
 					"Rotation": [0, 0, 0, 1],
-					"Scale": [0.2, 1.2, 2.5]
+					"Scale": [0.6, 1.8, 2.5]
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -452,6 +452,27 @@
 		},
 		{
 			"ID": "07153a848bb6cb7b",
+			"Name": "Pedestal",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.9, 0.7, -1.2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.7, 1.4, 0.7]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["43e3b6d11aed62f6"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a6ff3c973e360d5c",
 			"Name": "Volume",
 			"Parent": null,
 			"Active": true,
@@ -463,8 +484,8 @@
 					"Scale": [1, 1, 1]
 				},
 				"IrradianceVolume": {
-					"Data": "293501db2591957b",
-					"Size": [6.2, 3.2, 6.2],
+					"Data": "70a582b5b2da185a",
+					"Size": [6.6, 3.6, 6.6],
 					"ProbeCountX": 4,
 					"ProbeCountY": 3,
 					"ProbeCountZ": 4,
@@ -474,7 +495,7 @@
 			}
 		},
 		{
-			"ID": "a6ff3c973e360d5c",
+			"ID": "293501db2591957b",
 			"Name": "Reflection",
 			"Parent": null,
 			"Active": true,
@@ -486,7 +507,7 @@
 					"Scale": [1, 1, 1]
 				},
 				"ReflectionProbe": {
-					"Data": "70a582b5b2da185a",
+					"Data": "27d3be2af7420059",
 					"Size": [6, 3, 6],
 					"BoxProjection": true,
 					"Resolution": 128,

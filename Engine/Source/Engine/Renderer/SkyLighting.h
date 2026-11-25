@@ -69,9 +69,11 @@ namespace Engine {
 		bool operator==(const SkyLutKey&) const = default;
 	};
 
-	// The image-based light's key (decision 3): the view's SkyConstants with the camera's altitude, the live cloud offset and
-	// the fog cleared (the light is taken at sea level, with the clouds at their stepped offset, and the fog's colour is the
-	// finalize's every frame), and the clouds' offset at SkyCloudLightingStep. Equal keys give the same light.
+	// The image-based light's key (decision 3): the view's SkyConstants with what the update does not read cleared (the
+	// camera's altitude and the live cloud offset, since the light is taken at sea level with the clouds at their stepped
+	// offset; the fog and Intensity, which the finalize applies every frame; the discs, the stars and Overcast, whose Mie
+	// terms stay; and the moon's direction, fraction and flag while no Moon light lights it), and the clouds' offset at
+	// SkyCloudLightingStep while they cover anything. Equal keys give the same light.
 	struct SkyLightingKey
 	{
 		SkyConstants Constants{};

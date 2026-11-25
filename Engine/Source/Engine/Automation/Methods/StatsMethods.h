@@ -84,6 +84,10 @@ namespace Engine {
 		uint32_t DroppedPlanarReflections = 0;
 		uint32_t CulledPlanarReflections = 0;
 		std::vector<std::string> PlanarReflectionEntities{};
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: appended after M43's
+		// rows): RenderStats::SkyUpdates and RelitIrradianceVolumes.
+		uint32_t SkyUpdates = 0;
+		uint32_t RelitIrradianceVolumes = 0;
 	};
 
 	struct StatsGetResult

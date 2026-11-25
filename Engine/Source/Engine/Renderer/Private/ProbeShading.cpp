@@ -104,6 +104,16 @@ namespace Engine {
 			return IsOutsideView(Aabb{ .Min = -size * 0.5f, .Max = size * 0.5f }, world, camera);
 		}
 
+		// M45: the world point `point` in the local space of the box `box` of `size` about its origin, or nullopt when the box
+		// does not hold it (its faces hold it).
+		static std::optional<glm::vec3> FindPointInBox(const ProbeBox& box, const glm::vec3& size, const glm::vec3& point)
+		{
+			const glm::vec3 local = glm::vec3(box.WorldToLocal * glm::vec4(point, 1.0f));
+			if (glm::any(glm::greaterThan(glm::abs(local), size * 0.5f)))
+				return std::nullopt;
+			return local;
+		}
+
 		// M45: the relight entry of a reflection probe centred at `centre` among the view's sorted `volumes` (largest first, the
 		// first coefficient of each in `firsts`): the smallest relightable one whose box holds the centre, its probe nearest the
 		// centre in grid coordinates (rounded, clamped), that probe's constant term's element in the view's copy and its baked
@@ -116,11 +126,11 @@ namespace Engine {
 				const Candidate& volume = volumes[index];
 				if (volume.Relight == nullptr || volume.ConstantTerms == nullptr)
 					continue;
-				const glm::vec3 local = glm::vec3(volume.Box.WorldToLocal * glm::vec4(centre, 1.0f));
 				const glm::vec3 size = volume.Item->Size;
-				if (glm::any(glm::greaterThan(glm::abs(local), size * 0.5f)))
+				const std::optional<glm::vec3> local = FindPointInBox(volume.Box, size, centre);
+				if (!local.has_value())
 					continue;
-				const glm::vec3 grid = (local / size + 0.5f) * glm::vec3(volume.Counts - glm::uvec3(1));
+				const glm::vec3 grid = (*local / size + 0.5f) * glm::vec3(volume.Counts - glm::uvec3(1));
 				glm::uvec3 nearest(0);
 				for (glm::length_t axis = 0; axis < 3; ++axis)
 				{
@@ -162,30 +172,7 @@ namespace Engine {
 			if (!enabled)
 				return inputs;
 
-			std::vector<VolumeCandidate> volumes;
-			for (const IrradianceVolumeItem& item : snapshot.IrradianceVolumes)
-			{
-				const std::optional<ProbeBox> box = MakeProbeBox(item.World, item.Size);
-				if (!box.has_value() || IsProbeOutsideView(item.World, item.Size, camera))
-					continue;
-				if (volumes.size() == MaxViewIrradianceVolumes)
-				{
-					++inputs.DroppedVolumes;
-					continue;
-				}
-				const GpuIrradianceVolume* mirror = cache.GetIrradianceVolume(item.Data);
-				if (mirror == nullptr || mirror->Probes == nullptr)
-					continue;
-				const bool relit = relight && mirror->Relight != nullptr;
-				volumes.push_back({ .Item = &item,
-					.Box = *box,
-					.Probes = mirror->Probes,
-					.Id = { .Asset = item.Data, .Version = mirror->Version },
-					.Counts = glm::uvec3(mirror->CountX, mirror->CountY, mirror->CountZ),
-					.Relight = relit ? mirror->Relight : nvrhi::BufferHandle(),
-					.ConstantTerms = relit ? &mirror->ConstantTerms : nullptr });
-			}
-
+			// The reflection probes first: a relit reflection probe keeps the volume around its centre (below).
 			std::vector<ReflectionCandidate> reflections;
 			for (const ReflectionProbeItem& item : snapshot.ReflectionProbes)
 			{
@@ -212,6 +199,56 @@ namespace Engine {
 					}
 				}
 				reflections.push_back({ .Item = &item, .Box = *box, .Cube = mirror->Specular, .Id = { .Asset = item.Data, .Version = mirror->Version } });
+			}
+
+			std::vector<VolumeCandidate> volumes;
+			const auto addVolume = [&cache, &volumes, relight](const IrradianceVolumeItem& item, const ProbeBox& box, bool relitOnly)
+			{
+				const GpuIrradianceVolume* mirror = cache.GetIrradianceVolume(item.Data);
+				if (mirror == nullptr || mirror->Probes == nullptr)
+					return;
+				const bool relit = relight && mirror->Relight != nullptr;
+				if (relitOnly && !relit)
+					return;
+				volumes.push_back({ .Item = &item,
+					.Box = box,
+					.Probes = mirror->Probes,
+					.Id = { .Asset = item.Data, .Version = mirror->Version },
+					.Counts = glm::uvec3(mirror->CountX, mirror->CountY, mirror->CountZ),
+					.Relight = relit ? mirror->Relight : nvrhi::BufferHandle(),
+					.ConstantTerms = relit ? &mirror->ConstantTerms : nullptr });
+			};
+			// M45 (the W45.3 review's finding 3): with `relight`, a volume the view culls whose box holds a kept reflection probe's
+			// centre, so the reflection's relight does not depend on where the camera looks; kept after the view's own volumes,
+			// only while a slot is free and only when its data is relightable. No surface the camera sees lies in its box, so the
+			// view's own pixels do not change.
+			std::vector<std::pair<const IrradianceVolumeItem*, ProbeBox>> offView;
+			for (const IrradianceVolumeItem& item : snapshot.IrradianceVolumes)
+			{
+				const std::optional<ProbeBox> box = MakeProbeBox(item.World, item.Size);
+				if (!box.has_value())
+					continue;
+				if (IsProbeOutsideView(item.World, item.Size, camera))
+				{
+					if (relight && std::ranges::any_of(reflections, [&box, &item](const ReflectionCandidate& reflection)
+					{
+						return FindPointInBox(*box, item.Size, glm::vec3(reflection.Item->World[3])).has_value();
+					}))
+						offView.emplace_back(&item, *box);
+					continue;
+				}
+				if (volumes.size() == MaxViewIrradianceVolumes)
+				{
+					++inputs.DroppedVolumes;
+					continue;
+				}
+				addVolume(item, *box, false);
+			}
+			for (const auto& [item, box] : offView)
+			{
+				if (volumes.size() == MaxViewIrradianceVolumes)
+					break;
+				addVolume(*item, box, true);
 			}
 
 			SortLargestFirst(volumes);

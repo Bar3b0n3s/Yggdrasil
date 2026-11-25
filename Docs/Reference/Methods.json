@@ -30951,6 +30951,18 @@
 								"items": {
 									"type": "string"
 								}
+							},
+							"skyUpdates": {
+								"description": "1 when the frame regenerated its Sky's image-based light (its cube, specular prefilter and irradiance) because what it is made of changed: the atmosphere (Haze, Overcast, GroundAlbedo), the Sun light's direction, colour or intensity, the Moon light's, or the cloud layer's coverage or its drift past a 1 s step; else 0, and 0 without a Sky. Its cost is in the pass row SkyIbl.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"relitIrradianceVolumes": {
+								"description": "The irradiance volumes baked under a Sky (relightable) that the frame relit by its sky, because the sky's image-based light was regenerated, its Intensity changed or the volumes' data was copied to the view again; 0 otherwise. Its cost is in the pass row ProbeRelight.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false

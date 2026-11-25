@@ -597,6 +597,16 @@
 			]
 		},
 		{
+			"File": "Sky.jsonl",
+			"IdSeed": 4201,
+			"Renderer": "none"
+		},
+		{
+			"File": "SkyReplay.jsonl",
+			"IdSeed": 4202,
+			"Renderer": "none"
+		},
+		{
 			"File": "GoldenSky.jsonl",
 			"IdSeed": 4203,
 			"Renderer": "vulkan",

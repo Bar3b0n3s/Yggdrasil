@@ -675,32 +675,32 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/07153a848bb6cb7b.irradiance",
-			"XXH64": "7159462f393ba041",
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/293501db2591957b.hdr",
+			"XXH64": "d48f081e18f34445",
 			"Method": "lighting.bake",
 			"RequestId": 15,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/07153a848bb6cb7b.irradiance.meta",
-			"XXH64": "4ff849570bcbba6f",
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/293501db2591957b.hdr.meta",
+			"XXH64": "c961fe90a8f0b28b",
 			"Method": "lighting.bake",
 			"RequestId": 15,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/a6ff3c973e360d5c.hdr",
-			"XXH64": "dd2cea1ab6423db4",
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/a6ff3c973e360d5c.irradiance",
+			"XXH64": "12484efbc31e12c0",
 			"Method": "lighting.bake",
 			"RequestId": 15,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/a6ff3c973e360d5c.hdr.meta",
-			"XXH64": "23e5a436cdc8b5d1",
+			"Path": "Assets/Lighting/Scenes/GoldenSky/SkyProbes/a6ff3c973e360d5c.irradiance.meta",
+			"XXH64": "a9e0192baf96ca32",
 			"Method": "lighting.bake",
 			"RequestId": 15,
 			"Client": "batch",
@@ -2260,7 +2260,7 @@
 		},
 		{
 			"Path": "Assets/Materials/GoldenSky/Plaster.material",
-			"XXH64": "9f11f3da130928a9",
+			"XXH64": "199a6bf67a6e7cf5",
 			"Method": "asset.create",
 			"RequestId": 10,
 			"Client": "batch",
@@ -2701,6 +2701,38 @@
 		{
 			"Path": "Assets/Materials/PostProcessV2/Mirror.material.meta",
 			"XXH64": "88f199dc9b94bffd",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Sky/Ground.material",
+			"XXH64": "33f9302a4361cdca",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Sky/Ground.material.meta",
+			"XXH64": "9d00ee562f656c53",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Sky/Hut.material",
+			"XXH64": "2302b62b9b596d63",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Sky/Hut.material.meta",
+			"XXH64": "a1c8344a8702aedf",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
@@ -3892,7 +3924,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenSky/SkyProbes.scene",
-			"XXH64": "f4bf214457a0adf4",
+			"XXH64": "4d49a8d1020e1732",
 			"Method": "scene.save",
 			"RequestId": 16,
 			"Client": "batch",
@@ -4591,6 +4623,22 @@
 			"XXH64": "958f2ff13c89cd2f",
 			"Method": "edit.batch",
 			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Sky.scene",
+			"XXH64": "84fd36e6d581f60d",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Sky.scene.meta",
+			"XXH64": "92185d17c9203989",
+			"Method": "edit.batch",
+			"RequestId": 5,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5631,6 +5679,22 @@
 			"XXH64": "f315fc4e39fd65d0",
 			"Method": "script.write",
 			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Sky/SunTurner.luau",
+			"XXH64": "4fcfafd85bbcd506",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Sky/SunTurner.luau.meta",
+			"XXH64": "ba0fdb989e62fda1",
+			"Method": "script.write",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -7859,6 +7923,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/Sky.replay",
+			"XXH64": "3345e289dccff480",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Sky.replay.meta",
+			"XXH64": "e7ef3d2b8fe0cd19",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/Sprites2D.replay",
 			"XXH64": "9a68e3336bb0e0c6",
 			"Method": "input.record",
@@ -8031,6 +8111,22 @@
 			"XXH64": "e0d39c10c7fed37c",
 			"Method": "script.write",
 			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Sky/Sky.test.luau",
+			"XXH64": "c423f8490133007b",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Sky/Sky.test.luau.meta",
+			"XXH64": "9883efca0fa22908",
+			"Method": "script.write",
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -8708,7 +8804,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "a7ffeb5069b91268",
+			"XXH64": "ad4c721c4a18d203",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

@@ -170,6 +170,8 @@ namespace Engine {
 				Utils::DrawSupportingMetric("Skinned meshes", std::to_string(view.SkinnedMeshes));
 				// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
 				Utils::DrawSupportingMetric("Planar reflections", std::format("{} drawn / {} dropped", view.PlanarReflections, view.DroppedPlanarReflections));
+				// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+				Utils::DrawSupportingMetric("Sky", std::format("{} updates / {} relit volumes", view.SkyUpdates, view.RelitIrradianceVolumes));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

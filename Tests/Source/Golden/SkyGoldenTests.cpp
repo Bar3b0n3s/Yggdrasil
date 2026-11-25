@@ -22,7 +22,8 @@
 //     the moon and the stars, the sun (and at night the moon) turned in the extracted snapshot and the lights driven again
 //     (ApplySkyLightDriving; the roles stay resolved, so no ResolveSkyLights, whose precondition is the authored colours).
 //   - SkyOvercast: two tiles, a thick haze with broken clouds and the storm's full overcast, the sun in the morning.
-//   - SkyProbes (W45.3): two tiles of SkyProbes.scene, a room with a window and a cave mouth under the Sky, lit by a lamp, a
+//   - SkyProbes (W45.3): two tiles of SkyProbes.scene, a room with a window and a cave mouth under the Sky, its shell 0.6 m
+//     thick and double-sided with the volume's outer probes inside it (the W45.3 review's finding 1), lit by a lamp, a
 //     relightable irradiance volume and a reflection probe (a chrome ball) that the scaffold baked once under the scene's
 //     sun: noon, the sun through the window, and midnight, the sun below the horizon, with no bake between, the volume and
 //     the reflection relit by the sky (Renderer/ProbeRelight.h).
@@ -144,12 +145,14 @@ namespace Engine {
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
-			// The moon stands in the east all night; the sun shines through the window from the west at noon and is 40 degrees
-			// below the horizon at midnight.
-			const glm::vec3 moon = SkyDirection(40.0f, 90.0f);
+			// The sun shines through the window from the west-northwest at noon, with the moon below the horizon, and is 40 degrees
+			// below the horizon at midnight, with the moon high in the east-northeast. Neither light lies in the plane of a wall: a
+			// surface parallel to a directional light takes a little of it through the flat normal map's bias and bands under its
+			// cascade shadow (Docs/Backlog.md §6), and a second directional light above the horizon is unshadowed (Architecture
+			// §8.7), so by day the moon stays below it.
 			const std::vector<SkyTile> tiles = {
-				{ .Sun = SkyDirection(60.0f, -90.0f), .Moon = moon },  // noon
-				{ .Sun = SkyDirection(-40.0f, -60.0f), .Moon = moon }, // midnight
+				{ .Sun = SkyDirection(60.0f, -75.0f), .Moon = SkyDirection(-20.0f, 75.0f) }, // noon
+				{ .Sun = SkyDirection(-40.0f, -60.0f), .Moon = SkyDirection(40.0f, 75.0f) }, // midnight
 			};
 			const Image probes = RenderSkyTiles(gpu, "SkyProbes", tiles, 2);
 			CHECK(probes.Width == 640);

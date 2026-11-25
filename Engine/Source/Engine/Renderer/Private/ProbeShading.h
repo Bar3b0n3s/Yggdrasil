@@ -34,8 +34,12 @@
 // relights into the view's IrradianceProbes copy (now UAV-capable), and each reflection probe its relight entry: the relit
 // constant term of the probe nearest its centre of the smallest relightable volume whose box holds that centre, that probe's
 // baked constant term's luminance and its Intensity (Shared/SkyConstants.h's ReflectionRelights layout), from which
-// CSProbeRelight scales its Intensity. A view whose copy holds relit probes and whose sky no longer relights them copies its
-// volumes' bakes again.
+// CSProbeRelight scales its Intensity. So that a reflection probe's relight does not depend on where the camera looks (the
+// W45.3 review's finding 3), a relightable volume the view culls is kept too when its box holds a kept reflection probe's
+// centre: after the view's own volumes, only while one of the MaxViewIrradianceVolumes slots is free (it is not counted as
+// dropped otherwise); no surface the view's camera sees lies in its box, so the view's own pixels do not change (a mirror
+// view, which shades with the view's probes, may see into it). A view whose copy holds relit probes and whose sky no longer
+// relights them copies its volumes' bakes again.
 
 namespace Engine {
 

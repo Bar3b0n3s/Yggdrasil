@@ -49,6 +49,9 @@ namespace Engine {
 			stats.DroppedPlanarReflections = 1;
 			stats.CulledPlanarReflections = 6;
 			stats.PlanarReflectionEntities = { UUID(0x2a), UUID(0x17) };
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's light regenerated and the volumes relit.
+			stats.SkyUpdates = 1;
+			stats.RelitIrradianceVolumes = 2;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -73,6 +76,8 @@ namespace Engine {
 			CHECK(summary.DroppedPlanarReflections == 1);
 			CHECK(summary.CulledPlanarReflections == 6);
 			CHECK(summary.PlanarReflectionEntities == std::vector<std::string>{ UUID(0x2a).ToString(), UUID(0x17).ToString() });
+			CHECK(summary.SkyUpdates == 1);
+			CHECK(summary.RelitIrradianceVolumes == 2);
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
@@ -105,6 +110,8 @@ namespace Engine {
 			CHECK(unavailable.SkinnedMeshes == 0);
 			CHECK(unavailable.PlanarReflections == 0);
 			CHECK(unavailable.PlanarReflectionEntities.empty());
+			CHECK(unavailable.SkyUpdates == 0);
+			CHECK(unavailable.RelitIrradianceVolumes == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")
