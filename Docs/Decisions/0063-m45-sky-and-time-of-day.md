@@ -630,6 +630,7 @@ The lead's review of W45.4 (`bin/Reviews/P8/M45-W4-review.md`: 0 blocker, 0 majo
 - [x] W45.2 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] W45.3 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] W45.4 committed; [x] the lead's review pass taken and every finding fixed.
-- [ ] The landing: phase 8's batch in train order, third after M43 and M44, M45's hunks adapted in M43's files, M47's `Water` after `Sky`, FeatureTest regenerated, the gate `CI.py --require-clang-cl` green.
-- [ ] Architecture, the Roadmap, the skills, `Docs/Backlog.md` §2 and §6, and the generated references describe what landed.
-- [ ] S03's "How the game will check it" met in the goldens, the gpu cases, FeatureTest and Perf.py, and reported to the Skerries session through the product owner, with the corrections above.
+- [x] The landing: phase 8's batch in train order, third after M43 and M44, M45's hunks adapted in M43's files, M47's `Water` after `Sky`, FeatureTest regenerated, the gate `CI.py --require-clang-cl` green.
+- [x] Architecture, the Roadmap, the skills, `Docs/Backlog.md` §2 and §6, and the generated references describe what landed.
+- [x] S03's "How the game will check it" met in the goldens, the gpu cases, FeatureTest and Perf.py, and reported to the Skerries session through the product owner, with the corrections above.
+- Landed 2026-11-25: phase 8's batch on `landing/phase8`, the merge review's and the last fixes' findings fixed (`5da92759`), the gate `CI.py --require-clang-cl` green (`Docs/Decisions/0060-skerries-engine-program.md`, "The phase 8 gate"), main fast-forwarded and pushed, the brief's outcome relayed to the Skerries session through the product owner.

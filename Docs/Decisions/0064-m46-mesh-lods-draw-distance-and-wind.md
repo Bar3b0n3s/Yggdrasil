@@ -487,8 +487,9 @@ W46.4, the adaptation at landing (decision 2), on `milestone/m46`: the merge of 
 - [x] W46.1 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] W46.2 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] W46.3 committed; [x] the lead's review pass taken and every finding fixed.
-- [x] W46.4 committed on `milestone/m46` after its merge of `landing/phase8` with M43, M44 and M45; [ ] the lead's review pass taken and every finding fixed.
+- [x] W46.4 committed on `milestone/m46` after its merge of `landing/phase8` with M43, M44 and M45; [x] the lead's review pass taken and every finding fixed.
 - [x] meshoptimizer's `VENDOR.md`, notices and approvals row in place, and `CheckBuildConfig.py` with its fixture green.
-- [ ] The landing: phase 8's batch in train order, fourth after M43, M44 and M45, M43's contended files kept and M46's entries appended, FeatureTest regenerated, the gate `CI.py --require-clang-cl` green.
-- [ ] S04's "How the game will check it" (items 1 and 3) met in FeatureTest, the goldens, the gpu cases and Perf.py, and reported to the Skerries session through the product owner with the corrections above.
-- [ ] Architecture, the Roadmap, the skills, the Backlog and the generated references describe what landed.
+- [x] The landing: phase 8's batch in train order, fourth after M43, M44 and M45, M43's contended files kept and M46's entries appended, FeatureTest regenerated, the gate `CI.py --require-clang-cl` green.
+- [x] S04's "How the game will check it" (items 1 and 3) met in FeatureTest, the goldens, the gpu cases and Perf.py, and reported to the Skerries session through the product owner with the corrections above.
+- [x] Architecture, the Roadmap, the skills, the Backlog and the generated references describe what landed.
+- Landed 2026-11-25: phase 8's batch on `landing/phase8`, the merge review's and the last fixes' findings fixed (`5da92759`), the gate `CI.py --require-clang-cl` green (`Docs/Decisions/0060-skerries-engine-program.md`, "The phase 8 gate"), main fast-forwarded and pushed, the brief's outcome relayed to the Skerries session through the product owner.

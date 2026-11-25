@@ -636,12 +636,13 @@ None: M44 adds no metric (decision 4.3), so `Perf.py` has no part of M44's to ru
 - [x] W44.1 committed: its first checkpoint `MassProperties`, then the world's vehicles. [x] The lead's review pass taken and every finding fixed.
 - [x] W44.2 committed. [x] The lead's review pass taken and every finding fixed.
 - [x] W44.3 committed. [x] The lead's review pass taken and every finding fixed.
-- [ ] The milestone end: `milestone/m44` merged current main, and one independent review of the milestone diff, with every finding fixed.
-- [ ] The landing:
+- [x] The milestone end: `milestone/m44` merged current main, and one independent review of the milestone diff, with every finding fixed.
+- [x] The landing:
   - phase 8's batch, second in train order, merged over M43's regions;
   - M44's entries first in its contended regions, with M47's and M48's after;
   - `BuiltinComponents::Size` and the count lines set by hand;
   - FeatureTest regenerated;
   - phase 8's `CI.py --require-clang-cl` green.
-- [ ] Architecture, the Roadmap, the skills, the Backlog (§2 and §6) and the generated references describe what landed.
-- [ ] S02's "How the game will check it" met in the cases, the suite and the replay, and reported to the Skerries session through the product owner, with the corrections above. The report includes that `MassProperties` is ready for S01's boat.
+- [x] Architecture, the Roadmap, the skills, the Backlog (§2 and §6) and the generated references describe what landed.
+- [x] S02's "How the game will check it" met in the cases, the suite and the replay, and reported to the Skerries session through the product owner, with the corrections above. The report includes that `MassProperties` is ready for S01's boat.
+- Landed 2026-11-25: phase 8's batch on `landing/phase8`, the merge review's and the last fixes' findings fixed (`5da92759`), the gate `CI.py --require-clang-cl` green (`Docs/Decisions/0060-skerries-engine-program.md`, "The phase 8 gate"), main fast-forwarded and pushed, the brief's outcome relayed to the Skerries session through the product owner.

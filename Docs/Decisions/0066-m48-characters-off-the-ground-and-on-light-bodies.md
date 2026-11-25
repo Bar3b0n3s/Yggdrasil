@@ -559,6 +559,7 @@ The lead's review of `727a7d0d` (`bin/Reviews/P8/M48-W3-review.md`: 0 blocker, 0
 - [x] W48.1 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] W48.2 committed, its record holding the base run (the bridge case failing, its sink and stall, the cause); [x] the lead's review pass taken and every finding fixed.
 - [x] W48.3 committed; [x] the lead's review pass taken and every finding fixed.
-- [ ] The landing: phase 8's batch, M48 last, appending after M43 to M47 in every shared file; FeatureTest regenerated and `EngineVersionString` 0.9.0; `CI.py --require-clang-cl` green; main fast-forwarded and pushed.
-- [ ] S17's and S19's "How the game will check it" met as the Acceptance maps them, and reported to the Skerries session through the product owner with the corrections above. The light-body rule's change is reported to the World Tree session too.
-- [ ] Architecture, the Roadmap, the skills, the Backlog (§2, and §6's M34 row) and the generated references describe what landed.
+- [x] The landing: phase 8's batch, M48 last, appending after M43 to M47 in every shared file; FeatureTest regenerated and `EngineVersionString` 0.9.0; `CI.py --require-clang-cl` green; main fast-forwarded and pushed.
+- [x] S17's and S19's "How the game will check it" met as the Acceptance maps them, and reported to the Skerries session through the product owner with the corrections above. The light-body rule's change is reported to the World Tree session too.
+- [x] Architecture, the Roadmap, the skills, the Backlog (§2, and §6's M34 row) and the generated references describe what landed.
+- Landed 2026-11-25: phase 8's batch on `landing/phase8`, the merge review's and the last fixes' findings fixed (`5da92759`), the gate `CI.py --require-clang-cl` green (`Docs/Decisions/0060-skerries-engine-program.md`, "The phase 8 gate"), main fast-forwarded and pushed, the brief's outcome relayed to the Skerries session through the product owner.

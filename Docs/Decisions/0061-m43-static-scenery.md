@@ -507,6 +507,7 @@ W43.1 makes decision 3 exact for change tracking and the incremental per-tick sy
 - [x] W43.1 committed; [x] the lead's review pass taken and every finding fixed (the W43.2 record, "The lead's W43.1 review").
 - [x] W43.2 committed (its CPU half's checkpoints and the GPU half with the CPU review's fixes); [x] the lead's review pass taken and every finding fixed (the W43.2 record, "The lead's W43.2 CPU review" and "The lead's W43.2 GPU review").
 - [x] W43.3 committed; [x] the lead's review pass taken and every finding fixed (the W43.3 record, "The lead's W43.3 review").
-- [ ] The landing: first in phase 8's batch, the merge review's findings fixed, FeatureTest regenerated, every golden byte-identical against main's build, `CI.py --require-clang-cl` green, main fast-forwarded and pushed.
+- [x] The landing: first in phase 8's batch, the merge review's findings fixed, FeatureTest regenerated, every golden byte-identical against main's build, `CI.py --require-clang-cl` green, main fast-forwarded and pushed.
 - [x] Architecture (§5.2 and §5.7 amended), the Roadmap, the skills, the Backlog (§2, §6, §8's row) and the generated references describe what landed.
-- [ ] S16's "How the game will check it" met in the cases, suites and metrics above, and reported to the Skerries session through the product owner, with the corrections above.
+- [x] S16's "How the game will check it" met in the cases, suites and metrics above, and reported to the Skerries session through the product owner, with the corrections above.
+- Landed 2026-11-25: phase 8's batch on `landing/phase8`, the merge review's and the last fixes' findings fixed (`5da92759`), the gate `CI.py --require-clang-cl` green (`Docs/Decisions/0060-skerries-engine-program.md`, "The phase 8 gate"), main fast-forwarded and pushed, the brief's outcome relayed to the Skerries session through the product owner.

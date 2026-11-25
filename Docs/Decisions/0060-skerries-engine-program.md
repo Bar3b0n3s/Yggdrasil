@@ -708,9 +708,19 @@ The lead's draft put eight questions, each with a recommendation. The owner answ
 - **Vehicles in Jolt's worker jobs.** The 0, 1 and 8 thread-count test must prove they are deterministic. A vehicle that outlives its body leaves Jolt a dangling pointer, and the vehicle's lifetime rules prevent it.
 - **The device-thread hand-off in M56.** A torn filter setting can become unstable, so every new audio node uses M40's one-setting-per-pull hand-off.
 
+## The phase 8 gate
+
+Phase 8 (M43 to M48) landed in one batch on `landing/phase8` and passed its gate on 2026-11-25.
+
+- **The landing:** the merges in train order (`6d521f22` M43, `80023a7b` M44 with its adaptations `556199e4`, `7752c004` M45, `a94cdac2` M46 after its W46.4 on the landing, `c22f4bce` M47 with its adaptations `d3db8680`, `f77e30c6` M48), then the last lander's duties `07360396` (0.9.0, FeatureTest regenerated with every replay at 0.9.0 and its hashes kept, the demos' recorded upgrades and audits, the references, the six editor-UI goldens unchanged).
+- **The reviews:** the merge review (`bin/Reviews/P8/LAND8-review.md`: 1 minor, 9 nits) and the re-check of each milestone's last fix commits (`P8-lastfixes-review.md`: 1 minor, 6 nits); all 17 fixed in `5da92759`, after main's ledger amendment was merged (`bc41a192`). Two of the lead's decisions changed after the fixer's evidence: the Ocean's mirror band needs no wave allowance (the water samples its mirror at the base plane), and a ridden raft is woken and floated before the characters' item (the late-half fix left a limit cycle).
+- **The gate:** `CI.py --require-clang-cl` on `5da92759`: setup, generate, lint, the three builds, the bake and both unit suites passed (unit Debug 2,655 s, Release 398 s); the gpu stage timed out without a hang (the Debug suite grew from 631 to 707 cases and the renderer's per-case pipeline creation from about 2.1 s to 4.5 s, past Test.py's 1,800 s per cap). `fcdfddd2` gave the Debug gpu run its own bound (3,600 s per cap; the CI stage 7,500 s), amending ADR 0039 decision 5, with a Backlog §3 row for a pipeline cache shared across a test process's devices. The rerun of the failed and unrun stages (ADR 0023) on `fcdfddd2` passed every one: lint; gpu Debug 707 cases at Vulkan 1.4 (2,717 s) and 1.3 (2,482 s) and Release; golden 64 of 64 on `nvidia-62x`; feature Debug and Release; automation 999 tests, method coverage 128/128; export Release and Dist (124 suites, 32 replays) and the merged coverage; determinism 32 replays agreeing in four runs; the games suite (Rolling Ball, Tetris, Breakout, NativeTest); portability with the clang-cl Release and Dist builds. Logs: `bin/Reviews/P8/scratch/GATE/`.
+- **Measured:** `staticScenery/20000Entities/cpuMs` 0.854 ms on the merged tree (budget 2.0; the dynamic twin 25.8 ms); `sky/*` and `water/*` within their budgets; `lod/Forest/gpuMs` 0.902 ms.
+- **Main** fast-forwarded to the landing with this record and was pushed; the briefs' outcomes were relayed to the Skerries session through the product owner. The phase's follow-ups are listed in `bin/Reviews/P8/landing-notes.md`, those that defer work also in `Docs/Backlog.md`.
+
 ## Before program completion
 
-- [ ] The setup (decision 3) on main: the ASan sharding, S20, this ADR, the Roadmap's phase 8 sections, the ledger and phase 8's milestone ADRs.
+- [x] The setup (decision 3) on main: the ASan sharding, S20, this ADR, the Roadmap's phase 8 sections, the ledger and phase 8's milestone ADRs.
 - [ ] Phases 8 to 11 each landed in one batch, gated, pushed, and their briefs' outcomes reported to the Skerries session through the product owner, with decision 9's corrections.
 - [ ] Phase 12 landed (confirmed by the owner, 2026-11-24), and the program's one hardened gate run at its end (decision 7).
 - [ ] `Docs/Backlog.md` §2 and §6 hold what each milestone left out or accepted, and the §6 row on one scene a session is closed by M50.
