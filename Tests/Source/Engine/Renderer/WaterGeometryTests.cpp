@@ -340,6 +340,53 @@ namespace Engine {
 			CHECK(oceanRecord.HalfExtents == glm::vec2(0.0f));
 			CHECK(oceanRecord.PlanarSlot == WaterNoPlanarSlot);
 		}
+
+		// W47.3's Underwater pass records when the camera's near plane may lie under a water, judged on the snapshot alone: a
+		// corner of the near plane below an Ocean's base plus its summed amplitudes, or below a Rectangle's (within its
+		// Headroom), above its floor and inside its footprint widened by its waves' summed Q A.
+		TEST_CASE("WaterGeometry: the near plane is under a water when it meets the region below the water's highest crest")
+		{
+			const auto camera = [](const glm::vec3& eye, const glm::vec3& target)
+			{
+				CameraData data;
+				data.Position = eye;
+				data.View = glm::lookAt(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
+				data.NearClip = 0.1f;
+				data.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 10.0f, 0.1f, 100.0f, 64, 64);
+				return data;
+			};
+			// A swell of two waves: amplitudes 0.4 and 0.1 over a base at y = 1.
+			const std::array<WaterWave, 2> waves = { WaterWave{ .Direction = 0.0f, .Wavelength = 30.0f, .Amplitude = 0.4f, .Steepness = 0.5f },
+				WaterWave{ .Direction = 90.0f, .Wavelength = 12.0f, .Amplitude = 0.1f, .Steepness = 0.5f } };
+			const WaterItem sea = MakeWater(RenderWaterShape::Ocean, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.0f, 0.0f)), waves, 0.0);
+			const std::array<WaterItem, 1> ocean = { sea };
+			CHECK(IsNearPlaneUnderWater(ocean, camera(glm::vec3(0.0f, -3.0f, 0.0f), glm::vec3(0.0f, -3.0f, -1.0f))));
+			// Within the crests' reach (1.5) the near plane may be under; above it, not.
+			CHECK(IsNearPlaneUnderWater(ocean, camera(glm::vec3(0.0f, 1.45f, 0.0f), glm::vec3(0.0f, 1.45f, -1.0f))));
+			CHECK_FALSE(IsNearPlaneUnderWater(ocean, camera(glm::vec3(0.0f, 1.7f, 0.0f), glm::vec3(0.0f, 1.7f, -1.0f))));
+			CHECK_FALSE(IsNearPlaneUnderWater(ocean, camera(glm::vec3(0.0f, 20.0f, 0.0f), glm::vec3(0.0f, 0.0f, -20.0f))));
+			CHECK_FALSE(IsNearPlaneUnderWater({}, camera(glm::vec3(0.0f, -3.0f, 0.0f), glm::vec3(0.0f, -3.0f, -1.0f))));
+
+			// A calm pool 4 x 4 m at (10, 0, 0), 2 m deep with 3 m of headroom.
+			WaterItem pool = MakeWater(RenderWaterShape::Rectangle, glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 0.0f, 0.0f)), {}, 0.0);
+			pool.Size = glm::vec2(4.0f);
+			pool.Depth = 2.0f;
+			pool.Headroom = 3.0f;
+			const std::array<WaterItem, 1> pools = { pool };
+			CHECK(IsNearPlaneUnderWater(pools, camera(glm::vec3(10.0f, -1.0f, 0.0f), glm::vec3(10.0f, -1.0f, -1.0f))));
+			CHECK_FALSE(IsNearPlaneUnderWater(pools, camera(glm::vec3(10.0f, 0.5f, 0.0f), glm::vec3(10.0f, 0.5f, -1.0f))));
+			CHECK_FALSE(IsNearPlaneUnderWater(pools, camera(glm::vec3(10.0f, -2.5f, 0.0f), glm::vec3(10.0f, -2.5f, -1.0f))));
+			CHECK_FALSE(IsNearPlaneUnderWater(pools, camera(glm::vec3(13.0f, -1.0f, 0.0f), glm::vec3(13.0f, -1.0f, -1.0f))));
+			// Its waves widen the footprint by their Q A: a 0.5 m wave at Q 0.8 reaches 0.4 m past the edge.
+			const std::array<WaterWave, 1> ripple = { WaterWave{ .Direction = 0.0f, .Wavelength = 20.0f, .Amplitude = 0.5f, .Steepness = 0.8f } };
+			WaterItem wavy = MakeWater(RenderWaterShape::Rectangle, glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 0.0f, 0.0f)), ripple, 0.0);
+			wavy.Size = glm::vec2(4.0f);
+			wavy.Depth = 2.0f;
+			wavy.Headroom = 3.0f;
+			const std::array<WaterItem, 1> wavyPools = { wavy };
+			CHECK(IsNearPlaneUnderWater(wavyPools, camera(glm::vec3(12.3f, -1.0f, 0.0f), glm::vec3(12.3f, -1.0f, -1.0f))));
+			CHECK_FALSE(IsNearPlaneUnderWater(wavyPools, camera(glm::vec3(12.6f, -1.0f, 0.0f), glm::vec3(12.6f, -1.0f, -1.0f))));
+		}
 	}
 
 }

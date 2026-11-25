@@ -18,13 +18,15 @@
 #include "Shared/WaterConstants.h"
 
 // The surface at a rest point: the particle's displacement from it (horizontal x and z, and its height above the base in y),
-// the surface's unit normal (cross(dP/dz0, dP/dx0), Physics/WaterWaves.h's) and the horizontal map's Jacobian determinant
-// (1 on calm water, below 1 where the waves crowd the surface together at a crest).
+// the surface's unit normal (cross(dP/dz0, dP/dx0), Physics/WaterWaves.h's), the horizontal map's Jacobian determinant (1 on
+// calm water, below 1 where the waves crowd the surface together at a crest) and its matrix (dx/dx0, dx/dz0, dz/dx0,
+// dz/dz0).
 struct WaterWaveSample
 {
 	float3 Displacement;
 	float3 Normal;
 	float Jacobian;
+	float4 Horizontal;
 };
 
 // The fade of a wave of wave number `waveNumber` at rest point `rest` of `record`'s water (see the file comment).
@@ -81,7 +83,33 @@ WaterWaveSample EvaluateWaterWaves(WaterRecord record, float2 rest, bool previou
 	const float3 normal = cross(alongZ, alongX);
 	sample.Normal = normal * rsqrt(max(dot(normal, normal), 1e-20));
 	sample.Jacobian = dxdx * dzdz - dxdz * dzdx;
+	sample.Horizontal = float4(dxdx, dxdz, dzdx, dzdz);
 	return sample;
+}
+
+// W47.3's Underwater pass: the newton steps that find the rest point under a point (WaterSurfaceAt).
+static const uint WaterSurfaceNewtonSteps = 6;
+
+// The surface of `record`'s water in this frame over `target` (x and z from the record's Origin): the rest point whose
+// displaced point lies over it, found by WaterSurfaceNewtonSteps Newton steps on the horizontal map from the target itself,
+// and the surface's height there (world y). The drawn surface's waves, faded as the clipmap fades them (GetWaterWaveFade), so
+// the Underwater pass's waterline follows what the view shows rather than the CPU's unfaded surface; the sum of Q k A below
+// 0.9 keeps the map's Jacobian invertible.
+float GetWaterSurfaceHeight(WaterRecord record, float2 target)
+{
+	float2 rest = target;
+	WaterWaveSample sample = EvaluateWaterWaves(record, rest, false);
+	for (uint step = 0; step < WaterSurfaceNewtonSteps; ++step)
+	{
+		const float2 residual = rest + sample.Displacement.xz - target;
+		const float determinant = sample.Jacobian;
+		if (!(abs(determinant) > 1e-6))
+			break;
+		const float4 m = sample.Horizontal; // (dx/dx0, dx/dz0, dz/dx0, dz/dz0)
+		rest -= float2(m.w * residual.x - m.y * residual.y, m.x * residual.y - m.z * residual.x) / determinant;
+		sample = EvaluateWaterWaves(record, rest, false);
+	}
+	return record.BaseHeight + sample.Displacement.y;
 }
 
 // A Rectangle's rest point `rest` clamped into its footprint (its local X and Z within HalfExtents of FrameOrigin), so a

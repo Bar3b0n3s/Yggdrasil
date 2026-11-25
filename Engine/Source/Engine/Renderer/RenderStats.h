@@ -101,8 +101,7 @@ namespace Engine {
 		std::vector<UUID> PlanarReflectionEntities{};
 		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M46's fields): WaterSurfaces, the snapshot's
 		// waters when the Water pass's RecordSurface succeeds (it draws every one), 0 when it does not record or fails; Underwater,
-		// whether the Underwater pass recorded (the camera's near plane may lie under a water). Both 0 until W47.2's render stream
-		// and W47.3 record the passes.
+		// whether the Underwater pass recorded (the camera's near plane may lie under a water and the Water pass drew).
 		uint32_t WaterSurfaces = 0;
 		bool Underwater = false;
 	};

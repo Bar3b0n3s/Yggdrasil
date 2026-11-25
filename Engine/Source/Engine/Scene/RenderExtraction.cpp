@@ -995,8 +995,9 @@ namespace Engine {
 			Utils::AddProbeItems(entity, id, getWorld, snapshot);
 			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): a planar reflection whose entity draws a mesh, in
 			// canonical order, in every view (an edit scene's included: a mirror shows while authoring), at the rendered pose its
-			// mesh item draws at.
-			if (const PlanarReflectionComponent* reflection = entity.TryGetComponent<PlanarReflectionComponent>(); reflection != nullptr)
+			// mesh item draws at. M47 (W47.3): a Water entity's is the water's (below), whatever it draws.
+			if (const PlanarReflectionComponent* reflection = entity.TryGetComponent<PlanarReflectionComponent>();
+				reflection != nullptr && !entity.HasComponent<WaterComponent>())
 			{
 				const MeshRendererComponent* renderer = entity.TryGetComponent<MeshRendererComponent>();
 				if (renderer != nullptr && renderer->Visible && renderer->Mesh.IsValid())
@@ -1020,6 +1021,21 @@ namespace Engine {
 			{
 				ocean = ocean || water->Shape == WaterShape::Ocean;
 				snapshot.Waters.push_back(Utils::MakeWaterItem(*water, getWorld(), id, request.SimulationTime));
+				// The planar opt-in (decision 3, W47.3): a PlanarReflection on a drawn water reflects in its base plane, level at
+				// its rendered position (the water draws level whatever its entity's pitch or roll), Normal +Y and Offset 0: the
+				// component's Normal and Offset are not read, its ResolutionScale is.
+				if (const PlanarReflectionComponent* reflection = entity.TryGetComponent<PlanarReflectionComponent>(); reflection != nullptr)
+				{
+					glm::mat4 level(1.0f);
+					level[3] = getWorld()[3];
+					snapshot.PlanarReflections.push_back(PlanarReflectionItem{
+						.World = level,
+						.Normal = glm::vec3(0.0f, 1.0f, 0.0f),
+						.Offset = 0.0f,
+						.ResolutionScale = reflection->ResolutionScale,
+						.Entity = id,
+					});
+				}
 			}
 		});
 		Utils::AssignTerrainPickIds(snapshot);

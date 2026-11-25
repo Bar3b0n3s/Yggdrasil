@@ -31,7 +31,9 @@
 // The Water program (Passes/Water.slang) draws every clipmap level of every water with one of two pipelines (the surface, and
 // the surface with EntityId); a level's draw binds the view's forward set variant (set 0), its water's set 1 and its level's
 // mesh, and pushes the level's corner, cell size and record index. The pipelines cull nothing (SV_IsFrontFace tells above
-// from below) and test and write SceneDepth with GreaterOrEqual (reverse-Z).
+// from below) and test and write SceneDepth with GreaterOrEqual (reverse-Z). The Underwater pipeline (W47.3) draws one
+// triangle over the viewport into SceneColor alone, blended by its alpha, with the same set 0 and a set 1 of the records and
+// SceneDepth.
 
 namespace Engine {
 
@@ -48,6 +50,8 @@ namespace Engine {
 		constexpr uint32_t WaterViewDepthRegister = 2;
 		constexpr uint32_t WaterNormalMapRegister = 3;
 		constexpr uint32_t WaterFoamMapRegister = 4;
+		// The Underwater pipeline's set 1: t0 the records, t5 SceneDepth.
+		constexpr uint32_t UnderwaterSceneDepthRegister = 5;
 
 		[[nodiscard]] static nvrhi::BindingLayoutDesc MakeWaterLayout()
 		{
@@ -65,13 +69,27 @@ namespace Engine {
 			return layout;
 		}
 
-		[[nodiscard]] static PipelineLayoutDescription MakeWaterDescription(bool picking)
+		[[nodiscard]] static nvrhi::BindingLayoutDesc MakeUnderwaterLayout()
+		{
+			nvrhi::BindingLayoutDesc layout;
+			layout.visibility = nvrhi::ShaderType::All;
+			layout.registerSpace = 1;
+			layout.registerSpaceIsDescriptorSet = true;
+			layout.bindings = {
+				nvrhi::BindingLayoutItem::StructuredBuffer_SRV(WaterRecordsRegister),
+				nvrhi::BindingLayoutItem::Texture_SRV(UnderwaterSceneDepthRegister),
+			};
+			return layout;
+		}
+
+		// The surfaces' description (the surface, or the surface with EntityId), or with `underwater` the Underwater pass's.
+		[[nodiscard]] static PipelineLayoutDescription MakeWaterDescription(bool picking, bool underwater = false)
 		{
 			return {
-				.Name = picking ? "WaterPicking" : "WaterSurface",
+				.Name = underwater ? "WaterUnderwater" : (picking ? "WaterPicking" : "WaterSurface"),
 				.Program = std::string(WaterProgram),
-				.Entries = { "VSSurface", picking ? "PSPicking" : "PSSurface" },
-				.BindingLayouts = { GetForwardViewLayout(), MakeWaterLayout() },
+				.Entries = { underwater ? "VSUnderwater" : "VSSurface", underwater ? "PSUnderwater" : (picking ? "PSPicking" : "PSSurface") },
+				.BindingLayouts = { GetForwardViewLayout(), underwater ? MakeUnderwaterLayout() : MakeWaterLayout() },
 				.ConstantBuffers = {
 					{ .Set = 0, .Register = ViewConstantsRegister, .ByteSize = sizeof(ViewConstants) },
 					{ .Set = 0, .Register = EnvironmentConstantsRegister, .ByteSize = sizeof(EnvironmentConstants) },
@@ -111,6 +129,29 @@ namespace Engine {
 			return specification;
 		}
 
+		// The Underwater pipeline: one triangle over the viewport, nothing culled, no depth, into SceneColor alone, blended by
+		// its alpha (SrcAlpha, InvSrcAlpha) with SceneColor's alpha kept.
+		[[nodiscard]] static GraphicsPipelineSpecification MakeUnderwaterPipelineSpecification(nvrhi::IBindingLayout& forwardViewLayout,
+			nvrhi::IBindingLayout& underwaterLayout)
+		{
+			GraphicsPipelineSpecification specification;
+			specification.Layout = MakeWaterDescription(false, true);
+			specification.SharedBindingLayouts = { nvrhi::BindingLayoutHandle(&forwardViewLayout), nvrhi::BindingLayoutHandle(&underwaterLayout) };
+			specification.Primitive = nvrhi::PrimitiveType::TriangleList;
+			specification.RenderState.rasterState.setCullNone();
+			specification.RenderState.depthStencilState.setDepthTestEnable(false).setDepthWriteEnable(false).setStencilEnable(false);
+			nvrhi::BlendState::RenderTarget& blend = specification.RenderState.blendState.targets[0];
+			blend.enableBlend()
+				.setSrcBlend(nvrhi::BlendFactor::SrcAlpha)
+				.setDestBlend(nvrhi::BlendFactor::InvSrcAlpha)
+				.setBlendOp(nvrhi::BlendOp::Add)
+				.setSrcBlendAlpha(nvrhi::BlendFactor::Zero)
+				.setDestBlendAlpha(nvrhi::BlendFactor::One)
+				.setBlendOpAlpha(nvrhi::BlendOp::Add);
+			specification.Framebuffer.addColorFormat(SceneColorFormat);
+			return specification;
+		}
+
 		// The texture a water binds for `handle`: its mirror, or `fallback`'s (the built-in) for a null handle or one whose
 		// mirror is a placeholder or missing.
 		[[nodiscard]] static nvrhi::TextureHandle ResolveWaterTexture(GpuResourceCache& cache, AssetHandle handle, AssetHandle fallback)
@@ -142,8 +183,10 @@ namespace Engine {
 	{
 		GraphicsDevice* Device = nullptr; // documented back-reference
 		nvrhi::BindingLayoutHandle WaterLayout{};
+		nvrhi::BindingLayoutHandle UnderwaterLayout{};
 		GraphicsPipeline Surface{};
 		GraphicsPipeline Picking{};
+		GraphicsPipeline Underwater{};
 		std::array<WaterMeshBuffers, WaterMeshCount> Meshes{};
 		uint32_t PipelineCount = 0;
 
@@ -194,6 +237,9 @@ namespace Engine {
 		state.WaterLayout = layouts[1];
 		ENGINE_TRY_ASSIGN(state.Surface, pipelines.CreateGraphicsPipeline(Utils::MakeWaterPipelineSpecification(false, forwardViewLayout, *state.WaterLayout)));
 		ENGINE_TRY_ASSIGN(state.Picking, pipelines.CreateGraphicsPipeline(Utils::MakeWaterPipelineSpecification(true, forwardViewLayout, *state.WaterLayout)));
+		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> underwaterLayouts, pipelines.CreateBindingLayouts(Utils::MakeWaterDescription(false, true)));
+		state.UnderwaterLayout = underwaterLayouts[1];
+		ENGINE_TRY_ASSIGN(state.Underwater, pipelines.CreateGraphicsPipeline(Utils::MakeUnderwaterPipelineSpecification(forwardViewLayout, *state.UnderwaterLayout)));
 		for (uint32_t mesh = 0; mesh < WaterMeshCount; ++mesh)
 		{
 			ENGINE_TRY_ASSIGN(state.Meshes[mesh], state.CreateMesh(mesh));
@@ -204,7 +250,7 @@ namespace Engine {
 
 	std::vector<PipelineLayoutDescription> WaterPass::GetLayoutDescriptions()
 	{
-		return { Utils::MakeWaterDescription(false), Utils::MakeWaterDescription(true) };
+		return { Utils::MakeWaterDescription(false), Utils::MakeWaterDescription(true), Utils::MakeWaterDescription(false, true) };
 	}
 
 	uint32_t WaterPass::GetPipelineCount() const
@@ -231,10 +277,17 @@ namespace Engine {
 		const glm::dvec2 camera(static_cast<double>(inputs.Camera->Position.x), static_cast<double>(inputs.Camera->Position.z));
 		const std::array<WaterLevelPlacement, WaterLevelCount> levels = PlaceWaterLevels(camera);
 		const glm::dvec2 origin = levels[0].Corner;
+		// W47.3's planar opt-in: a water whose entity holds a drawn planar reflection slot samples it.
 		std::vector<WaterRecord> records;
 		records.reserve(count);
 		for (const WaterItem& water : snapshot.Waters)
-			records.push_back(MakeWaterRecord(water, origin, camera, count));
+		{
+			const auto slot = std::ranges::find(inputs.PlanarReflectionSlots, water.Entity);
+			const uint32_t planarSlot = slot == inputs.PlanarReflectionSlots.end() || !water.Entity.IsValid()
+				? WaterNoPlanarSlot
+				: static_cast<uint32_t>(slot - inputs.PlanarReflectionSlots.begin());
+			records.push_back(MakeWaterRecord(water, origin, camera, count, planarSlot));
+		}
 		if (resources.Records == nullptr || resources.RecordCapacity < count)
 		{
 			const uint32_t capacity = std::max(count, resources.RecordCapacity * 2);
@@ -302,6 +355,36 @@ namespace Engine {
 				counters.Triangles += mesh.IndexCount / 3;
 			}
 		}
+		return {};
+	}
+
+	Status WaterPass::RecordUnderwater(nvrhi::ICommandList& commandList, WaterViewResources& resources, const WaterUnderwaterInputs& inputs,
+		RenderPassCounters& counters)
+	{
+		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr && inputs.ViewSet != nullptr && inputs.SceneDepth != nullptr, "WaterPass::RecordUnderwater needs every input");
+		if (inputs.Framebuffer == nullptr || inputs.ViewSet == nullptr || inputs.SceneDepth == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "the underwater pass needs a framebuffer, a view set and SceneDepth");
+		if (resources.Records == nullptr)
+			return MakeError(ErrorCode::InvalidState, "the underwater pass needs the records the water's surfaces wrote this render");
+		State& state = *m_State;
+		nvrhi::BindingSetDesc desc;
+		desc.bindings = {
+			nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::WaterRecordsRegister, resources.Records),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::UnderwaterSceneDepthRegister, inputs.SceneDepth),
+		};
+		ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, resources.Bindings.GetOrCreate(*state.Device, desc, *state.UnderwaterLayout));
+		nvrhi::GraphicsState graphics;
+		graphics.pipeline = state.Underwater.Pipeline;
+		graphics.framebuffer = inputs.Framebuffer;
+		graphics.viewport.addViewportAndScissorRect(inputs.Framebuffer->getFramebufferInfo().getViewport());
+		graphics.bindings = { inputs.ViewSet, set };
+		commandList.setGraphicsState(graphics);
+		// The push-constant range is set 0's layout's; the pass reads none of it.
+		const WaterDrawConstants constants{};
+		commandList.setPushConstants(&constants, sizeof(constants));
+		commandList.draw(nvrhi::DrawArguments().setVertexCount(3));
+		++counters.DrawCalls;
+		++counters.Triangles;
 		return {};
 	}
 

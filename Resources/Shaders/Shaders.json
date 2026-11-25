@@ -557,6 +557,14 @@
 				{
 					"Name": "PSPicking",
 					"Stage": "fragment"
+				},
+				{
+					"Name": "VSUnderwater",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSUnderwater",
+					"Stage": "fragment"
 				}
 			]
 		}

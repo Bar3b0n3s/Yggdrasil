@@ -1802,6 +1802,45 @@ namespace Engine {
 			REQUIRE(between->Waters.size() == 1);
 			CHECK(between->Waters[0].World[3].y == doctest::Approx(1.0f));
 		}
+
+		// M47's planar opt-in (Docs/Decisions/0065-m47-water.md decision 3, W47.3): a PlanarReflection on a drawn water gives
+		// an item of the water's base plane, level at its rendered position (Normal +Y, Offset 0; the component's Normal and
+		// Offset are not read, its ResolutionScale is), whatever the entity draws; a second Ocean, which is not drawn, gives none.
+		TEST_CASE("RenderExtraction: a planar reflection on a water is the water's base plane")
+		{
+			Test::SceneTestFixture edit;
+			Scene& scene = edit.GetScene();
+			CreateCamera(scene, "Camera", true);
+			Entity lake = scene.CreateEntity("Lake");
+			lake.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.0f, -2.0f, 5.0f);
+				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(10.0f, 40.0f, 0.0f));
+			});
+			WaterComponent water;
+			water.Shape = WaterShape::Rectangle;
+			lake.AddComponent<WaterComponent>(water);
+			lake.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::QuadMesh));
+			lake.AddComponent<PlanarReflectionComponent>(PlanarReflectionComponent{ .Normal = glm::vec3(0.0f, 0.0f, 1.0f), .Offset = 0.5f, .ResolutionScale = 0.25f });
+			Entity sea = scene.CreateEntity("Sea");
+			sea.AddComponent<WaterComponent>();
+			Entity secondSea = scene.CreateEntity("SecondSea");
+			secondSea.AddComponent<WaterComponent>();
+			secondSea.AddComponent<PlanarReflectionComponent>();
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->PlanarReflections.size() == 1);
+			const PlanarReflectionItem& item = snapshot->PlanarReflections[0];
+			CHECK(item.Entity == lake.GetUUID());
+			CHECK(item.Normal == glm::vec3(0.0f, 1.0f, 0.0f));
+			CHECK(item.Offset == 0.0f);
+			CHECK(item.ResolutionScale == 0.25f);
+			glm::mat4 level(1.0f);
+			level[3] = glm::vec4(3.0f, -2.0f, 5.0f, 1.0f);
+			CHECK(item.World == level);
+		}
 	}
 
 }

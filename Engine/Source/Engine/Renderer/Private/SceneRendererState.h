@@ -246,6 +246,9 @@ namespace Engine {
 			nvrhi::TextureHandle WaterRefraction{};
 			nvrhi::FramebufferHandle WaterFramebuffer{};
 			nvrhi::FramebufferHandle WaterPickingFramebuffer{};
+			// W47.3: the Underwater pass's framebuffer, SceneColor alone, created by the first render it records in and dropped
+			// with the water's.
+			nvrhi::FramebufferHandle UnderwaterFramebuffer{};
 		};
 
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): one timing slot's SSR area readback: the copy of the arguments
@@ -414,6 +417,10 @@ namespace Engine {
 			// WaterSurfaces, the waters it drew (RenderStats::WaterSurfaces).
 			bool Water = false;
 			uint32_t WaterSurfaces = 0;
+			// W47.3: the view set the Water pass drew with (a set of ViewBindings, alive for the render), which the Underwater pass
+			// binds too; and whether the Underwater pass recorded (RenderStats::Underwater).
+			nvrhi::IBindingSet* WaterViewSet = nullptr;
+			bool Underwater = false;
 			// M32's milestone review: the skybox draws over the cleared pixels (a Lit view clearing to a skybox it has and shows).
 			bool DrawsSkybox = false;
 			ViewConstants View{};
@@ -967,6 +974,11 @@ namespace Engine {
 		// and the depth pyramid's ViewDepth when GTAO and SSR did not create it, each created when missing. Errors: those of the
 		// pool and the framebuffer creations (Gpu).
 		[[nodiscard]] Status EnsureWaterTargets(bool picking);
+		// M47 (W47.3): first in HdrPost, before TAA: with the Water pass's surfaces drawn and the camera's near plane possibly
+		// under a water (IsNearPlaneUnderWater), WaterPass::RecordUnderwater under the Underwater row into SceneColor
+		// (UnderwaterFramebuffer, created when missing) with the Water pass's view set and SceneDepth; frame.Underwater says it
+		// recorded. An error is the render's, and SceneColor keeps its image.
+		void RecordUnderwater(Detail::SceneRendererFrame& frame);
 		// M26 (stream X-D): SsrColor and SsrFramebuffer at the scene resolution (Targets), and the depth pyramid's ViewDepth when
 		// GTAO did not create it, each created when missing. M32: SsrColor at the trace image's size (SsrPass::GetTraceSize with
 		// `halfResolution`), replaced when it has another size; the tile list when missing or too small for the trace image's

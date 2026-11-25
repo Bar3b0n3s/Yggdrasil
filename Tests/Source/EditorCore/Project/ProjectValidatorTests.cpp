@@ -2398,6 +2398,9 @@ end
 				REQUIRE(ComponentAccess::PatchComponentJson(hidden, "MeshRenderer", ParseValidatorJson(R"({"Visible":false})")).has_value());
 				addMirror("Disabled", quad, "", R"({"Normal":[0,1,0]})");
 				editor.GetScene().FindEntityByPath("/Disabled").SetActive(false);
+				// M47 (Docs/Decisions/0065-m47-water.md decision 3, W47.3): a Water's mirror is its base plane, which needs no mesh.
+				addMirror("Lake", "", "", "{}");
+				REQUIRE(ComponentAccess::AddComponent(editor.GetScene().FindEntityByPath("/Lake"), "Water", nullptr).has_value());
 				REQUIRE(edit.Commit().has_value());
 			}
 			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
@@ -2410,6 +2413,7 @@ end
 					CHECK(mirrors.emplace(diagnostic.Entity, &diagnostic).second);
 			}
 			CHECK(mirrors.size() == 6);
+			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/Lake").GetUUID().ToString()));
 			const auto check = [&editor, &mirrors](std::string_view path, std::string_view component, std::string_view field) -> const ProjectDiagnostic*
 			{
 				CAPTURE(path);

@@ -138,6 +138,31 @@ namespace Engine {
 			};
 			unite(OpaqueDraws);
 			unite(TransparentDraws);
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3, W47.3): a water's reflection covers its drawn footprint, a
+			// Rectangle's box raised and lowered by its waves' amplitudes, and the whole view for an Ocean (whose camera faces
+			// its base plane from above).
+			for (const WaterItem& water : snapshot.Waters)
+			{
+				if (water.Entity != item.Entity)
+					continue;
+				if (water.Shape != RenderWaterShape::Rectangle)
+				{
+					rect = PlanarReflectionScreenRect{};
+					break;
+				}
+				float amplitudes = 0.0f;
+				for (uint32_t wave = 0; wave < std::min(water.WaveCount, MaxWaterWaves); ++wave)
+					amplitudes += std::abs(water.Waves[wave].Amplitude);
+				const float heightScale = glm::length(glm::vec3(water.World[1]));
+				const float lift = heightScale > 0.0f ? amplitudes / heightScale : 0.0f;
+				Aabb footprint;
+				footprint.Min = glm::vec3(-0.5f * water.Size.x, -lift, -0.5f * water.Size.y);
+				footprint.Max = glm::vec3(0.5f * water.Size.x, lift, 0.5f * water.Size.y);
+				const std::optional<PlanarReflectionScreenRect> drawn = ComputePlanarReflectionScreenRect(footprint, water.World, frame.Camera);
+				if (drawn)
+					rect = rect ? PlanarReflectionScreenRect{ .Min = glm::min(rect->Min, drawn->Min), .Max = glm::max(rect->Max, drawn->Max) } : *drawn;
+				break;
+			}
 			if (!rect)
 				continue;
 			planes[index] = *plane;

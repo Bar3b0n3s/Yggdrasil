@@ -45,6 +45,7 @@
 #include "Engine/Renderer/TerrainPass.h"
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
+#include "Engine/Renderer/WaterGeometry.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/FogConstants.h"
@@ -1462,6 +1463,7 @@ namespace Engine {
 			state.Targets.WaterRefraction = nullptr;
 			state.Targets.WaterFramebuffer = nullptr;
 			state.Targets.WaterPickingFramebuffer = nullptr;
+			state.Targets.UnderwaterFramebuffer = nullptr;
 		}
 		std::set<size_t> visibleMeshes;
 		for (const auto& draw : state.OpaqueDraws)
@@ -1488,6 +1490,7 @@ namespace Engine {
 		stats.PlanarReflectionEntities = std::move(frame.PlanarReflectionEntities);
 		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the waters the Water pass drew.
 		stats.WaterSurfaces = frame.WaterSurfaces;
+		stats.Underwater = frame.Underwater;
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -2634,10 +2637,36 @@ namespace Engine {
 			.Refraction = Targets.WaterRefraction,
 			.ViewDepth = Targets.ViewDepth,
 			.Picking = frame.Picking,
+			.PlanarReflectionSlots = frame.PlanarReflectionEntities,
 		};
 		const Status recorded = Pipelines->Water->RecordSurface(commandList, *Cache, WaterResources, inputs, counters);
 		recording.EndPass(counters);
 		frame.WaterSurfaces = recorded ? static_cast<uint32_t>(frame.Snapshot->Waters.size()) : 0U;
+		frame.WaterViewSet = recorded ? *set : nullptr;
+		frame.KeepFirstError(recorded);
+	}
+
+	void SceneRenderer::State::RecordUnderwater(Detail::SceneRendererFrame& frame)
+	{
+		if (frame.WaterSurfaces == 0 || frame.WaterViewSet == nullptr || !IsNearPlaneUnderWater(frame.Snapshot->Waters, frame.Camera))
+			return;
+		if (Targets.UnderwaterFramebuffer == nullptr)
+		{
+			Result<nvrhi::FramebufferHandle> framebuffer = Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.SceneColor));
+			if (!framebuffer)
+			{
+				frame.KeepFirstError(std::unexpected(std::move(framebuffer).error()));
+				return;
+			}
+			Targets.UnderwaterFramebuffer = std::move(*framebuffer);
+		}
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		frame.Recording->BeginPass("Underwater", &commandList);
+		RenderPassCounters counters;
+		const Status recorded = Pipelines->Water->RecordUnderwater(commandList, WaterResources,
+			{ .Framebuffer = Targets.UnderwaterFramebuffer, .ViewSet = frame.WaterViewSet, .SceneDepth = Targets.SceneDepth }, counters);
+		frame.Recording->EndPass(counters);
+		frame.Underwater = recorded.has_value();
 		frame.KeepFirstError(recorded);
 	}
 
@@ -3302,6 +3331,8 @@ namespace Engine {
 
 	void SceneRenderer::State::RecordHdrPostStage(Detail::SceneRendererFrame& frame)
 	{
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the view under a water first, so TAA resolves it.
+		RecordUnderwater(frame);
 		RecordTaa(frame);
 		const PostProcessSettings& post = frame.Snapshot->Post;
 		frame.Bloom = nullptr;

@@ -905,6 +905,187 @@ namespace Engine {
 			}
 			device.RunGarbageCollection();
 		}
+
+		// The planar opt-in (decision 3, W47.3): a PlanarReflection on a water gives an item of its base plane (Normal +Y,
+		// Offset 0), ranked by the water's footprint, whose slot the water samples in place of its probe term, writing a zero SSR
+		// multiplier. A camera 1 m above calm, smooth water looks at a green emitting marker standing on it 6 m ahead, in a scene
+		// with no light and no ambient and SSR off: without the reflection the water reflects black where the marker's mirror
+		// image lies; with it, green.
+		TEST_CASE("Water: a planar reflection on a water reflects the scene in its base plane" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 1.0f, 2.0f), glm::vec3(0.0f, 0.2f, -4.0f),
+					glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+				const glm::vec3 markerCentre(0.0f, 1.2f, -6.0f);
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), markerCentre), .Mesh = QuadMeshHandle, .Materials = { GreenMarkerMaterialHandle }, .Entity = UUID(1) });
+				WaterItem water = MakeWater(RenderWaterShape::Rectangle, glm::mat4(1.0f), {}, 0.0, 600, 0);
+				water.Size = glm::vec2(40.0f);
+				water.Roughness = 0.02f;
+				water.DetailNormalStrength = 0.0f;
+				water.FoamAmount = 0.0f;
+				snapshot.Waters.push_back(water);
+
+				const std::vector<glm::dvec3> probed = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 0);
+				snapshot.PlanarReflections.push_back(PlanarReflectionItem{ .World = glm::mat4(1.0f), .Normal = glm::vec3(0.0f, 1.0f, 0.0f), .Offset = 0.0f, .Entity = UUID(600) });
+				const std::vector<glm::dvec3> mirrored = RenderSceneColor(device, fixture, snapshot);
+				const RenderStats& stats = fixture.Renderer().GetRenderStats();
+				CHECK(stats.WaterSurfaces == 1);
+				CHECK(stats.PlanarReflections == 1);
+				REQUIRE(stats.PlanarReflectionEntities.size() == 1);
+				CHECK(stats.PlanarReflectionEntities[0] == UUID(600));
+
+				const glm::vec2 image = ProjectToPixel(snapshot.Camera.Projection * snapshot.Camera.View, glm::vec3(markerCentre.x, -markerCentre.y, markerCentre.z));
+				const auto x = static_cast<uint32_t>(image.x);
+				const auto y = static_cast<uint32_t>(image.y);
+				REQUIRE(x < Size);
+				REQUIRE(y < Size);
+				INFO("the reflection's pixel (" << x << ", " << y << "): green " << Texel(probed, x, y).g << " without the planar reflection, " << Texel(mirrored, x, y).g
+												<< " with it");
+				CHECK(Texel(probed, x, y).g < 0.02);
+				CHECK(Texel(mirrored, x, y).g > 0.1);
+				// SSR neither traces nor composites over a water that reflects its plane: a zero multiplier, the water's flag kept.
+				const Image roughness = ReadTexture(device, fixture.Renderer().GetSceneRoughnessTexture());
+				CHECK((WordTexel(roughness, x, y, 2, 0) & 0x00FFFFFFU) == 0);
+				CHECK(((WordTexel(roughness, x, y, 2, 1) >> 8) & 0xFFU) == 0xFFU);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The Underwater pass (decision 3, W47.3). A camera 2 m under calm water looks along it at a red emitting wall 10 m
+		// away: the pass records (its row, RenderStats::Underwater) and the wall is fogged toward the water's UnderwaterColor over
+		// its UnderwaterVisibility along the path from the near plane, exp(-9.9 / 15) of the red left and the rest the
+		// underwater colour. A camera 2 m above the water looking at the same wall records no Underwater pass and sees the wall
+		// as the render without water does.
+		TEST_CASE("Underwater: a camera under the surface sees the underwater view, and one above it does not" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				const auto hasRow = [&fixture](std::string_view row)
+				{
+					return Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), row) != nullptr;
+				};
+				for (const float height : { -2.0f, 2.0f })
+				{
+					CAPTURE(height);
+					RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, height, 0.0f), glm::vec3(0.0f, height, -10.0f),
+						glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+					snapshot.Camera.ClearColor = glm::vec3(0.0f);
+					snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(20.0f)),
+						.Mesh = QuadMeshHandle,
+						.Materials = { RedFloorMaterialHandle },
+						.Entity = UUID(1) });
+					const std::vector<glm::dvec3> dry = RenderSceneColor(device, fixture, snapshot);
+					WaterItem water = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0, 600, 0);
+					water.FoamAmount = 0.0f;
+					snapshot.Waters.push_back(water);
+					const std::vector<glm::dvec3> wet = RenderSceneColor(device, fixture, snapshot);
+					const glm::dvec3 before = Texel(dry, 32, 32);
+					const glm::dvec3 after = Texel(wet, 32, 32);
+					INFO("the wall's centre: dry " << before.r << ", " << before.g << "; wet " << after.r << ", " << after.g << ", " << after.b);
+					REQUIRE(before.r > 0.95);
+					if (height < 0.0f)
+					{
+						CHECK(fixture.Renderer().GetRenderStats().Underwater);
+						CHECK(hasRow("Underwater"));
+						const double distance = 10.0 - static_cast<double>(snapshot.Camera.NearClip);
+						const double kept = std::exp(-distance / static_cast<double>(water.UnderwaterVisibility));
+						CHECK(std::abs(after.r - (before.r * kept + static_cast<double>(water.UnderwaterColor.r) * (1.0 - kept))) < 0.02);
+						CHECK(std::abs(after.g - static_cast<double>(water.UnderwaterColor.g) * (1.0 - kept)) < 0.01);
+						CHECK(std::abs(after.b - static_cast<double>(water.UnderwaterColor.b) * (1.0 - kept)) < 0.01);
+					}
+					else
+					{
+						CHECK_FALSE(fixture.Renderer().GetRenderStats().Underwater);
+						CHECK_FALSE(hasRow("Underwater"));
+						CHECK(after == before);
+					}
+				}
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The waterline (decision 3, W47.3): a camera whose eye lies 2 cm above a swell's surface under it looks along the water
+		// at a red emitting wall. The water's own colours are black, the environment and the lights too, so a pixel holds green
+		// only where the Underwater pass fogged it toward the green UnderwaterColor (or a back face's total internal reflection
+		// shows it, seen only from under the water). Each column of the image has its fogged pixels in one run from the bottom
+		// up to one waterline, where the near plane crosses the surface: within two rows of the first whose point on the near
+		// plane lies below the CPU surface.
+		TEST_CASE("Underwater: a camera straddling the surface draws one waterline" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				const double time = 2.5;
+				const WaterSurfaceDesc surface = ResolveWaterSurface(SwellWaves, 1.0, glm::dvec2(0.0), MakeWaterFrame(glm::dmat4(1.0)));
+				const double under = EvaluateWaterSurface(surface, glm::dvec2(0.0, 0.0), time).Height;
+				const auto eye = glm::vec3(0.0f, static_cast<float>(under + 0.02), 0.0f);
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, eye, eye + glm::vec3(0.0f, 0.0f, -10.0f), glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+				snapshot.Camera.ClearColor = glm::vec3(0.0f);
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(20.0f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { RedFloorMaterialHandle },
+					.Entity = UUID(1) });
+				WaterItem water = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), SwellWaves, time, 600, 0);
+				water.ShallowColor = glm::vec3(0.0f);
+				water.DeepColor = glm::vec3(0.0f);
+				water.FoamAmount = 0.0f;
+				snapshot.Waters.push_back(water);
+				const std::vector<glm::dvec3> image = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().Underwater);
+
+				// Each pixel's point on the near plane (reverse-Z depth 1) through the inverse view-projection, and the CPU surface
+				// under it: the first row of a column whose point lies below it is where the waterline is expected.
+				const glm::dmat4 inverse = glm::inverse(glm::dmat4(snapshot.Camera.Projection) * glm::dmat4(snapshot.Camera.View));
+				const auto nearPoint = [&inverse](uint32_t x, uint32_t y)
+				{
+					const glm::dvec4 point = inverse
+						* glm::dvec4((static_cast<double>(x) + 0.5) / Size * 2.0 - 1.0, 1.0 - (static_cast<double>(y) + 0.5) / Size * 2.0, 1.0, 1.0);
+					return glm::dvec3(point) / point.w;
+				};
+				for (uint32_t x = 0; x < Size; x += 7)
+				{
+					uint32_t expectedRow = Size;
+					for (uint32_t y = 0; y < Size && expectedRow == Size; ++y)
+					{
+						const glm::dvec3 point = nearPoint(x, y);
+						if (point.y < EvaluateWaterSurface(surface, glm::dvec2(point.x, point.z), time).Height)
+							expectedRow = y;
+					}
+					uint32_t transitions = 0;
+					uint32_t firstFogged = Size;
+					for (uint32_t y = 0; y < Size; ++y)
+					{
+						const bool fogged = Texel(image, x, y).g > 0.005;
+						if (fogged && firstFogged == Size)
+							firstFogged = y;
+						if (y > 0 && fogged != (Texel(image, x, y - 1).g > 0.005))
+							++transitions;
+					}
+					CAPTURE(x);
+					CAPTURE(expectedRow);
+					CAPTURE(firstFogged);
+					REQUIRE(expectedRow > 8);
+					REQUIRE(expectedRow < Size - 8);
+					CHECK(transitions == 1);
+					CHECK(Texel(image, x, Size - 1).g > 0.005);
+					CHECK(std::abs(static_cast<double>(firstFogged) - static_cast<double>(expectedRow)) <= 2.0);
+				}
+			}
+			device.RunGarbageCollection();
+		}
 	}
 
 }

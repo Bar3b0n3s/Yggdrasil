@@ -218,7 +218,7 @@ namespace Engine {
 		// skybox and before SSR in Forward, with its two rows and its WaterRefraction target, and the Underwater pass first in
 		// HdrPost, before TAA; declared without pipelines until W47.2's render stream and W47.3 set them, as M26's contract
 		// declared its passes. W47.2's render stream gives Water its two pipelines of the program Water (the surface, and the
-		// surface with EntityId); Underwater has none until W47.3.
+		// surface with EntityId), and W47.3 Underwater its one of the same program.
 		TEST_CASE("RenderPassDeclarations: the water comes after the skybox and before SSR, and the underwater view first in HdrPost")
 		{
 			const auto find = [](std::string_view name)
@@ -247,11 +247,14 @@ namespace Engine {
 			CHECK(underwater->StatsRows[0] == "Underwater");
 			CHECK(underwater->Targets.empty());
 			CHECK(water->PipelineCount == 2);
-			CHECK(water->PipelineCount == WaterPass::PipelineCount);
+			CHECK(water->PipelineCount == WaterPass::SurfacePipelineCount);
 			REQUIRE(water->Programs.size() == 1);
 			CHECK(water->Programs[0] == "Water");
+			CHECK(underwater->PipelineCount == 1);
+			CHECK(underwater->PipelineCount == WaterPass::UnderwaterPipelineCount);
+			REQUIRE(underwater->Programs.size() == 1);
+			CHECK(underwater->Programs[0] == "Water");
 			CHECK(WaterPass::GetLayoutDescriptions().size() == WaterPass::PipelineCount);
-			CHECK(underwater->PipelineCount == 0);
 		}
 
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger): the planar reflections first in the Forward
@@ -293,8 +296,9 @@ namespace Engine {
 			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14), 77 with M33's Particles pass
 			// (Docs/Decisions/0048-m33-particle-look.md decision 4) and 76 without M26's HdrAdditive, which M33's merge removed
 			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3);
-			// 79 with M47's Water pass (Docs/Decisions/0065-m47-water.md decision 3, W47.2's render stream).
-			CHECK(GetDeclaredPipelineCount() == 79);
+			// 79 with M47's Water pass (Docs/Decisions/0065-m47-water.md decision 3, W47.2's render stream), 80 with its
+			// Underwater pass (W47.3).
+			CHECK(GetDeclaredPipelineCount() == 80);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -323,9 +327,9 @@ namespace Engine {
 			CHECK((lights - 1)->Name == "Sprites");
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
 			CHECK(QuadBatcher::PipelineCount == 5);
-			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain, 79 with
-			// M47's Water pass.
-			CHECK(GetDeclaredPipelineCount() == 79);
+			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain, 80 with
+			// M47's Water and Underwater passes.
+			CHECK(GetDeclaredPipelineCount() == 80);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -358,8 +362,8 @@ namespace Engine {
 			// Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and M33's 3 (the Particles pass,
 			// Docs/Decisions/0048-m33-particle-look.md decision 4), less the QuadBatcher's HdrAdditive, which M33's merge removed
 			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3),
-			// and M47's 2 (the Water pass's surfaces, Docs/Decisions/0065-m47-water.md decision 3).
-			static_assert(GetDeclaredPipelineCount() == 79);
+			// and M47's 3 (the Water pass's surfaces and the Underwater pass, Docs/Decisions/0065-m47-water.md decision 3).
+			static_assert(GetDeclaredPipelineCount() == 80);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

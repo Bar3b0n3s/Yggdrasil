@@ -38,7 +38,8 @@
 // declaration's pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the
 // Upscale pipelines, Ui the QuadBatcher's and the Text pipelines). M47's contract (C47, Docs/Decisions/0065-m47-water.md
 // decision 2) declares Water (after Skybox, before Ssr) and Underwater (first in HdrPost, before Taa) M26's way, with their
-// rows and without pipelines until W47.2's render stream (Water's two) and W47.3 (Underwater's one) set them.
+// rows and without pipelines until W47.2's render stream (Water's two) and W47.3 (Underwater's one) set them, both of the
+// program Water.
 
 namespace Engine {
 
@@ -252,8 +253,8 @@ namespace Engine {
 		// a water's surface fogged toward its UnderwaterColor over its UnderwaterVisibility, with the waterline where the camera
 		// straddles the surface, recorded when the camera's near plane may lie under a water, before TAA so the transparents and
 		// particles under the surface are fogged too. Declared by C47 with its row and without pipelines; W47.3 sets its one
-		// pipeline of the program Water.
-		{ .Name = "Underwater", .Stage = RenderStage::HdrPost, .StatsRows = Detail::UnderwaterRows },
+		// pipeline of the program Water (WaterPass::RecordUnderwater).
+		{ .Name = "Underwater", .Stage = RenderStage::HdrPost, .PipelineCount = 1, .Programs = Detail::WaterPrograms, .StatsRows = Detail::UnderwaterRows },
 		// M26 (C26.1, R-TAA; decisions 10, 13 and 17): the jittered HDR image resolved against its history (TaaHistory), in
 		// HdrPost before Bloom and Exposure (after M47's Underwater), so they read the resolved image; recorded only with
 		// AntiAliasing Taa in a Lit view outside the wireframe and pixel-art mode. TaaPass's one compute pipeline of the program

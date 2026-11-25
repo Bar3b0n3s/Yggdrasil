@@ -6,6 +6,7 @@
 #include <glm/gtc/type_precision.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -249,6 +250,68 @@ namespace Engine {
 		const glm::dvec2 centre(world[3].x, world[3].z);
 		const glm::dvec2 extent = glm::abs(axisX) * half.x + glm::abs(axisZ) * half.y;
 		return { .Min = centre - extent, .Max = centre + extent };
+	}
+
+	bool IsNearPlaneUnderWater(std::span<const WaterItem> waters, const CameraData& camera)
+	{
+		const glm::dmat4 viewProjection = glm::dmat4(camera.Projection) * glm::dmat4(camera.View);
+		const double determinant = glm::determinant(viewProjection);
+		if (!std::isfinite(determinant) || determinant == 0.0)
+			return false;
+		const glm::dmat4 inverse = glm::inverse(viewProjection);
+		std::array<glm::dvec3, 4> corners{};
+		for (uint32_t corner = 0; corner < 4; ++corner)
+		{
+			// Reverse-Z: the near plane at depth 1.
+			const glm::dvec4 point = inverse * glm::dvec4((corner & 1U) != 0 ? 1.0 : -1.0, (corner & 2U) != 0 ? 1.0 : -1.0, 1.0, 1.0);
+			if (!(std::abs(point.w) > 0.0))
+				return false;
+			corners[corner] = glm::dvec3(point) / point.w;
+		}
+		for (const WaterItem& water : waters)
+		{
+			const glm::dmat4 world(water.World);
+			const double base = world[3].y;
+			double amplitudes = 0.0;
+			double sideways = 0.0;
+			for (uint32_t wave = 0; wave < std::min(water.WaveCount, MaxWaterWaves); ++wave)
+			{
+				amplitudes += std::abs(static_cast<double>(water.Waves[wave].Amplitude));
+				sideways += std::abs(static_cast<double>(water.Waves[wave].Steepness) * static_cast<double>(water.Waves[wave].Amplitude));
+			}
+			double lowest = std::numeric_limits<double>::infinity();
+			double highest = -std::numeric_limits<double>::infinity();
+			for (const glm::dvec3& corner : corners)
+			{
+				lowest = std::min(lowest, corner.y);
+				highest = std::max(highest, corner.y);
+			}
+			if (water.Shape != RenderWaterShape::Rectangle)
+			{
+				if (lowest <= base + amplitudes)
+					return true;
+				continue;
+			}
+			if (lowest > base + std::min(amplitudes, static_cast<double>(water.Headroom)) || highest < base - static_cast<double>(water.Depth))
+				continue;
+			// The corners' bounds in the Rectangle's local X and Z against its footprint, widened.
+			const glm::dvec2 axisX = Utils::GetWaterAxisX(world);
+			const glm::dvec2 axisZ(-axisX.y, axisX.x);
+			const glm::dvec2 half(static_cast<double>(water.Size.x) * 0.5 * glm::length(glm::dvec3(world[0])) + sideways,
+				static_cast<double>(water.Size.y) * 0.5 * glm::length(glm::dvec3(world[2])) + sideways);
+			glm::dvec2 minimum(std::numeric_limits<double>::infinity());
+			glm::dvec2 maximum(-std::numeric_limits<double>::infinity());
+			for (const glm::dvec3& corner : corners)
+			{
+				const glm::dvec2 relative = glm::dvec2(corner.x, corner.z) - glm::dvec2(world[3].x, world[3].z);
+				const glm::dvec2 local(glm::dot(relative, axisX), glm::dot(relative, axisZ));
+				minimum = glm::min(minimum, local);
+				maximum = glm::max(maximum, local);
+			}
+			if (maximum.x >= -half.x && minimum.x <= half.x && maximum.y >= -half.y && minimum.y <= half.y)
+				return true;
+		}
+		return false;
 	}
 
 	WaterRecord MakeWaterRecord(const WaterItem& water, const glm::dvec2& origin, const glm::dvec2& camera, uint32_t waterCount, uint32_t planarSlot)

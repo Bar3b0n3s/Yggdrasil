@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 // The Water pass's geometry and records (M47, Docs/Decisions/0065-m47-water.md decision 3 and the W47.2 record; Renderer/
@@ -92,5 +93,12 @@ namespace Engine {
 	// (x, z) `camera`, among `waterCount` waters, sampling planar reflection slot `planarSlot` (WaterNoPlanarSlot for none).
 	[[nodiscard]] WaterRecord MakeWaterRecord(const WaterItem& water, const glm::dvec2& origin, const glm::dvec2& camera, uint32_t waterCount,
 		uint32_t planarSlot = WaterNoPlanarSlot);
+
+	// W47.3: whether the Underwater pass records for `camera` over `waters`, a conservative test on the snapshot alone: the
+	// near plane's rectangle (its four corners, through the inverse of the projection times the view) meets a water's region
+	// that may lie under its surface: below its base plus the sum of its waves' amplitudes, and for a Rectangle inside its
+	// footprint widened by the sum of its waves' Q A and above its floor (Depth below its base). A camera whose projection
+	// cannot be inverted is never under water.
+	[[nodiscard]] bool IsNearPlaneUnderWater(std::span<const WaterItem> waters, const CameraData& camera);
 
 }

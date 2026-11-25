@@ -27,7 +27,16 @@
 // coverage. Main thread.
 //
 // Frozen by M47's contract C47 (decision 2): the class, its pipeline count, Create and RecordSurface. W47.2's render stream
-// implements them and the pipeline set creates the pass; W47.3 adds the Underwater pass's recording.
+// implements them and the pipeline set creates the pass; W47.3 adds the Underwater pass's recording (RecordUnderwater, its
+// one pipeline of the program Water) and the planar opt-in's slots.
+//
+// The Underwater pass (decision 3; W47.3): first in HdrPost, before TAA, when the camera's near plane may lie under a water
+// (IsNearPlaneUnderWater, WaterGeometry.h, on the snapshot alone): one triangle over the viewport blended into SceneColor,
+// which fogs each pixel whose point on the near plane lies under the water that holds it (the point rule over the view's
+// records, the masks included, against the surface the clipmap draws) toward that water's UnderwaterColor over its
+// UnderwaterVisibility along the view ray to SceneDepth's point (a Rectangle's clipped to its volume's sides and floor), so a
+// camera straddling the surface draws one waterline. The surfaces' back faces show Snell's window: the world above
+// refracted inside it, the total internal reflection's UnderwaterColor outside it.
 
 namespace Engine {
 
@@ -62,12 +71,23 @@ namespace Engine {
 		std::span<const UUID> PlanarReflectionSlots{};
 	};
 
+	// What RecordUnderwater draws with (W47.3): the framebuffer of SceneColor alone, the view set RecordSurface drew with
+	// (set 0) and SceneDepth, read as a texture. None of the pointers is null.
+	struct WaterUnderwaterInputs
+	{
+		nvrhi::IFramebuffer* Framebuffer = nullptr;
+		nvrhi::IBindingSet* ViewSet = nullptr;
+		nvrhi::ITexture* SceneDepth = nullptr;
+	};
+
 	class WaterPass
 	{
 	public:
-		// The Water declaration's pipelines (RenderPassDeclaration.h): the surface, and the surface with EntityId.
+		// The Water declaration's pipelines (RenderPassDeclaration.h): the surface, and the surface with EntityId; the
+		// Underwater declaration's one (W47.3).
 		static constexpr uint32_t SurfacePipelineCount = 2;
-		static constexpr uint32_t PipelineCount = SurfacePipelineCount;
+		static constexpr uint32_t UnderwaterPipelineCount = 1;
+		static constexpr uint32_t PipelineCount = SurfacePipelineCount + UnderwaterPipelineCount;
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
@@ -101,6 +121,12 @@ namespace Engine {
 		// them). Errors: those of a record buffer's or a binding set's creation, with nothing drawn.
 		[[nodiscard]] Status RecordSurface(nvrhi::ICommandList& commandList, GpuResourceCache& cache, WaterViewResources& resources,
 			const WaterSurfaceInputs& inputs, RenderPassCounters& counters);
+
+		// W47.3: draws the Underwater pass under the caller's Underwater row, counting its draw in `counters`, with the records
+		// RecordSurface wrote into `resources` this render (InvalidState without them). Errors: those of its binding set's
+		// creation, with nothing drawn.
+		[[nodiscard]] Status RecordUnderwater(nvrhi::ICommandList& commandList, WaterViewResources& resources, const WaterUnderwaterInputs& inputs,
+			RenderPassCounters& counters);
 	private:
 		struct State;
 		Scope<State> m_State;

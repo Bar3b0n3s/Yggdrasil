@@ -1195,11 +1195,11 @@ declare extern type PixelPerfectCamera with
 	ReferenceWidth: number
 end
 
--- Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before.
+-- Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before. On an entity with a Water, the water reflects in its base plane (its Normal and Offset are not read).
 declare extern type PlanarReflection with
-	-- The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. Not read on a Water, which reflects in its base plane. [All modes; Runtime|Test; pure/read; setter mutates]
 	Normal: vector
-	-- The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. Not read on a Water. [All modes; Runtime|Test; pure/read; setter mutates]
 	Offset: number
 	-- The reflection's size as a share of the view's scene resolution: 0.5 renders it at half the width and height, a quarter of the pixels. [All modes; Runtime|Test; pure/read; setter mutates]
 	ResolutionScale: number

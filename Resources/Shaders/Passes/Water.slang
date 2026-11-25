@@ -83,10 +83,13 @@ Texture2D<float4> Refraction : register(t1, space1);
 Texture2D<float> WaterViewDepth : register(t2, space1);
 Texture2D<float4> WaterNormalMap : register(t3, space1);
 Texture2D<float4> WaterFoamMap : register(t4, space1);
+// The Underwater pipeline's set 1 (W47.3): the records (t0) and SceneDepth, read as a texture (t5).
+Texture2D<float> UnderwaterSceneDepth : register(t5, space1);
 
 #include "Common/LightLoop.slang"
 #include "Common/Probes.slang"
 #include "Common/Fog.slang"
+#include "Common/PlanarReflections.slang"
 #include "Common/Waves.slang"
 
 // The share of the view's height a fully tilted view-space normal moves the refraction at a RefractionStrength of 1.
@@ -102,6 +105,12 @@ static const float WaterDetailSecondDrift = 0.75;
 static const float2 WaterDetailSecondTurn = float2(0.8, 0.6);
 // The foam map's tiling, in DetailScale.
 static const float WaterFoamTiling = 2.0;
+// W47.3: water's refractive index against air (Snell's window from below), and the metres a fully tilted wave normal moves
+// the point a planar reflection is sampled at.
+static const float WaterRefractiveIndex = 1.333;
+static const float WaterPlanarDistortion = 0.5;
+// The Underwater pass: no water holds the point.
+static const uint WaterNone = 0xFFFFFFFF;
 
 struct WaterVertexInput
 {
@@ -263,6 +272,20 @@ WaterShading ShadeWater(WaterVertexOutput input, bool isFrontFace)
 	const float3 refractedColor = Refraction.Load(int3(refracted, 0)).rgb;
 	const float transmittance = above ? exp(-column / record.ShallowColor.a) : 1.0;
 
+	// From below (W47.3): inside Snell's window, where the ray leaves the water into the air (sin of the angle in the air
+	// below 1), the world above refracted, less the share Fresnel's law (Schlick's, at the angle in the air) reflects back;
+	// outside it the surface reflects the water below wholly (total internal reflection), tinted UnderwaterColor. The
+	// Underwater pass fogs the path to it. SSR traces nothing here.
+	if (!above)
+	{
+		const float cosIncident = saturate(dot(normal, view));
+		const float sinOutside2 = WaterRefractiveIndex * WaterRefractiveIndex * (1.0 - cosIncident * cosIncident);
+		const float reflected = sinOutside2 < 1.0 ? 0.02 + 0.98 * pow(1.0 - sqrt(1.0 - sinOutside2), 5.0) : 1.0;
+		shading.Radiance = refractedColor * (1.0 - reflected) + record.Underwater.rgb * reflected;
+		shading.Roughness = uint2(PackUnorm4x8(float4(0.0, 0.0, 0.0, roughness)), PackUnorm4x8(float4(1.0, 1.0, 0.0, 0.0)));
+		return shading;
+	}
+
 	// Foam on the shallows and the crests, a white diffuse surface over the body.
 	const float shore = above ? saturate(1.0 - column / max(record.Look.z, 1e-4)) : 0.0;
 	const float crest = saturate((WaterCrestFoamStart - waves.Jacobian) / (WaterCrestFoamStart - WaterCrestFoamFull));
@@ -284,6 +307,15 @@ WaterShading ShadeWater(WaterVertexOutput input, bool isFrontFace)
 	}
 	irradiance = ShadeProbeIrradiance(worldPosition, normal, irradiance);
 	prefiltered = ShadeProbeSpecular(worldPosition, reflection, roughness, prefiltered);
+	// W47.3's planar opt-in: a water with a drawn planar reflection slot reflects its base plane's mirror view in place of the
+	// probe term, sampled at the point moved by the wave normal (M42's glass, Common/PlanarReflections.slang), and SSR
+	// neither traces nor composites over it (a zero multiplier, as M42's glass).
+	const bool planar = record.PlanarSlot != WaterNoPlanarSlot;
+	if (planar)
+	{
+		const float3 planarPoint = float3(worldPosition.x + normal.x * WaterPlanarDistortion, record.BaseHeight, worldPosition.z + normal.z * WaterPlanarDistortion);
+		prefiltered = ShadePlanarReflection(record.PlanarSlot, planarPoint, roughness, alpha, prefiltered);
+	}
 	const float3 transmitted = saturate(float3(1.0) - multiScatter);
 	const float3 specularMultiplier = multiScatter * ((1.0 - foam) * HorizonOcclusion(reflection, geometricNormal));
 	radiance += irradiance * diffuseColor * transmitted;
@@ -300,7 +332,7 @@ WaterShading ShadeWater(WaterVertexOutput input, bool isFrontFace)
 	radiance += refractedColor * transmission;
 	shading.Radiance = radiance;
 	// SceneRoughness (SceneTargetFormats.h): the specular multiplier and roughness; the occlusion 1 and the water flag.
-	shading.Roughness = uint2(PackUnorm4x8(float4(specularMultiplier, roughness)), PackUnorm4x8(float4(1.0, 1.0, 0.0, 0.0)));
+	shading.Roughness = uint2(PackUnorm4x8(float4(planar ? float3(0.0) : specularMultiplier, roughness)), PackUnorm4x8(float4(1.0, 1.0, 0.0, 0.0)));
 	return shading;
 }
 
@@ -349,5 +381,117 @@ WaterPickingOutput PSPicking(WaterVertexOutput input, bool isFrontFace : SV_IsFr
 	output.Roughness = shading.Roughness;
 	output.EntityId = Records[input.Water].PickId;
 	output.Coverage = shading.Coverage;
+	return output;
+}
+
+// The Underwater pass (W47.3; Renderer/WaterPass.h's RecordUnderwater): one triangle over the viewport, first in HdrPost,
+// blended into SceneColor (SrcAlpha, InvSrcAlpha; its alpha kept). A pixel whose point on the near plane lies under the
+// water that holds it (the point rule over the view's records: the Rectangle whose volume holds it with the highest surface
+// there, ties to the first in snapshot order, else the Ocean; the surface the clipmap draws, GetWaterSurfaceHeight) fogs
+// its view ray from the near plane to SceneDepth's point, a Rectangle's clipped to the sides and floor of its volume,
+// toward the water's UnderwaterColor: amount 1 - exp(-length / UnderwaterVisibility). Every other pixel writes zero
+// coverage, so a camera straddling the surface draws one waterline where the near plane crosses the waves.
+struct UnderwaterVaryings
+{
+	float4 Position : SV_Position;
+};
+
+[shader("vertex")]
+UnderwaterVaryings VSUnderwater(uint vertexID : SV_VulkanVertexID)
+{
+	UnderwaterVaryings output;
+	output.Position = float4(vertexID == 1 ? 3.0 : -1.0, vertexID == 2 ? 3.0 : -1.0, 0.0, 1.0);
+	return output;
+}
+
+// The world point at the scene position `pixel` (pixels from the top-left corner) and the reverse-Z depth `depth` (1 the
+// near plane).
+float3 GetViewPoint(float2 pixel, float depth)
+{
+	const float2 ndc = float2(pixel.x * View.InverseViewportSize.x * 2.0 - 1.0, 1.0 - pixel.y * View.InverseViewportSize.y * 2.0);
+	const float4 world = mul(View.InverseViewProjection, float4(ndc, depth, 1.0));
+	return world.xyz / world.w;
+}
+
+// The metres the ray from `start` along the unit `direction` (both relative to the records' Origin in x and z) runs inside
+// the Rectangle `record`'s footprint and above its floor (Depth below its base): its exit through a side or the floor.
+float GetRectangleExitDistance(WaterRecord record, float3 start, float3 direction)
+{
+	const float2 axisX = record.AxisX;
+	const float2 axisZ = float2(-axisX.y, axisX.x);
+	const float2 relative = start.xz - record.FrameOrigin;
+	const float2 local = float2(dot(relative, axisX), dot(relative, axisZ));
+	const float2 along = float2(dot(direction.xz, axisX), dot(direction.xz, axisZ));
+	float exit = 3.0e38;
+	for (uint axis = 0; axis < 2; ++axis)
+	{
+		if (along[axis] > 1e-6)
+			exit = min(exit, (record.HalfExtents[axis] - local[axis]) / along[axis]);
+		else if (along[axis] < -1e-6)
+			exit = min(exit, (-record.HalfExtents[axis] - local[axis]) / along[axis]);
+	}
+	if (direction.y < -1e-6)
+		exit = min(exit, (record.BaseHeight - record.Depth - start.y) / direction.y);
+	return max(exit, 0.0);
+}
+
+struct UnderwaterOutput
+{
+	float4 Color : SV_Target0;
+	uint Coverage : SV_Coverage;
+};
+
+[shader("fragment")]
+UnderwaterOutput PSUnderwater(UnderwaterVaryings input)
+{
+	UnderwaterOutput output;
+	output.Color = float4(0.0);
+	output.Coverage = 0u;
+	const WaterRecord first = Records[0];
+	const float3 nearPoint = GetViewPoint(input.Position.xy, 1.0);
+	const float3 start = float3(nearPoint.x - first.Origin.x, nearPoint.y, nearPoint.z - first.Origin.y);
+
+	// The point rule.
+	uint holder = WaterNone;
+	uint ocean = WaterNone;
+	float surface = 0.0;
+	for (uint index = 0; index < first.WaterCount; ++index)
+	{
+		const WaterRecord record = Records[index];
+		if ((record.Flags & WaterRecordFlagRectangle) == 0)
+		{
+			ocean = ocean == WaterNone ? index : ocean;
+			continue;
+		}
+		if (!IsInWaterVolume(record, start))
+			continue;
+		const float height = GetWaterSurfaceHeight(record, start.xz);
+		if (holder == WaterNone || height > surface)
+		{
+			holder = index;
+			surface = height;
+		}
+	}
+	if (holder == WaterNone && ocean != WaterNone)
+	{
+		holder = ocean;
+		surface = GetWaterSurfaceHeight(Records[ocean], start.xz);
+	}
+	if (holder == WaterNone || !(start.y < surface))
+		return output;
+
+	// The fog of the under-water segment: to SceneDepth's point, or without one (the far plane) without end.
+	const WaterRecord record = Records[holder];
+	const float depth = UnderwaterSceneDepth.Load(int3(int2(input.Position.xy), 0));
+	float distance = 3.0e38;
+	if (depth > 0.0)
+		distance = length(GetViewPoint(input.Position.xy, depth) - nearPoint);
+	if ((record.Flags & WaterRecordFlagRectangle) != 0)
+	{
+		const float3 direction = SafeNormalize(GetViewPoint(input.Position.xy, 0.5) - nearPoint);
+		distance = min(distance, GetRectangleExitDistance(record, start, direction));
+	}
+	output.Color = float4(record.Underwater.rgb, 1.0 - exp(-distance / max(record.Underwater.a, 1e-3)));
+	output.Coverage = 0xFFFFFFFFu;
 	return output;
 }

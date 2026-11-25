@@ -336,13 +336,17 @@ Limits accepted for v1. A limit that names a milestone is scheduled by ADR 0028 
   - A mirror at the cap of 4 switches between its planar reflection and its fallback as the ranks change (no hysteresis).
   - Geometry on a mirror's reflecting side within the clip bias (1 cm) of its plane is clipped from its reflection.
   - A mirror's blur margin follows the view's `SsrMaxRoughness`, not its glass's own roughness (W42.3's review, the lead's decision): every slot's chain reaches the level of `SsrMaxRoughness`, and its cull and rasterization rectangle widens by two texels of the chain's last level, so even a polished mirror culls and renders about 29% of its reflection's width as margin on each side (276 of 960 pixels at 1080p's default half resolution and `SsrMaxRoughness` 0.6). The measured cost stays far within the budget: Perf.py's room of three mirrors, a median of 0.188 ms at 1920 x 1080 against 2 ms. Sizing the chain and the margin from the glass's roughness is §2's row for later.
-- M47's water (`Docs/Decisions/0065-m47-water.md` decision 3; Skerries' brief S01), accepted at its landing (its buoyancy's limits and the drawn surface's; W47.3 adds the views'):
+- M47's water (`Docs/Decisions/0065-m47-water.md` decision 3; Skerries' brief S01), accepted at its landing:
   - Each collider floats on the plane under its world bounds' centre, so a collider longer than the swell does not follow it: give a hull several colliders to ride a short swell.
   - Jolt's drag uses the whole body's local bounds, whatever is submerged, so a boat with spread pontoons is damped as its whole box.
   - A capsule floats as its bounding box (Jolt 5.6.0's `CapsuleShape` keeps `ConvexShape`'s box volume): 53 % more volume than a capsule whose half height equals its radius, so it floats higher; boxes, spheres and convex meshes are exact.
   - A buoyant body on calm, unchanged water may sleep, and one asleep is skipped: woken by a contact, it gets its buoyancy from the next tick, so it dips by up to one tick's fall.
   - Distant short waves are drawn flat while the physics keeps them: a wave is drawn whole to 3.75 wavelengths from the camera (Chebyshev distance) and flat from 7.5, and every wave is flat beyond about 5.6 to 7.7 km. A 20 m swell is drawn whole to about 75 m and flat from about 150 m, so only long wavelengths reach the horizon.
   - A Rectangle with waves draws its edge displaced sideways by up to the sum of its waves' Q A, and triangles fold within one cell of its corners, while the queries' footprint stays exact: keep a pool's or a canal's waves small.
+  - The sea is absent from M42's mirror views and from probe bakes, as fog is from bakes: a mirror over the sea reflects no sea, and a probe baked over it lights as over its floor.
+  - Transparents and particles under the surface are hidden behind it (the water writes SceneDepth before the transparent pass), and refraction of what lies off screen shows the unrefracted pixel.
+  - The Ocean's mask costs one box test per Rectangle per Ocean pixel.
+  - The Underwater pass's waterline follows the drawn surface, whose short waves fade with distance, not the CPU's; its fog is `UnderwaterColor` as unlit radiance, and the air's fog stays on what lies under the surface; from below the surface shows no foam and no light's glint.
 
 ## 7. Non-goals for v1
 
