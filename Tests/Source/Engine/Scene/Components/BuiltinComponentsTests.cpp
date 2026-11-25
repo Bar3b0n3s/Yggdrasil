@@ -620,7 +620,7 @@ namespace Engine {
 			CHECK(water.DetailNormalStrength == 0.5f);
 			CHECK(water.DetailScale == 4.0f);
 			CHECK(water.DetailDrift == glm::vec2(2.0f, 1.0f));
-			CHECK(water.UnderwaterColor == glm::vec3(0.02f, 0.10f, 0.12f));
+			CHECK(water.UnderwaterColor == glm::vec3(0.07f, 0.30f, 0.33f));
 			CHECK(water.UnderwaterVisibility == 15.0f);
 			CHECK_FALSE(water.NormalMap.IsValid());
 			CHECK_FALSE(water.FoamTexture.IsValid());

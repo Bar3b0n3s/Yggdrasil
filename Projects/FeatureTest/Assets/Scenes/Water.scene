@@ -258,7 +258,7 @@
 					"DetailNormalStrength": 0.5,
 					"DetailScale": 4,
 					"DetailDrift": [2, 1],
-					"UnderwaterColor": [0.02, 0.1, 0.12],
+					"UnderwaterColor": [0.07, 0.3, 0.33],
 					"UnderwaterVisibility": 6,
 					"NormalMap": null,
 					"FoamTexture": null

@@ -499,7 +499,8 @@ namespace Engine {
 				"CharacterController or Dynamic RigidBody." },
 			ValidationCodeInfo{ RenderReflectionInvalidCode, "Warning", false,
 				"A PlanarReflection reflects nothing or not on its glass: its entity has no MeshRenderer with a Mesh, or its mesh's bounds "
-				"reach farther than 5 cm from its plane (usually a Normal along the wrong axis, or a mesh too thick to be one glass).",
+				"reach farther than 5 cm from its plane (usually a Normal along the wrong axis, or a mesh too thick to be one glass). A "
+				"PlanarReflection on an entity with a Water mirrors the water's base plane and is never reported.",
 				"Put the PlanarReflection on the entity whose MeshRenderer draws a flat glass, and set its Normal to the glass's facing axis and "
 				"Offset to its surface (the finding names the axis along which the mesh is thinnest and that face's Offset; the built-in Quad "
 				"faces +Z, the Plane +Y)." },

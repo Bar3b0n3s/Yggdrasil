@@ -46,7 +46,9 @@ namespace Engine {
 	//     Clarity metres of water column; Roughness; RefractionStrength; foam on crests and where the column is shallower than
 	//     ShoreFoamDepth, by FoamAmount; two detail normal layers of NormalMap (null: the built-in WaterNormal) tiled every
 	//     DetailScale metres and drifting at DetailDrift m/s, by DetailNormalStrength; FoamTexture (null: the built-in
-	//     WaterFoam); under the surface, a fog toward UnderwaterColor over UnderwaterVisibility metres. Colours are linear.
+	//     WaterFoam); under the surface, a fog toward UnderwaterColor over UnderwaterVisibility metres, UnderwaterColor also
+	//     being the surface's colour seen from below outside Snell's window. UnderwaterColor is unlit radiance: its default
+	//     suits a sunlit scene, and a dim one (dusk, night, a cave) dims it to the scene's light. Colours are linear.
 	// Component data: serialized and in the state hash of a scene that holds it; nothing derived from it is hashed.
 	struct WaterComponent
 	{
@@ -68,7 +70,7 @@ namespace Engine {
 		float DetailNormalStrength = 0.5f;             // [0, 1]
 		float DetailScale = 4.0f;                      // metres, [0.1, 1000]
 		glm::vec2 DetailDrift = glm::vec2(2.0f, 1.0f); // m/s in local X and Z, each [-100, 100]
-		glm::vec3 UnderwaterColor = glm::vec3(0.02f, 0.10f, 0.12f);
+		glm::vec3 UnderwaterColor = glm::vec3(0.07f, 0.30f, 0.33f);
 		float UnderwaterVisibility = 15.0f;                 // metres, [0.1, 10000]
 		TypedAssetHandle<AssetType::Texture> NormalMap{};   // null: the built-in WaterNormal
 		TypedAssetHandle<AssetType::Texture> FoamTexture{}; // null: the built-in WaterFoam

@@ -35,6 +35,31 @@ namespace Engine {
 			return false;
 		}
 
+		// M47: whether `output` holds a row of `label` reading `value` (spaces, tabs and table bars ignored, as
+		// HasStatsMetricRow ignores them).
+		static bool HasStatsTextRow(std::string_view output, std::string_view label, std::string_view value)
+		{
+			const auto compact = [](std::string text)
+			{
+				std::erase_if(text, [](char character)
+				{
+					return character == ' ' || character == '\t' || character == '\r' || character == '|';
+				});
+				return text;
+			};
+			const std::string expectedRow = compact(std::format("{} {}", label, value));
+			while (!output.empty())
+			{
+				const size_t end = output.find('\n');
+				if (compact(std::string(output.substr(0, end))) == expectedRow)
+					return true;
+				if (end == std::string_view::npos)
+					break;
+				output.remove_prefix(end + 1);
+			}
+			return false;
+		}
+
 	}
 
 	TEST_SUITE("Editor")
@@ -133,6 +158,26 @@ namespace Engine {
 			fixture.Pump();
 			CHECK(fixture.Draw(panel) != paused);
 			CHECK(fixture.Draw(panel).contains("Updates paused"));
+		}
+
+		TEST_CASE("StatsPanel: a displayed view shows its water surfaces and whether it is under water")
+		{
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): the view metrics' Water row reads the surfaces the view drew
+			// (RenderStats::WaterSurfaces) and, while the Underwater pass recorded, " (under water)".
+			for (const bool underwater : { true, false })
+			{
+				CAPTURE(underwater);
+				Test::UtilityPanelFixture fixture;
+				fixture.SetHostViews({ StatsViewSummary{ .Name = "scene", .Available = true, .Frame = "12", .Width = 640, .Height = 360, .PlanarReflections = 1, .WaterSurfaces = 3, .Underwater = underwater } });
+				fixture.OpenProject();
+				StatsPanel panel;
+				fixture.Draw(panel);
+				fixture.Pump();
+				const std::string text = fixture.Draw(panel);
+				INFO(text);
+				CHECK(Utils::HasStatsTextRow(text, "Water", underwater ? "3 surfaces (under water)" : "3 surfaces"));
+				CHECK(Utils::HasStatsTextRow(text, "Planar reflections", "1 drawn / 0 dropped"));
+			}
 		}
 	}
 

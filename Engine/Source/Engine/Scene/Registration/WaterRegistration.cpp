@@ -121,9 +121,13 @@ namespace Engine {
 			.Field("DetailDrift", &WaterComponent::DetailDrift,
 				"How fast the detail normals drift along the water's local X and Z axes, in metres per second.",
 				{ .Min = -100.0, .Max = 100.0, .Unit = "m/s" })
-			.ColorField("UnderwaterColor", &WaterComponent::UnderwaterColor, "The linear colour of the fog a camera under the surface sees.",
+			.ColorField("UnderwaterColor", &WaterComponent::UnderwaterColor,
+				"The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside "
+				"Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at "
+				"night and in caves).",
 				Utils::WaterColorRange())
-			.Field("UnderwaterVisibility", &WaterComponent::UnderwaterVisibility, "How far a camera under the surface sees, in metres.",
+			.Field("UnderwaterVisibility", &WaterComponent::UnderwaterVisibility,
+				"The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind.",
 				{ .Min = 0.1, .Max = 10000.0, .Unit = "m" })
 			.Field("NormalMap", &WaterComponent::NormalMap, "The detail normal map; null takes the built-in WaterNormal.")
 			.Field("FoamTexture", &WaterComponent::FoamTexture, "The foam's texture; null takes the built-in WaterFoam.")

@@ -64,7 +64,9 @@
 // holds a PlanarReflection and a MeshRenderer that is Visible with a mesh gives one PlanarReflectionItem, in canonical
 // order, in every view (an edit scene's included), at the rendered world matrix its mesh item draws at, so the reflection
 // follows the glass between ticks; without a drawn mesh the component gives none (RENDER_REFLECTION_INVALID,
-// Scene/PlanarReflectionValidation.h).
+// Scene/PlanarReflectionValidation.h). M47's opt-in: on an entity whose Water is drawn, the component gives the water's base
+// plane instead (its rendered translation, Normal (0, 1, 0), Offset 0), whatever the entity's meshes, which the renderer
+// never takes for its glass.
 //
 // Waters (M47, Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger): every effectively enabled Water but an Ocean
 // after the scene's first gives one WaterItem, in canonical order, in every view (an edit scene's included), at its rendered

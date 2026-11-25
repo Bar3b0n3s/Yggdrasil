@@ -1086,6 +1086,221 @@ namespace Engine {
 			}
 			device.RunGarbageCollection();
 		}
+
+		// W47.3's review, finding 1: an Ocean's planar reflection covers its base plane below the horizon
+		// (ComputeWaterPlanarReflectionScreenRect), so a camera above the sea looking up at the sky, with no sea on screen,
+		// renders no mirror view (the reflection counted culled), and one looking down at the sea renders it.
+		TEST_CASE("Water: an Ocean's planar reflection renders no mirror view where no sea is on screen" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				for (const bool up : { true, false })
+				{
+					CAPTURE(up);
+					RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 2.0f, 0.0f),
+						up ? glm::vec3(0.0f, 3.0f, -1.0f) : glm::vec3(0.0f, 0.0f, -6.0f), glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+					snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.2f, -6.0f)), .Mesh = QuadMeshHandle, .Materials = { GreenMarkerMaterialHandle }, .Entity = UUID(1) });
+					snapshot.Waters.push_back(MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0, 600, 0));
+					snapshot.PlanarReflections.push_back(PlanarReflectionItem{ .World = glm::mat4(1.0f), .Normal = glm::vec3(0.0f, 1.0f, 0.0f), .Offset = 0.0f, .Entity = UUID(600) });
+					const Status rendered = RenderStatus(device, fixture, snapshot);
+					REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+					const RenderStats& stats = fixture.Renderer().GetRenderStats();
+					CHECK(stats.WaterSurfaces == 1);
+					CHECK(stats.PlanarReflections == (up ? 0U : 1U));
+					CHECK(stats.CulledPlanarReflections == (up ? 1U : 0U));
+					CHECK((Test::SceneRendererIntegrationFixture::FindPass(stats, "PlanarReflection0") != nullptr) == !up);
+				}
+			}
+			device.RunGarbageCollection();
+		}
+
+		// W47.3's review, finding 2: a water's planar reflection is its surface's alone; a mesh its entity also draws (a pool's
+		// basin) is not the mirror's glass and keeps its own reflection. A camera 1 m above calm, smooth water looks at a green
+		// emitting wall standing on it 10 m away, in a scene with no light and no ambient; the water entity also draws a polished
+		// metal quad above the water. With the water's planar reflection the water shows the wall's mirror image, while the
+		// quad's pixels stay exactly those of the render without it (it reflects the black environment), where sampling the
+		// mirror would show the wall's green.
+		TEST_CASE("Water: a water's planar reflection is its surface's, never its entity's meshes'" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 1.0f, 2.0f), glm::vec3(0.0f, 0.2f, -4.0f),
+					glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+				const glm::mat4 wall = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 5.0f, -10.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(10.0f, 5.0f, 1.0f));
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = wall, .Mesh = QuadMeshHandle, .Materials = { GreenMarkerMaterialHandle }, .Entity = UUID(1) });
+				const glm::vec3 quadCentre(-2.0f, 1.0f, -4.0f);
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), quadCentre) * glm::scale(glm::mat4(1.0f), glm::vec3(0.6f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { MirrorMaterialHandle },
+					.Entity = UUID(600) });
+				WaterItem water = MakeWater(RenderWaterShape::Rectangle, glm::mat4(1.0f), {}, 0.0, 600, 0);
+				water.Size = glm::vec2(40.0f);
+				water.Roughness = 0.02f;
+				water.DetailNormalStrength = 0.0f;
+				water.FoamAmount = 0.0f;
+				snapshot.Waters.push_back(water);
+
+				const std::vector<glm::dvec3> probed = RenderSceneColor(device, fixture, snapshot);
+				snapshot.PlanarReflections.push_back(PlanarReflectionItem{ .World = glm::mat4(1.0f), .Normal = glm::vec3(0.0f, 1.0f, 0.0f), .Offset = 0.0f, .Entity = UUID(600) });
+				const std::vector<glm::dvec3> mirrored = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+
+				const glm::mat4 viewProjection = snapshot.Camera.Projection * snapshot.Camera.View;
+				// The water shows the wall's mirror image at the wall's point (0, 2, -10) mirrored in the plane.
+				const glm::vec2 reflection = ProjectToPixel(viewProjection, glm::vec3(0.0f, -2.0f, -10.0f));
+				REQUIRE(reflection.x < static_cast<float>(Size));
+				REQUIRE(reflection.y < static_cast<float>(Size));
+				const auto rx = static_cast<uint32_t>(reflection.x);
+				const auto ry = static_cast<uint32_t>(reflection.y);
+				INFO("the reflection's pixel (" << rx << ", " << ry << "): green " << Texel(probed, rx, ry).g << " without, " << Texel(mirrored, rx, ry).g << " with");
+				CHECK(Texel(probed, rx, ry).g < 0.02);
+				CHECK(Texel(mirrored, rx, ry).g > 0.1);
+				// The quad's 3 x 3 pixels round its centre are those of the render without the planar reflection.
+				const glm::vec2 quad = ProjectToPixel(viewProjection, quadCentre);
+				const auto qx = static_cast<uint32_t>(quad.x);
+				const auto qy = static_cast<uint32_t>(quad.y);
+				REQUIRE(qx > 0);
+				REQUIRE(qx + 1 < Size);
+				REQUIRE(qy > 0);
+				REQUIRE(qy + 1 < Size);
+				for (uint32_t y = qy - 1; y <= qy + 1; ++y)
+				{
+					for (uint32_t x = qx - 1; x <= qx + 1; ++x)
+					{
+						CAPTURE(x);
+						CAPTURE(y);
+						CHECK(Texel(mirrored, x, y) == Texel(probed, x, y));
+					}
+				}
+			}
+			device.RunGarbageCollection();
+		}
+
+		// W47.3's review, finding 3 (a): the Underwater pass's Rectangle half, S05's grotto. An Ocean at y = 0 (its fog blue) and
+		// a calm Rectangle lake at y = -6, 8 x 8 m, 3 m deep with 4 m of headroom (its fog red over 10 m), and a green emitting
+		// wall inside the footprint, 6 m ahead of a camera at its centre looking along -Z:
+		//   - at y = -4, in the lake's dry volume though 4 m under the sea's level, the pass records (the conservative CPU test
+		//     ignores masks) but the wall's pixel is the dry render's: the lake masks the sea, and its air is dry;
+		//   - at y = -7, under the lake, the wall is fogged toward the lake's red over the 5.9 m from the near plane, not the sea's
+		//     blue;
+		//   - with the wall moved 6 m beyond the lake's side, the fog stops at the side: exp(-6.9 / 10) of the green kept, not
+		//     exp(-12.9 / 10).
+		TEST_CASE("Underwater: a Rectangle's volume keeps its air dry, fogs its lake toward its own colour and ends the fog at its sides"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				WaterItem sea = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0, 600, 0);
+				sea.FoamAmount = 0.0f;
+				sea.UnderwaterColor = glm::vec3(0.0f, 0.0f, 0.5f);
+				WaterItem lake = MakeWater(RenderWaterShape::Rectangle, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -6.0f, 0.0f)), {}, 0.0, 601, 0);
+				lake.Size = glm::vec2(8.0f);
+				lake.Depth = 3.0f;
+				lake.Headroom = 4.0f;
+				lake.FoamAmount = 0.0f;
+				lake.UnderwaterColor = glm::vec3(0.5f, 0.0f, 0.0f);
+				lake.UnderwaterVisibility = 10.0f;
+				const auto render = [&fixture, &device, &sea, &lake](float height, float wallZ, bool wet)
+				{
+					RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, height, 3.0f), glm::vec3(0.0f, height, -10.0f),
+						glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+					snapshot.Camera.ClearColor = glm::vec3(0.0f);
+					snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, height, wallZ)) * glm::scale(glm::mat4(1.0f), glm::vec3(20.0f)),
+						.Mesh = QuadMeshHandle,
+						.Materials = { GreenMarkerMaterialHandle },
+						.Entity = UUID(1) });
+					if (wet)
+					{
+						snapshot.Waters.push_back(sea);
+						snapshot.Waters.push_back(lake);
+					}
+					return Texel(RenderSceneColor(device, fixture, snapshot), 32, 32);
+				};
+				const double nearClip = static_cast<double>(fixture.Snapshot(RenderProjection::Perspective).Camera.NearClip);
+
+				const glm::dvec3 dryAir = render(-4.0f, -3.0f, false);
+				REQUIRE(dryAir.g > 1.9);
+				const glm::dvec3 air = render(-4.0f, -3.0f, true);
+				CHECK(fixture.Renderer().GetRenderStats().Underwater);
+				CHECK(air == dryAir);
+
+				const glm::dvec3 dryLake = render(-7.0f, -3.0f, false);
+				const glm::dvec3 inLake = render(-7.0f, -3.0f, true);
+				CHECK(fixture.Renderer().GetRenderStats().Underwater);
+				const double keptInside = std::exp(-(6.0 - nearClip) / 10.0);
+				INFO("in the lake: dry " << dryLake.g << ", wet " << inLake.r << ", " << inLake.g << ", " << inLake.b);
+				CHECK(std::abs(inLake.g - dryLake.g * keptInside) < 0.03);
+				CHECK(std::abs(inLake.r - 0.5 * (1.0 - keptInside)) < 0.02);
+				CHECK(inLake.b < 0.01);
+
+				const glm::dvec3 dryBeyond = render(-7.0f, -10.0f, false);
+				const glm::dvec3 beyond = render(-7.0f, -10.0f, true);
+				const double keptToSide = std::exp(-(7.0 - nearClip) / 10.0);
+				INFO("beyond the side: dry " << dryBeyond.g << ", wet " << beyond.r << ", " << beyond.g << ", " << beyond.b);
+				CHECK(std::abs(beyond.g - dryBeyond.g * keptToSide) < 0.03);
+				CHECK(std::abs(beyond.r - 0.5 * (1.0 - keptToSide)) < 0.02);
+				CHECK(beyond.b < 0.01);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// W47.3's review, finding 3 (b): the Underwater pass's set (t0 the records, t5 SceneDepth) failing to be created leaves
+		// the view unfogged with its surfaces drawn, and the render returns the error (RenderStats::Underwater false; the row,
+		// begun before the set, stays with the time it took); the next render records the pass.
+		TEST_CASE("Underwater: a pass whose set cannot be created leaves the view unfogged, returns the error, and the next render records it"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, -2.0f, 0.0f), glm::vec3(0.0f, -2.0f, -10.0f),
+					glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+				snapshot.Camera.ClearColor = glm::vec3(0.0f);
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(20.0f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { RedFloorMaterialHandle },
+					.Entity = UUID(1) });
+				const glm::dvec3 dry = Texel(RenderSceneColor(device, fixture, snapshot), 32, 32);
+				snapshot.Waters.push_back(MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0, 600, 0));
+
+				Status failed;
+				{
+					const Test::BindingSetCreationFails fails(device, [](const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& /*layout*/)
+					{
+						return desc.bindings.size() == 2 && desc.bindings[0].type == nvrhi::ResourceType::StructuredBuffer_SRV
+							&& desc.bindings[1].type == nvrhi::ResourceType::Texture_SRV;
+					});
+					failed = RenderStatus(device, fixture, snapshot);
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				CHECK_FALSE(failed.has_value());
+				const RenderStats& unfogged = fixture.Renderer().GetRenderStats();
+				CHECK_FALSE(unfogged.Underwater);
+				CHECK(unfogged.WaterSurfaces == 1);
+				CHECK(glm::dvec3(HalfTexel(ReadTexture(device, fixture.Renderer().GetSceneColorTexture()), 32, 32, 4)) == dry);
+
+				const Status recovered = RenderStatus(device, fixture, snapshot);
+				REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+				CHECK(fixture.Renderer().GetRenderStats().Underwater);
+				CHECK(glm::dvec3(HalfTexel(ReadTexture(device, fixture.Renderer().GetSceneColorTexture()), 32, 32, 4)) != dry);
+			}
+			device.RunGarbageCollection();
+		}
 	}
 
 }

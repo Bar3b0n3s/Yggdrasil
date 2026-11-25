@@ -13,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -386,6 +387,74 @@ namespace Engine {
 			const std::array<WaterItem, 1> wavyPools = { wavy };
 			CHECK(IsNearPlaneUnderWater(wavyPools, camera(glm::vec3(12.3f, -1.0f, 0.0f), glm::vec3(12.3f, -1.0f, -1.0f))));
 			CHECK_FALSE(IsNearPlaneUnderWater(wavyPools, camera(glm::vec3(12.6f, -1.0f, 0.0f), glm::vec3(12.6f, -1.0f, -1.0f))));
+		}
+
+		// W47.3's review, finding 1: an Ocean's planar reflection covers its base plane below the horizon, so a view with no sea
+		// on screen renders no mirror view, and a level camera's mirror stops at the horizon rather than taking the sky's half.
+		TEST_CASE("WaterGeometry: an Ocean's mirror covers its base plane below the horizon, and none when the camera looks up")
+		{
+			const auto camera = [](const glm::vec3& eye, const glm::vec3& target)
+			{
+				CameraData data;
+				data.Position = eye;
+				data.View = glm::lookAt(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
+				data.NearClip = 0.1f;
+				data.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 10.0f, 0.1f, 1000.0f, 64, 64);
+				return data;
+			};
+			const WaterItem sea = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0);
+
+			// Level, 2 m above the sea: the whole width, from the bottom edge up to just under the horizon (the plane's far edge
+			// 100 km out lies 2 m below the eye's height).
+			const std::optional<PlanarReflectionScreenRect> level = ComputeWaterPlanarReflectionScreenRect(sea, camera(glm::vec3(3.0f, 2.0f, 5.0f), glm::vec3(3.0f, 2.0f, 4.0f)));
+			REQUIRE(level.has_value());
+			CHECK(level->Min == glm::vec2(-1.0f));
+			CHECK(level->Max.x == 1.0f);
+			CHECK(level->Max.y < 0.0f);
+			CHECK(level->Max.y > -1.0e-3f);
+
+			// Looking 45 degrees up with a 60-degree field: the horizon lies 15 degrees below the view's bottom edge.
+			CHECK_FALSE(ComputeWaterPlanarReflectionScreenRect(sea, camera(glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 3.0f, -1.0f))).has_value());
+
+			// Looking down: the whole view.
+			const std::optional<PlanarReflectionScreenRect> down = ComputeWaterPlanarReflectionScreenRect(sea, camera(glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)));
+			REQUIRE(down.has_value());
+			CHECK(*down == PlanarReflectionScreenRect{});
+
+			// Looking 20 degrees up: the horizon lies 10 degrees above the bottom edge, so the rectangle is a band along it.
+			const std::optional<PlanarReflectionScreenRect> raised = ComputeWaterPlanarReflectionScreenRect(sea, camera(glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 2.0f + std::tan(glm::radians(20.0f)), -1.0f)));
+			REQUIRE(raised.has_value());
+			CHECK(raised->Min.y == -1.0f);
+			CHECK(raised->Max.y == doctest::Approx(-std::tan(glm::radians(20.0f)) / std::tan(glm::radians(30.0f))).epsilon(1.0e-3));
+		}
+
+		// W47.3's review, nit 7: a Rectangle's mirror covers its footprint widened by the surface's sampling offset
+		// (WaterPlanarDistortion) and its waves' sideways reach (the sum of Q A), so its drawn edge never samples the mirror
+		// view's clear colour.
+		TEST_CASE("WaterGeometry: a Rectangle's mirror reaches the surface's sampling offset and its waves' sideways reach")
+		{
+			// Straight down through an orthographic camera 10 m high: NDC x is world x over 10.
+			CameraData top;
+			top.Position = glm::vec3(0.0f, 10.0f, 0.0f);
+			top.View = glm::lookAt(top.Position, glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+			top.ProjectionKind = RenderProjection::Orthographic;
+			top.Projection = ComputeReverseZProjection(RenderProjection::Orthographic, 60.0f, 10.0f, 0.1f, 100.0f, 64, 64);
+
+			WaterItem calm = MakeWater(RenderWaterShape::Rectangle, glm::mat4(1.0f), {}, 0.0);
+			calm.Size = glm::vec2(4.0f, 6.0f);
+			const std::optional<PlanarReflectionScreenRect> calmRect = ComputeWaterPlanarReflectionScreenRect(calm, top);
+			REQUIRE(calmRect.has_value());
+			CHECK(calmRect->Max.x == doctest::Approx((2.0f + WaterPlanarDistortion) / 10.0f));
+			CHECK(calmRect->Max.y == doctest::Approx((3.0f + WaterPlanarDistortion) / 10.0f));
+
+			// A 0.5 m wave at Q 0.8 reaches 0.4 m further; an X scale of 2 doubles the footprint, not the reach.
+			const std::array<WaterWave, 1> ripple = { WaterWave{ .Direction = 0.0f, .Wavelength = 20.0f, .Amplitude = 0.5f, .Steepness = 0.8f } };
+			WaterItem wavy = MakeWater(RenderWaterShape::Rectangle, glm::scale(glm::mat4(1.0f), glm::vec3(2.0f, 1.0f, 1.0f)), ripple, 0.0);
+			wavy.Size = glm::vec2(4.0f, 6.0f);
+			const std::optional<PlanarReflectionScreenRect> wavyRect = ComputeWaterPlanarReflectionScreenRect(wavy, top);
+			REQUIRE(wavyRect.has_value());
+			CHECK(wavyRect->Max.x == doctest::Approx((4.0f + WaterPlanarDistortion + 0.4f) / 10.0f).epsilon(1.0e-4));
+			CHECK(wavyRect->Min.y == doctest::Approx(-(3.0f + WaterPlanarDistortion + 0.4f) / 10.0f).epsilon(1.0e-4));
 		}
 	}
 

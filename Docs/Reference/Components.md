@@ -2138,8 +2138,8 @@ A body of water at the entity's world height: an unbounded Ocean or a bounded Re
 | `DetailNormalStrength` | `Float` | `0.5` | 0 to 1 |  |  | How strongly the small-scale detail normals ripple the surface. |
 | `DetailScale` | `Float` | `4` | 0.1 to 1000 | m |  | The metres one repeat of the detail normal map covers. |
 | `DetailDrift` | `Vec2` | `[2,1]` | -100 to 100 | m/s |  | How fast the detail normals drift along the water's local X and Z axes, in metres per second. |
-| `UnderwaterColor` | `Color3` | `[0.02,0.1,0.12]` | 0 to 1 |  |  | The linear colour of the fog a camera under the surface sees. |
-| `UnderwaterVisibility` | `Float` | `15` | 0.1 to 10000 | m |  | How far a camera under the surface sees, in metres. |
+| `UnderwaterColor` | `Color3` | `[0.07,0.3,0.33]` | 0 to 1 |  |  | The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves). |
+| `UnderwaterVisibility` | `Float` | `15` | 0.1 to 10000 | m |  | The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind. |
 | `NormalMap` | `AssetRef(Texture)` | `null` |  |  |  | The detail normal map; null takes the built-in WaterNormal. |
 | `FoamTexture` | `AssetRef(Texture)` | `null` |  |  |  | The foam's texture; null takes the built-in WaterFoam. |
 
@@ -2169,8 +2169,8 @@ Script members of `Water`:
 | `Shape` | proxy field | `WaterShape` | read/write | All | Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). |
 | `ShoreFoamDepth` | proxy field | `number` | read/write | All | The water column, in metres, under which foam gathers where the surface meets the ground or an object. |
 | `Size` | proxy field | `vector` | read/write | All | A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). |
-| `UnderwaterColor` | proxy field | `Color` | read/write | All | The linear colour of the fog a camera under the surface sees. |
-| `UnderwaterVisibility` | proxy field | `number` | read/write | All | How far a camera under the surface sees, in metres. |
+| `UnderwaterColor` | proxy field | `Color` | read/write | All | The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves). |
+| `UnderwaterVisibility` | proxy field | `number` | read/write | All | The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind. |
 | `WaveScale` | proxy field | `number` | read/write | All | Multiplies every wave's amplitude: 0 is calm, above 1 a storm. |
 | `Waves` | proxy field | `{{Direction: number, Wavelength: number, Amplitude: number, Steepness: number, Speed: number, Phase: number}}` | read/write | All | At most eight Gerstner waves summed over the base; empty is a calm surface. |
 

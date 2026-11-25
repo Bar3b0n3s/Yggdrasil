@@ -118,6 +118,8 @@ Decisions left open with a default in force until their milestone lands. Reopeni
 | Water | Water in 2D and in native modules (`NativeApiVersion` stays 1) | water is 3D and scripted in Luau | later, on a game's brief | ADR 0065 decision 3 (M47; Skerries' brief S01) |
 | Water | Water in the wireframe, data and debug views | those views draw no water | later | ADR 0065 decision 3 (M47; Skerries' brief S01) |
 | Water | A cap or ranking of the Ocean's masks | every effectively enabled Rectangle masks the Ocean (one box test per Rectangle per Ocean pixel, §6) | later, when a scene's pools cost too much | ADR 0065 decision 3 (M47; Skerries' brief S01) |
+| Water | Underwater fog lit by the view's sun and environment, and the sun's light absorbed on its way down to the seabed | `UnderwaterColor` is unlit radiance, tuned to the scene's light (its default suits daylight), and everything under the surface is lit as in air | to be decided with M64's volumetric light (phase 12, ADR 0060) | ADR 0065 (M47's W47.3 review, the lead's answer) |
+| Water | Underwater fog per fragment in the transparent and particle shaders | the Underwater pass fogs a transparent surface or a particle by the distance to what lies behind it (§6) | later, on a game's brief | ADR 0065 decision 3 (M47's W47.3 review, finding 4) |
 
 ## 3. Tracked follow-ups
 
@@ -347,6 +349,7 @@ Limits accepted for v1. A limit that names a milestone is scheduled by ADR 0028 
   - Transparents and particles under the surface are hidden behind it (the water writes SceneDepth before the transparent pass), and refraction of what lies off screen shows the unrefracted pixel.
   - The Ocean's mask costs one box test per Rectangle per Ocean pixel.
   - The Underwater pass's waterline follows the drawn surface, whose short waves fade with distance, not the CPU's; its fog is `UnderwaterColor` as unlit radiance, and the air's fog stays on what lies under the surface; from below the surface shows no foam and no light's glint.
+  - Under water, a transparent surface or a particle is fogged by the distance to the opaque surface (or the water's underside) behind it, not by its own, since neither writes `SceneDepth`: bubbles near the camera fade with the scene behind them.
 
 ## 7. Non-goals for v1
 

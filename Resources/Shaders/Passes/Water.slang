@@ -105,10 +105,9 @@ static const float WaterDetailSecondDrift = 0.75;
 static const float2 WaterDetailSecondTurn = float2(0.8, 0.6);
 // The foam map's tiling, in DetailScale.
 static const float WaterFoamTiling = 2.0;
-// W47.3: water's refractive index against air (Snell's window from below), and the metres a fully tilted wave normal moves
-// the point a planar reflection is sampled at.
+// W47.3: water's refractive index against air (Snell's window from below). The planar reflection's sampling offset is
+// Shared/WaterConstants.h's WaterPlanarDistortion, which the renderer's mirror rectangle allows for.
 static const float WaterRefractiveIndex = 1.333;
-static const float WaterPlanarDistortion = 0.5;
 // The Underwater pass: no water holds the point.
 static const uint WaterNone = 0xFFFFFFFF;
 

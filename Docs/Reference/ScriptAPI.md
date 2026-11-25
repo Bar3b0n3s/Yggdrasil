@@ -7204,7 +7204,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `Color`
 
-The linear colour of the fog a camera under the surface sees.
+The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves).
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -7212,7 +7212,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-How far a camera under the surface sees, in metres.
+The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

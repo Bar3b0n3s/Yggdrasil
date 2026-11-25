@@ -369,4 +369,69 @@ namespace Engine {
 		return record;
 	}
 
+	std::optional<PlanarReflectionScreenRect> ComputeWaterPlanarReflectionScreenRect(const WaterItem& water, const CameraData& camera)
+	{
+		const glm::mat4& world = water.World;
+		float amplitudes = 0.0f;
+		float sideways = 0.0f;
+		for (uint32_t wave = 0; wave < std::min(water.WaveCount, MaxWaterWaves); ++wave)
+		{
+			amplitudes += std::abs(water.Waves[wave].Amplitude);
+			sideways += std::abs(water.Waves[wave].Steepness * water.Waves[wave].Amplitude);
+		}
+		if (water.Shape == RenderWaterShape::Rectangle)
+		{
+			// The footprint box in local units: the sampling offset and the drawn edge's sideways reach are metres.
+			const glm::vec3 scale(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2])));
+			const float reach = WaterPlanarDistortion + sideways;
+			const glm::vec3 half(0.5f * water.Size.x + (scale.x > 0.0f ? reach / scale.x : 0.0f), scale.y > 0.0f ? amplitudes / scale.y : 0.0f,
+				0.5f * water.Size.y + (scale.z > 0.0f ? reach / scale.z : 0.0f));
+			Aabb footprint;
+			footprint.Min = -half;
+			footprint.Max = half;
+			return ComputePlanarReflectionScreenRect(footprint, world, camera);
+		}
+
+		// An Ocean: its base plane's square around the camera, clipped to w > 0 (Sutherland-Hodgman against one plane), in double
+		// precision: an edge crossing w = 0 runs between corners 100 km out, whose float clip coordinates would leave the
+		// crossing's sign to rounding.
+		constexpr double MinClipW = 1.0e-6;
+		const double base = world[3].y;
+		const glm::dvec3 eye(camera.Position);
+		const glm::dmat4 viewProjection = glm::dmat4(camera.Projection) * glm::dmat4(camera.View);
+		const std::array<glm::dvec4, 4> square = {
+			viewProjection * glm::dvec4(eye.x - WaterHorizonDistance, base, eye.z - WaterHorizonDistance, 1.0),
+			viewProjection * glm::dvec4(eye.x + WaterHorizonDistance, base, eye.z - WaterHorizonDistance, 1.0),
+			viewProjection * glm::dvec4(eye.x + WaterHorizonDistance, base, eye.z + WaterHorizonDistance, 1.0),
+			viewProjection * glm::dvec4(eye.x - WaterHorizonDistance, base, eye.z + WaterHorizonDistance, 1.0),
+		};
+		glm::dvec2 min(std::numeric_limits<double>::infinity());
+		glm::dvec2 max(-std::numeric_limits<double>::infinity());
+		bool any = false;
+		const auto include = [&min, &max, &any](const glm::dvec4& clip)
+		{
+			const glm::dvec2 ndc = glm::dvec2(clip) / clip.w;
+			min = glm::min(min, ndc);
+			max = glm::max(max, ndc);
+			any = true;
+		};
+		for (size_t index = 0; index < square.size(); ++index)
+		{
+			const glm::dvec4& from = square[index];
+			const glm::dvec4& to = square[(index + 1) % square.size()];
+			const bool fromInside = from.w > MinClipW;
+			const bool toInside = to.w > MinClipW;
+			if (fromInside)
+				include(from);
+			if (fromInside != toInside)
+				include(from + (to - from) * ((MinClipW - from.w) / (to.w - from.w)));
+		}
+		if (!any)
+			return std::nullopt;
+		const PlanarReflectionScreenRect rect{ .Min = glm::vec2(glm::max(min, glm::dvec2(-1.0))), .Max = glm::vec2(glm::min(max, glm::dvec2(1.0))) };
+		if (!(rect.Min.x < rect.Max.x) || !(rect.Min.y < rect.Max.y))
+			return std::nullopt;
+		return rect;
+	}
+
 }

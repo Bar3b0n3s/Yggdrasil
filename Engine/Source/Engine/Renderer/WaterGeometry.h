@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Base.h"
+#include "Engine/Renderer/PlanarReflections.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Shared/WaterConstants.h"
 
@@ -8,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -100,5 +102,15 @@ namespace Engine {
 	// footprint widened by the sum of its waves' Q A and above its floor (Depth below its base). A camera whose projection
 	// cannot be inverted is never under water.
 	[[nodiscard]] bool IsNearPlaneUnderWater(std::span<const WaterItem> waters, const CameraData& camera);
+
+	// W47.3 (the planar opt-in, after W47.3's review, findings 1 and 7): the screen rectangle, in `camera`'s normalized device
+	// coordinates clamped to [-1, 1], that a planar reflection of `water` covers, or nullopt when its surface is not on screen.
+	//   - A Rectangle: its footprint box (ComputePlanarReflectionScreenRect), raised and lowered by the sum of its waves'
+	//     amplitudes and widened in X and Z by WaterPlanarDistortion (the surface's sampling offset) plus the sum of its
+	//     waves' Q A (how far its drawn edge moves sideways), in metres through the World's column lengths.
+	//   - An Ocean: its base plane below the horizon: the square of the plane WaterHorizonDistance around the camera's (x, z),
+	//     clipped in clip space to w > 0 (in front of the camera) and bounded by its clipped corners' projections, so a camera
+	//     looking up at the sky has none and a level camera's rectangle tops out at the horizon.
+	[[nodiscard]] std::optional<PlanarReflectionScreenRect> ComputeWaterPlanarReflectionScreenRect(const WaterItem& water, const CameraData& camera);
 
 }

@@ -1983,9 +1983,9 @@ declare extern type Water with
 	ShoreFoamDepth: number
 	-- A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
 	Size: vector
-	-- The linear colour of the fog a camera under the surface sees. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves). [All modes; Runtime|Test; pure/read; setter mutates]
 	UnderwaterColor: Color
-	-- How far a camera under the surface sees, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind. [All modes; Runtime|Test; pure/read; setter mutates]
 	UnderwaterVisibility: number
 	-- Multiplies every wave's amplitude: 0 is calm, above 1 a storm. [All modes; Runtime|Test; pure/read; setter mutates]
 	WaveScale: number

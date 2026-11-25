@@ -48,6 +48,7 @@ namespace Engine {
 	static const float WaterFadeCellsPerWave = 2.0;
 	static const float WaterHorizonFadeEndCells = 30.0;
 	static const float WaterHorizonFadeCells = 8.0;
+	static const float WaterPlanarDistortion = 0.5;
 	static const uint WaterRecordFlagRectangle = 1;
 	static const uint WaterRecordFlagMoved = 2;
 	static const uint WaterRecordFlagAdvanced = 4;
@@ -65,6 +66,9 @@ inline constexpr float WaterLevelDistanceCells = 15.0f;
 inline constexpr float WaterFadeCellsPerWave = 2.0f;
 inline constexpr float WaterHorizonFadeEndCells = 30.0f;
 inline constexpr float WaterHorizonFadeCells = 8.0f;
+// W47.3: the metres a fully tilted wave normal moves the point a water's planar reflection is sampled at (Water.slang), by
+// which the renderer widens a Rectangle's mirror rectangle.
+inline constexpr float WaterPlanarDistortion = 0.5f;
 inline constexpr uint32_t WaterRecordFlagRectangle = 1; // a Rectangle: clamped to its footprint, masking the Ocean
 inline constexpr uint32_t WaterRecordFlagMoved = 2;     // PreviousFromCurrent applies
 inline constexpr uint32_t WaterRecordFlagAdvanced = 4;  // a previous phase differs from this frame's

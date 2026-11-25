@@ -851,7 +851,7 @@ namespace Engine {
 		// The detail normals' offset at the view's time: DetailDrift * time in the water's local X and Z, each wrapped into
 		// [0, DetailScale) in double precision.
 		glm::vec2 DetailOffset = glm::vec2(0.0f);
-		glm::vec3 UnderwaterColor = glm::vec3(0.02f, 0.10f, 0.12f);
+		glm::vec3 UnderwaterColor = glm::vec3(0.07f, 0.30f, 0.33f);
 		float UnderwaterVisibility = 15.0f; // metres
 		AssetHandle NormalMap{};            // null: the built-in WaterNormal
 		AssetHandle FoamTexture{};          // null: the built-in WaterFoam

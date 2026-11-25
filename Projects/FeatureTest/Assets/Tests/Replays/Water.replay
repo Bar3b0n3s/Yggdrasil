@@ -69,7 +69,7 @@
 				"Hash": "4f33326e74bb7844",
 				"Components": {
 					"Transform": "56ab4fbf82327ece",
-					"Water": "0cd14b04dca11fe6"
+					"Water": "3ef1717457ed5202"
 				}
 			},
 			{
@@ -222,6 +222,12 @@
 		],
 		"Assets": [
 			{
+				"Handle": "0000000000000202",
+				"Path": "engine://Environments/Sky",
+				"Type": "Environment",
+				"Hash": "326cd6c99922bd8b"
+			},
+			{
 				"Handle": "2dbf092f33eb546f",
 				"Path": "Assets/Materials/Water/Rock.material",
 				"Type": "Material",
@@ -318,41 +324,41 @@
 	"Checkpoints": [
 		{
 			"Tick": 60,
-			"StateHash": "cc33afe1fc3b4d7d"
+			"StateHash": "32111cd1566e0da8"
 		},
 		{
 			"Tick": 120,
-			"StateHash": "c6ee07c4b7f67377"
+			"StateHash": "be1df9182bc903c4"
 		},
 		{
 			"Tick": 180,
-			"StateHash": "cfd8662d6c54fae5"
+			"StateHash": "4c80dbd12a8a6643"
 		},
 		{
 			"Tick": 240,
-			"StateHash": "199fcbc808b3a705"
+			"StateHash": "3ed397c373dba489"
 		},
 		{
 			"Tick": 300,
-			"StateHash": "ef2cf0686992391a"
+			"StateHash": "393b9189a6f55e29"
 		},
 		{
 			"Tick": 360,
-			"StateHash": "56d074a8c1debea5"
+			"StateHash": "734d34cb3b4bf1d1"
 		},
 		{
 			"Tick": 420,
-			"StateHash": "be46c437ff9aa9ec"
+			"StateHash": "299b54d7b9744848"
 		},
 		{
 			"Tick": 480,
-			"StateHash": "d8be34c69eb87eb8"
+			"StateHash": "605c4032f5dd67c0"
 		},
 		{
 			"Tick": 540,
-			"StateHash": "134dc6274171770a"
+			"StateHash": "3f727dffd584c336"
 		}
 	],
 	"FinalTick": 600,
-	"FinalStateHash": "6f53a7dac9bab5e5"
+	"FinalStateHash": "27bcb12b748cd9cd"
 }
