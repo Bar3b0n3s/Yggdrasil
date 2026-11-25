@@ -511,7 +511,7 @@ W45.3 relights the irradiance volumes by the sky: decision 3's "Relit probes" ex
 The lead's review of W45.3 (`bin/Reviews/P8/M45-W3-review.md`: 0 blocker, 0 major, 4 minor, 2 nit; the three departures accepted) is fixed with W45.4's checkpoint, before FeatureTest's regeneration:
 - **1, `SkyProbes` saw the sky through its shell** (the lead's option A; the review's inset, `Size` [5.6, 2.6, 5.6], would have left the room's walls, floor and ceiling outside the volume, lit by the open sky through the Environment's fallback, since `Common/Probes.slang` weighs a point outside a box 0):
   - **The scene:** `SkyProbes.scene`'s shell is 0.6 m thick and `DoubleSided` (`Plaster.material`), and the volume (`Size` [6.6, 3.6, 6.6] about (0, 1.5, 0), still 4 × 3 × 4) runs its faces through the shell's middle, so its 44 outer probes sit 0.3 m inside the slabs and see their inside. The window is widened to 0.8 to 2.6 m, so the noon sun reaches the floor through the thicker wall, and a plaster pedestal near the room's middle takes the interior probes' light.
-  - **The bake** (parsed with `w45.4/parse_irradiance.py`, `logs/parse-skyprobes-2.log`): the 44 shell probes' sky transfer T00 is 0.00000 (their local terms at most 0.0047, the lamp on the shell's inside), the 4 interior probes' 0.0066, 0.0087, 0.0136 and 0.0157 (the sky through the window and the mouth); before, the shell probes' T00 reached 0.71.
+  - **The bake** (parsed with `w45.4/parse_irradiance.py`, `logs/parse-skyprobes-2.log`): the 44 shell probes' sky transfer T00 is 0.00000, while their local terms reach 0.90 (red; corrected by the W45.4 review's finding 4: the lamp casts no shadow, so it lights the back side of each slab's outer face, whose flipped normal faces the room, and the shell is dark to the sky only), the 4 interior probes' 0.0066, 0.0087, 0.0136 and 0.0157 (the sky through the window and the mouth); before, the shell probes' T00 reached 0.71.
   - **The bands.** The first candidate showed faint horizontal bands (3 to 5 of 255) on the noon tile's dark back wall and the window's jamb. The lead's diagnostic (`w45.4/diag.py`, a temporary golden-suite case never committed, its variants under manual exposure) traced them:
     - They go when the sun's colour or its shadows go, and stay without the reflection probe, with its box shrunk to [5.9, 2.9, 5.9], without the moon, and with the Sky disabled, so they predate M45.
     - **The cause:** the flat normal texture's 128/255 decodes to 0.0039, which tilts every map-less surface's normal by about 0.3 degrees. The sun at azimuth -90 lay exactly in the plane of the back wall and the jamb, which so took a little of its light, banded by the cascade shadow's acne at that grazing angle.
@@ -615,12 +615,21 @@ W45.4 adds the stats, FeatureTest's coverage in every mode, `test_sky.py`, Perf.
   - **feature, Debug:** passed, the six editor-mode gates evaluated and green, 468 of 469 rows passed and one quit as expected, the `Sky` suite's three cases and `Sky.replay` among them, and the project unchanged (`feature-2.log`, `Feature-Debug.json`). The exported Release and Dist runs, where the suite's `SkyUpdates` 1 is checked, are the gate's export suite.
   - **Static checks:** `Lint.py` (0 findings, `lint-1.log`), `Format.py --check` (`format-2.log`), `GenerateDocs.py --config Debug` then `--check` (`gendocs-1.log`, `gendocs-check-1.log`) and `MakeValidationFixtures.py --check` (`fixtures-check-1.log`) all passed.
 
+### After the lead's review
+
+The lead's review of W45.4 (`bin/Reviews/P8/M45-W4-review.md`: 0 blocker, 0 major, 1 minor, 3 nit; the departures accepted, the open item traced to pass in every run the gate makes) is fixed in one more checkpoint:
+- **1:** the Stats panel's "Sky" row has its case, "StatsPanel: a displayed view shows its sky updates and relit volumes" (a host view with `SkyUpdates` 1 and `RelitIrradianceVolumes` 2 draws "1 updates / 2 relit volumes").
+- **2:** "ProbeRelight: a cave darkens at night and lights at noon with no bake between" compares the relit night with the lamp's bake at a relative tolerance (`scale(0)`). Proof (`gpu-proof.log`, a Release build whose `CSProbeRelight` added 1.5 times each probe's local light): the check failed, 0.0048 against a night of 0.0072, a difference the default scale of 1 would accept; every other check of the case passed; then restored.
+- **3:** Architecture §8.6 and Backlog §6's reflection-probe row state the condition: a culled relightable volume is kept for a reflection probe only while one of the view's 8 volume slots is free, an accepted limit at the cap.
+- **4:** this record's figure for the shell probes' local light is corrected (up to 0.90: the lamp casts no shadow, so the shell is dark to the sky only), and the look skill says "dark to the sky".
+- **Runs** (2026-11-25, logs in `bin/Reviews/P8/scratch/M45-builder/w45.5/logs/`): Debug and Release builds, 0 warnings; unit, Debug, `StatsPanel:*` and `DocExamples*`, 12 passed (`unit.log`); gpu, Release, the cave case at Vulkan 1.4 and 1.3, passed (`gpu.log`); `Format.py --check`, `GenerateDocs.py --config Debug --check` and `Lint.py` on the two changed test files passed (`format.log`, `gendocs-check.log`, `lint.log`).
+
 ## Before milestone completion
 
 - [x] W45.1 committed, the copy's case passing (or the fallback recorded); [x] the lead's review pass taken and every finding fixed.
 - [x] W45.2 committed; [x] the lead's review pass taken and every finding fixed.
 - [x] W45.3 committed; [x] the lead's review pass taken and every finding fixed.
-- [x] W45.4 committed; [ ] the lead's review pass taken and every finding fixed.
+- [x] W45.4 committed; [x] the lead's review pass taken and every finding fixed.
 - [ ] The landing: phase 8's batch in train order, third after M43 and M44, M45's hunks adapted in M43's files, M47's `Water` after `Sky`, FeatureTest regenerated, the gate `CI.py --require-clang-cl` green.
 - [ ] Architecture, the Roadmap, the skills, `Docs/Backlog.md` §2 and §6, and the generated references describe what landed.
 - [ ] S03's "How the game will check it" met in the goldens, the gpu cases, FeatureTest and Perf.py, and reported to the Skerries session through the product owner, with the corrections above.

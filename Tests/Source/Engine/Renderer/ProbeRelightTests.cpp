@@ -491,7 +491,7 @@ namespace Engine {
 			CHECK(fixture.Renderer().GetRenderStats().RelitIrradianceVolumes == 0U);
 			const double bakedNight = render(BakedVolumeHandle, -30.0f, 25);
 			CHECK(bakedNoon == doctest::Approx(bakedNight).epsilon(1e-6));
-			CHECK(bakedNight == doctest::Approx(night).epsilon(0.05));
+			CHECK(bakedNight == doctest::Approx(night).epsilon(0.05).scale(0.0));
 			device.RunGarbageCollection();
 		}
 
