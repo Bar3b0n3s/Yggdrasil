@@ -16,7 +16,8 @@ time: scripts, the physics and the renderer sample the same surface, so a boat f
   other waters' masks aside; a `Rectangle`'s are nil outside its footprint.
 - `time` defaults to `Time.GetTime()`: the world's time, held by `Time.PauseWorld`, and 0 in an edit scene. Read in
   `OnFixedUpdate`, a sample is the surface the physics floats bodies on that tick.
-- A position beyond 1e9 m in any coordinate is an error, as for the physics queries; a disabled `Water` holds no point.
+- A position beyond 1e9 m in any coordinate is an error, as for the physics queries.
+- `Physics.SampleWater` and buoyancy ignore a disabled `Water`; its own methods still read its surface.
 
 ## The tide and the storm
 

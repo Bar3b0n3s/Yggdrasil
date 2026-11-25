@@ -126,13 +126,17 @@ namespace Engine {
 
 	}
 
-	// One mesh on the GPU: its cells (RG16_SINT) and its triangle list (R32_UINT).
-	struct WaterMeshBuffers
-	{
-		nvrhi::BufferHandle Cells{};
-		nvrhi::BufferHandle Indices{};
-		uint32_t IndexCount = 0;
-	};
+	namespace {
+
+		// One mesh on the GPU: its cells (RG16_SINT) and its triangle list (R32_UINT).
+		struct WaterMeshBuffers
+		{
+			nvrhi::BufferHandle Cells{};
+			nvrhi::BufferHandle Indices{};
+			uint32_t IndexCount = 0;
+		};
+
+	}
 
 	struct WaterPass::State
 	{

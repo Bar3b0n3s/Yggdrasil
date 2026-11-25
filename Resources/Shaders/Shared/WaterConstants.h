@@ -30,15 +30,15 @@ namespace Engine {
 	// (WaterFadeCellsPerWave). For the motion vectors: with WaterRecordFlagAdvanced a previous phase differs from this frame's,
 	// so the shaders evaluate the previous frame's waves too; with WaterRecordFlagMoved, PreviousFromCurrent maps this frame's
 	// world points of the water to the previous frame's (the history's PreviousWorld times the inverse of World). Without
-	// either, a point's previous position is its current one, exactly. A Rectangle (WaterRecordFlagRectangle) is centred on FrameOrigin (its entity's world (x, z) minus
-	// Origin) with its local X along the unit world (x, z) AxisX and its local Z a quarter turn from it, HalfExtents metres
-	// along them, from Depth below its base to Headroom above it: its draws clamp their rest points into that footprint, and
-	// an Ocean's fragments inside any Rectangle's volume write zero coverage. WaterCount is the snapshot's waters, the records
-	// an Ocean's fragment tests. The look members are the snapshot item's (RenderSnapshot.h's WaterItem): ShallowColor (rgb)
-	// and Clarity (a), DeepColor (rgb) and Roughness (a), Look (RefractionStrength, FoamAmount, ShoreFoamDepth,
-	// DetailNormalStrength), Detail (DetailScale, DetailOffset, 0) and Underwater (UnderwaterColor, UnderwaterVisibility).
-	// PickId is the picking pipeline's EntityId; PlanarSlot the view's planar reflection slot the water samples, or
-	// WaterNoPlanarSlot.
+	// either, a point's previous position is its current one, exactly. A Rectangle (WaterRecordFlagRectangle) is centred on
+	// FrameOrigin (its entity's world (x, z) minus Origin) with its local X along the unit world (x, z) AxisX and its local Z
+	// a quarter turn from it, HalfExtents metres along them, from Depth below its base to Headroom above it: its draws clamp
+	// their rest points into that footprint, and an Ocean's fragments inside any Rectangle's volume write zero coverage.
+	// WaterCount is the snapshot's waters, the records an Ocean's fragment tests. The look members are the snapshot item's
+	// (RenderSnapshot.h's WaterItem): ShallowColor (rgb) and Clarity (a), DeepColor (rgb) and Roughness (a), Look
+	// (RefractionStrength, FoamAmount, ShoreFoamDepth, DetailNormalStrength), Detail (DetailScale, DetailOffset, 0) and
+	// Underwater (UnderwaterColor, UnderwaterVisibility). PickId is the picking pipeline's EntityId; PlanarSlot the view's
+	// planar reflection slot the water samples, or WaterNoPlanarSlot.
 #if defined(ENGINE_SHADER)
 	static const uint MaxWaterRecordWaves = 8;
 	static const uint WaterGridCells = 64;

@@ -36,17 +36,17 @@
 //     multiScatter * HorizonOcclusion (SceneRoughness word 0's rgb) times SpecularOcclusion(n.v, min(material occlusion, GTAO),
 //     alpha) (word 1's x, GTAO sampled as the forward pass samples it; M47, Docs/Decisions/0065-m47-water.md decision 3: on a
 //     water pixel, whose word 1's y is not 0, word 1's x alone, the water's own occlusion, since GTAO describes the opaque
-//     surface under it); the composite evaluates it from SceneNormals'
-//     normal and word 0's roughness, and adds (traced - prefiltered) times that factor times the confidence times
-//     Intensity: in proportion to the confidence the traced radiance replaces the probes' reflection, and where a ray missed
-//     (confidence 0) the composite adds 0, so the probes' reflection stays (the probe fallback). At half resolution the
-//     traced reflection of a scene pixel that traces itself is reconstructed from SsrColor's four bilateral taps around it,
-//     with GTAO's weights (Common/Gtao.slang's GtaoFullPixel and GtaoEdgeWeight over ViewDepth's linear depth and
-//     SceneNormals), each tap's radiance weighed by its confidence; a pixel that does not trace adds nothing, and neither
-//     does one of an unlisted tile (none of the tile's trace pixels traced, though a tap of a pixel at its edge may lie in a
-//     listed neighbour; the pass clears SsrColor at half resolution, so no tap reads an earlier frame's trace). M32
-//     (Docs/Decisions/0047-m32-fog-ssr.md decision 6): in a fogged view the addition is multiplied by 1 - the fog's amount at
-//     the pixel (Common/Fog.slang), so the forward pass's fogged image and the reflection fog as one surface.
+//     surface under it); the composite evaluates it from SceneNormals' normal and word 0's roughness, and adds (traced -
+//     prefiltered) times that factor times the confidence times Intensity: in proportion to the confidence the traced
+//     radiance replaces the probes' reflection, and where a ray missed (confidence 0) the composite adds 0, so the probes'
+//     reflection stays (the probe fallback). At half resolution the traced reflection of a scene pixel that traces itself is
+//     reconstructed from SsrColor's four bilateral taps around it, with GTAO's weights (Common/Gtao.slang's GtaoFullPixel
+//     and GtaoEdgeWeight over ViewDepth's linear depth, or on a water pixel SceneDepth's, and SceneNormals), each tap's
+//     radiance weighed by its confidence; a pixel that does not trace adds nothing, and neither does one of an unlisted tile
+//     (none of the tile's trace pixels traced, though a tap of a pixel at its edge may lie in a listed neighbour; the pass
+//     clears SsrColor at half resolution, so no tap reads an earlier frame's trace). M32 (Docs/Decisions/0047-m32-fog-ssr.md
+//     decision 6): in a fogged view the addition is multiplied by 1 - the fog's amount at the pixel (Common/Fog.slang), so
+//     the forward pass's fogged image and the reflection fog as one surface.
 
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/FogConstants.h"
@@ -365,14 +365,25 @@ float4 UnpackUnorm8(uint word)
 	return float4(float(word & 0xFFu), float((word >> 8) & 0xFFu), float((word >> 16) & 0xFFu), float(word >> 24)) / 255.0;
 }
 
+// The linear depth the half-resolution reconstruction weighs the scene pixel `pixel` by: ViewDepth's, or SceneDepth's when the
+// reconstructed pixel is `water` (M47, Docs/Decisions/0065-m47-water.md, the W47.2 review's finding 2: the pyramid was
+// recorded before the water, so at a water pixel it holds the seabed's depth, whose edges the continuous surface does not
+// have).
+float GetHalfResolutionTapDepth(uint2 pixel, bool water)
+{
+	return water ? GetLinearDepth(SceneDepth.Load(int3(pixel, 0))) : ViewDepth.Load(int3(pixel, 0));
+}
+
 // The traced reflection at the scene pixel `pixel` from the half-resolution SsrColor: the four bilateral taps of SampleGtao
-// around it (GtaoFullPixel and GtaoEdgeWeight over ViewDepth's linear depth and SceneNormals), each tap's radiance weighed by
-// its confidence too; rgb the radiance, a the confidence. Zero when no tap represents the pixel's surface.
+// around it (GtaoFullPixel and GtaoEdgeWeight over GetHalfResolutionTapDepth's linear depth and SceneNormals), each tap's
+// radiance weighed by its confidence too; rgb the radiance, a the confidence. Zero when no tap represents the pixel's
+// surface. A water pixel (SceneRoughness word 1's y byte) weighs the centre and the taps alike by SceneDepth.
 float4 SampleHalfResolutionTrace(uint2 pixel)
 {
 	const uint2 fullSize = Settings.ImageSize;
 	const uint2 traceSize = GetTraceSize();
-	const float depth = ViewDepth.Load(int3(pixel, 0));
+	const bool water = ((SceneRoughness.Load(int3(pixel, 0)).y >> 8) & 0xFFu) != 0;
+	const float depth = GetHalfResolutionTapDepth(pixel, water);
 	const float3 normal = DecodeGtaoNormal(SceneNormals.Load(int3(pixel, 0)));
 	const float2 coordinate = (float2(pixel) + 0.5) * float2(traceSize) / float2(fullSize) - 0.5;
 	const int2 first = int2(floor(coordinate));
@@ -387,7 +398,7 @@ float4 SampleHalfResolutionTrace(uint2 pixel)
 			const uint2 tap = uint2(clamp(first + int2(x, y), int2(0), int2(traceSize) - 1));
 			const uint2 fullTap = GtaoFullPixel(tap, fullSize, traceSize);
 			const float weight = (x == 0 ? 1.0 - fraction.x : fraction.x) * (y == 0 ? 1.0 - fraction.y : fraction.y)
-				* GtaoEdgeWeight(depth, ViewDepth.Load(int3(fullTap, 0)), normal, DecodeGtaoNormal(SceneNormals.Load(int3(fullTap, 0))));
+				* GtaoEdgeWeight(depth, GetHalfResolutionTapDepth(fullTap, water), normal, DecodeGtaoNormal(SceneNormals.Load(int3(fullTap, 0))));
 			const float4 traced = SsrColor.Load(int3(tap, 0));
 			radiance += traced.rgb * (weight * traced.a);
 			confidence += weight * traced.a;

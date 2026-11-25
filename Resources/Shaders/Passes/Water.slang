@@ -19,9 +19,10 @@
 //     the view ray) by Beer-Lambert, T = exp(-column / Clarity), and the water's body scatters lerp(DeepColor,
 //     ShallowColor, T) in its place, lit as a diffuse surface. Foam (FoamAmount) covers the shallows (the column below
 //     ShoreFoamDepth) and the crests (the Jacobian below WaterCrestFoamStart), broken up by the foam map: a white diffuse
-//     surface over the body. The specular term is SSR's input: SceneRoughness word 0 holds its multiplier and roughness,
-//     word 1 the occlusion 1 (x) and the water flag 1 (y), so SSR's composite takes the water's own occlusion, not the
-//     seabed's GTAO.
+//     surface over the body. Fog: the water's own terms are fogged, the fog's colour weighted by its opacity, and the
+//     refraction, already fogged by the passes that drew it, is added after. The specular term is SSR's input:
+//     SceneRoughness word 0 holds its multiplier and roughness, word 1 the occlusion 1 (x) and the water flag 1 (y), so
+//     SSR's composite takes the water's own occlusion, not the seabed's GTAO.
 //   - PSPicking adds the water's pick id (EntityId) as SV_Target4.
 // Set 0 is the mesh forward passes' (Passes/Scene.slang, Private/ForwardPipelines.h), bound with SceneNormals and the ambient
 // occlusion swapped for neutral textures: the program declares all of it, M42's planar reflections included, though it reads
@@ -287,9 +288,16 @@ WaterShading ShadeWater(WaterVertexOutput input, bool isFrontFace)
 	const float3 specularMultiplier = multiScatter * ((1.0 - foam) * HorizonOcclusion(reflection, geometricNormal));
 	radiance += irradiance * diffuseColor * transmitted;
 	radiance += prefiltered * specularMultiplier * SpecularOcclusion(nDotV, 1.0, alpha);
-	radiance += refractedColor * (transmittance * (1.0 - foam)) * transmitted;
+	// The refraction is SceneColor's, which the opaque, terrain and sky passes fogged over the whole path to what lies behind:
+	// only the water's own terms are fogged, the fog's colour weighted by the water's opacity (1 - the transmission), as the
+	// transparent pass blends a fogged surface over its fogged background, and the refraction is added after.
+	const float3 transmission = (transmittance * (1.0 - foam)) * transmitted;
 	if (Fog.Enabled != 0)
-		radiance = ApplyFog(radiance, EvaluateViewFog(worldPosition, View.ReflectionView != 0, View.ClipPlane));
+	{
+		const float4 fog = EvaluateViewFog(worldPosition, View.ReflectionView != 0, View.ClipPlane);
+		radiance = radiance * (1.0 - fog.a) + fog.rgb * (fog.a * (float3(1.0) - transmission));
+	}
+	radiance += refractedColor * transmission;
 	shading.Radiance = radiance;
 	// SceneRoughness (SceneTargetFormats.h): the specular multiplier and roughness; the occlusion 1 and the water flag.
 	shading.Roughness = uint2(PackUnorm4x8(float4(specularMultiplier, roughness)), PackUnorm4x8(float4(1.0, 1.0, 0.0, 0.0)));

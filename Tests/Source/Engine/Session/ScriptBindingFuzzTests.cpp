@@ -336,7 +336,8 @@ return true
 				transform.Translation = glm::vec3(3e38f, 0, 0);
 			});
 			Test::AddSphereBody(edit, "Ball", glm::vec3(100, 0, 0), 0.5f, BodyType::Dynamic);
-			// M47: the water proxy's receiver, a Rectangle far from the bodies (it floats nothing: no Buoyancy).
+			// M47: the water proxy's receiver, a Rectangle at the origin with the default 20 x 20 m footprint, 5 m deep with 10 m
+			// of headroom, whose volume holds Fixed and, on its boundary, Dynamic (it floats nothing: no entity has a Buoyancy).
 			edit.CreateEntity("Pool").AddComponent<WaterComponent>(WaterComponent{ .Shape = WaterShape::Rectangle });
 			Test::AddBoxBody(edit, "FuzzBody", glm::vec3(120, 0, 0), glm::vec3(0.5f), BodyType::Dynamic);
 			REQUIRE(fixture.Call("prefab.create", Json{ { "entity", "/FuzzBody" }, { "path", "Assets/Prefabs/FuzzBody.prefab" }, { "replaceWithInstance", false } }));

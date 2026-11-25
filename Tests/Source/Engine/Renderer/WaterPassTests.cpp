@@ -210,7 +210,7 @@ namespace Engine {
 	TEST_SUITE("Renderer")
 	{
 		// The rasterized surface's height at each pixel against the wave function's (Physics/WaterWaves.h's EvaluateWaterSurface,
-		// which buoyancy, the scripts and water.sample read). An orthographic camera 7 m above a swell, 1.5 km from the water's
+		// which buoyancy, the scripts and water.sample read). An orthographic camera 7 m above a swell, 2 km from the water's
 		// own origin, looks straight down at 4 x 4 m of it (64 x 64 pixels, all in the finest clipmap level). The snapshot's
 		// previous view-projection is the current one sheared by the height (clip y + HeightShear (y - base)), and the water has
 		// no previous pose, so each pixel's motion vector (SceneVelocity, current minus previous pixel) is 0.5 x 64 x HeightShear
@@ -693,6 +693,215 @@ namespace Engine {
 				const Status grown = RenderStatus(device, fixture, wet);
 				REQUIRE_MESSAGE(grown.has_value(), grown.error().ToString());
 				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 2);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The W47.2 review's finding 1: the refraction is SceneColor's, which the floor's pass already fogged over the whole path
+		// from the camera to the floor, so the water fogs only its own terms, the fog's colour weighted by its opacity. A camera
+		// 5 m above calm, unlit water (black environment, no light, no foam, no refraction offset) looks straight down at a red
+		// emitting floor 0.2 m under it, in a blue fog of 0.07 a metre. The water's own terms are black, so it shows the dry
+		// render's fogged floor times its transmission (about 93 %: exp(-0.2 / 4) less the little the surface reflects), plus
+		// the fog's colour at the surface times the water's opacity (the rest); fogging the refraction again would darken the
+		// red by the fog's amount (about 30 %) and add the fog's colour a second time.
+		TEST_CASE("Water: in a fogged view the refracted bottom is fogged once, as the dry bottom is" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+					glm::vec3(0.0f, 0.0f, -1.0f), 100.0f);
+				constexpr float Density = 0.07f;
+				snapshot.Fog = RenderFog{ .Enabled = true, .Color = glm::vec3(0.0f, 0.0f, 1.0f), .Density = Density, .MaxOpacity = 1.0f, .SunGlow = 0.0f };
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(0.0f, -0.2f, 0.0f), glm::vec2(40.0f)), .Mesh = QuadMeshHandle, .Materials = { RedFloorMaterialHandle }, .Entity = UUID(1) });
+				const std::vector<glm::dvec3> dry = RenderSceneColor(device, fixture, snapshot);
+
+				WaterItem water = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0, 600, 0);
+				water.FoamAmount = 0.0f;
+				water.RefractionStrength = 0.0f;
+				water.DetailNormalStrength = 0.0f;
+				snapshot.Waters.push_back(water);
+				const std::vector<glm::dvec3> wet = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 1);
+
+				// The fog's amount at the surface: 5 m of view depth at every pixel of the plane facing the camera.
+				const double surfaceFog = 1.0 - std::exp(-static_cast<double>(Density) * 5.0);
+				for (const glm::uvec2 pixel : { glm::uvec2(32, 32), glm::uvec2(12, 20), glm::uvec2(50, 44) })
+				{
+					const glm::dvec3 before = Texel(dry, pixel.x, pixel.y);
+					const glm::dvec3 after = Texel(wet, pixel.x, pixel.y);
+					INFO("pixel (" << pixel.x << ", " << pixel.y << "): dry " << before.r << ", " << before.b << "; wet " << after.r << ", " << after.b);
+					REQUIRE(before.r > 0.6);
+					REQUIRE(before.b > 0.25);
+					const double transmission = after.r / before.r;
+					CHECK(transmission > 0.9);
+					CHECK(transmission < 0.97);
+					CHECK(std::abs(after.b - (before.b * transmission + surfaceFog * (1.0 - transmission))) < 0.01);
+				}
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The W47.2 review's finding 2: SSR's half-resolution reconstruction weighs its taps by depth, and the depth pyramid,
+		// recorded before the water, holds the seabed's depth at a water pixel. An orthographic camera looks down at 30 degrees
+		// at calm, smooth water reflecting a green emitting wall; under the water lies a floor 3 m deep and, over it, a ridge
+		// 1 m deep that covers exactly one even row of the image. Weighed by the seabed's depth, that row's four taps (on the
+		// rows above and below it, over the floor) would all be rejected and the row would lose its reflection, a seam
+		// outlining the ridge; weighed by the water's own depth (SceneDepth), the row reflects the wall as the full-resolution
+		// trace does.
+		TEST_CASE("Water: a half-resolution trace weighs a water pixel's taps by the water's depth, so a ridge under it leaves no seam"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				const glm::vec3 target(0.0f, 0.0f, -2.0f);
+				const glm::vec3 forward(0.0f, -0.5f, -std::sqrt(0.75f)); // 30 degrees down
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Orthographic, target - forward * 50.0f, target, glm::vec3(0.0f, 1.0f, 0.0f), 100.0f);
+				snapshot.Camera.OrthographicSize = 4.0f;
+				snapshot.Camera.Projection = ComputeReverseZProjection(RenderProjection::Orthographic, snapshot.Camera.VerticalFov, snapshot.Camera.OrthographicSize,
+					snapshot.Camera.NearClip, snapshot.Camera.FarClip, Size, Size);
+				const glm::mat4 viewProjection = snapshot.Camera.Projection * snapshot.Camera.View;
+				// The ridge's plane, y = -1: a point's image row is affine in its z. The ridge spans rows Row - 0.3 to Row + 1.3,
+				// so only Row's pixel centres lie on it.
+				constexpr uint32_t Row = 24;
+				const float rowAtZero = ProjectToPixel(viewProjection, glm::vec3(0.0f, -1.0f, 0.0f)).y;
+				const float rowsPerMetre = ProjectToPixel(viewProjection, glm::vec3(0.0f, -1.0f, 1.0f)).y - rowAtZero;
+				const float nearZ = (static_cast<float>(Row) + 1.3f - rowAtZero) / rowsPerMetre;
+				const float farZ = (static_cast<float>(Row) - 0.3f - rowAtZero) / rowsPerMetre;
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(0.0f, -3.0f, -2.0f), glm::vec2(40.0f)), .Mesh = QuadMeshHandle, .Materials = { GreyMaterialHandle }, .Entity = UUID(1) });
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(0.0f, -1.0f, 0.5f * (nearZ + farZ)), glm::vec2(40.0f, std::abs(nearZ - farZ))),
+					.Mesh = QuadMeshHandle,
+					.Materials = { GreyMaterialHandle },
+					.Entity = UUID(2) });
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(10.0f, 3.0f, 1.0f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { GreenMarkerMaterialHandle },
+					.Entity = UUID(3) });
+				WaterItem water = MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), {}, 0.0, 600, 0);
+				water.Roughness = 0.02f;
+				water.DetailNormalStrength = 0.0f;
+				water.FoamAmount = 0.0f;
+				water.RefractionStrength = 0.0f;
+				snapshot.Waters.push_back(water);
+				snapshot.Post.SsrEnabled = true;
+
+				const std::vector<glm::dvec3> full = RenderSceneColor(device, fixture, snapshot);
+				snapshot.Quality.SsrHalfResolution = true;
+				const std::vector<glm::dvec3> half = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 1);
+				uint32_t compared = 0;
+				uint32_t seam = 0;
+				for (uint32_t x = 8; x < Size - 8; ++x)
+				{
+					const double reflected = Texel(full, x, Row).g;
+					REQUIRE(reflected > 0.1);
+					++compared;
+					seam += Texel(half, x, Row).g < 0.5 * reflected ? 1U : 0U;
+				}
+				INFO("row " << Row << ": " << seam << " of " << compared << " pixels lose the reflection at half resolution");
+				CHECK(seam == 0);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The W47.2 review's finding 3: a Rectangle draws the rings clamped to its footprint, so a calm one draws exactly its
+		// footprint. A camera 10 m above a calm Rectangle, turned 30 degrees and scaled 1.5 along its X and 0.75 along its Z
+		// (6 x 3 m from a Size of 4 x 4), picks the lake 1.5 pixels inside the midpoint of each of its four edges and nothing
+		// 1.5 pixels outside.
+		TEST_CASE("Water: a calm Rectangle draws exactly its footprint, turned and scaled" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				RenderSnapshot snapshot = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 10.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+					glm::vec3(0.0f, 0.0f, -1.0f), 100.0f);
+				snapshot.Flags = RenderViewFlags::Picking;
+				snapshot.PickTable = { UUID(602) };
+				const glm::vec3 centre(0.4f, 0.0f, -0.3f);
+				const glm::mat4 world = glm::translate(glm::mat4(1.0f), centre) * glm::rotate(glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f))
+					* glm::scale(glm::mat4(1.0f), glm::vec3(1.5f, 1.0f, 0.75f));
+				WaterItem lake = MakeWater(RenderWaterShape::Rectangle, world, {}, 0.0, 602, 1);
+				lake.Size = glm::vec2(4.0f);
+				snapshot.Waters.push_back(lake);
+				const Status rendered = RenderStatus(device, fixture, snapshot);
+				REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 1);
+				const Image ids = ReadTexture(device, fixture.Renderer().GetEntityIdTexture());
+				const glm::mat4 viewProjection = snapshot.Camera.Projection * snapshot.Camera.View;
+				const glm::vec2 centrePixel = ProjectToPixel(viewProjection, centre);
+				const glm::vec3 axisX = glm::vec3(world[0]) * 2.0f; // half the Size times the column: 3 m along the turned X
+				const glm::vec3 axisZ = glm::vec3(world[2]) * 2.0f; // 1.5 m along the turned Z
+				for (const glm::vec3 edge : { axisX, -axisX, axisZ, -axisZ })
+				{
+					const glm::vec2 midpoint = ProjectToPixel(viewProjection, centre + edge);
+					const glm::vec2 inward = glm::normalize(centrePixel - midpoint);
+					const glm::vec2 inside = midpoint + inward * 1.5f;
+					const glm::vec2 outside = midpoint - inward * 1.5f;
+					INFO("the edge's midpoint at pixel (" << midpoint.x << ", " << midpoint.y << ")");
+					REQUIRE(outside.x >= 0.0f);
+					REQUIRE(outside.y >= 0.0f);
+					REQUIRE(outside.x < static_cast<float>(Size));
+					REQUIRE(outside.y < static_cast<float>(Size));
+					CHECK(WordTexel(ids, static_cast<uint32_t>(inside.x), static_cast<uint32_t>(inside.y), 1, 0) == 1);
+					CHECK(WordTexel(ids, static_cast<uint32_t>(outside.x), static_cast<uint32_t>(outside.y), 1, 0) == 0);
+				}
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The W47.2 review's finding 4 (decision 3: the data views, the debug views and the wireframe draw no water): a scene
+		// with an Ocean, SSAO and SSR off, rendered in the Albedo view, the LightCount data view and the wireframe, records
+		// neither the Water nor the WaterRefraction row, counts no surface and records no depth pyramid; its Lit view draws
+		// the water.
+		TEST_CASE("Water: the debug views, the data views and the wireframe draw no water" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot lit = MakeView(fixture, RenderProjection::Perspective, glm::vec3(0.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, -3.0f), glm::vec3(0.0f, 1.0f, 0.0f),
+					100.0f);
+				lit.Environment.FallbackColor = glm::vec3(0.3f);
+				lit.Post.SsaoEnabled = false;
+				lit.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(0.0f, -1.0f, -3.0f), glm::vec2(10.0f)), .Mesh = QuadMeshHandle, .Materials = { GreyMaterialHandle }, .Entity = UUID(1) });
+				lit.Waters.push_back(MakeWater(RenderWaterShape::Ocean, glm::mat4(1.0f), SwellWaves, 1.0, 600, 0));
+				const auto hasRow = [&fixture](std::string_view row)
+				{
+					return Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), row) != nullptr;
+				};
+				RenderSnapshot albedo = lit;
+				albedo.DebugView = RenderDebugView::Albedo;
+				RenderSnapshot lightCount = lit;
+				lightCount.DebugView = RenderDebugView::LightCount;
+				RenderSnapshot wireframe = lit;
+				wireframe.Flags = RenderViewFlags::Wireframe;
+				for (RenderSnapshot* snapshot : { &albedo, &lightCount, &wireframe })
+				{
+					CAPTURE(static_cast<int>(snapshot->DebugView));
+					CAPTURE(snapshot == &wireframe);
+					const Status rendered = RenderStatus(device, fixture, *snapshot);
+					REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+					CHECK_FALSE(hasRow("Water"));
+					CHECK_FALSE(hasRow("WaterRefraction"));
+					CHECK_FALSE(hasRow("DepthPyramid"));
+					CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 0);
+				}
+				const Status rendered = RenderStatus(device, fixture, lit);
+				REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+				CHECK(hasRow("Water"));
+				CHECK(hasRow("WaterRefraction"));
+				CHECK(fixture.Renderer().GetRenderStats().WaterSurfaces == 1);
 			}
 			device.RunGarbageCollection();
 		}

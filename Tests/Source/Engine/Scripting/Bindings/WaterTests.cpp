@@ -185,6 +185,24 @@ assert(Physics.SampleWater(vector.create(20, 6, 0)).Depth == -2)
 return true
 )");
 		}
+
+		// The W47.2 review's finding 10: a proxy reads its own component like a field, so a disabled Water's own methods still
+		// read its surface (as Terrain:SampleHeight reads a disabled terrain), while the point rule (Physics.SampleWater), the
+		// renderer and buoyancy ignore it.
+		TEST_CASE("WaterBindings: a disabled Water's own methods read its surface, and Physics.SampleWater ignores it")
+		{
+			Test::ScriptTestFixture fixture({ .ReadOnly = true });
+			AddWaters(fixture.GetScene(), false);
+			fixture.GetScene().FindEntityByPath("/Pool").SetActive(false);
+			REQUIRE(fixture.Start());
+			CheckWaterScript(fixture, R"(
+local pool = Scene.FindByName("Pool").Water
+assert(pool:SampleHeight(vector.create(20, 0, 0)) == 4)
+assert(pool:IsUnderwater(vector.create(20, 3, 0)))
+assert(Physics.SampleWater(vector.create(20, 3, 0)) == nil)
+return true
+)");
+		}
 	}
 
 }

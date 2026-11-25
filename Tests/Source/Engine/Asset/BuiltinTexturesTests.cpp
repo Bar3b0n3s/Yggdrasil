@@ -272,11 +272,35 @@ namespace Engine {
 				leansLeft = leansLeft || x < -40.0;
 				leansRight = leansRight || x > 40.0;
 			}
-			// A tiling height field's slopes sum to zero across a period, so the mean lean is within rounding of none.
+			// A sanity check, not the tiling's proof: the wrapping central differences of any height field sum to zero across
+			// the period, so the mean lean is within rounding of none.
 			CHECK(std::abs(static_cast<double>(sumX) / (128.0 * 128.0)) < 1.0);
 			CHECK(std::abs(static_cast<double>(sumY) / (128.0 * 128.0)) < 1.0);
 			CHECK(leansLeft);
 			CHECK(leansRight);
+			// Seamless (the W47.2 review's finding 5): neighbouring texels' decoded x and y differ by a small step, across the
+			// wrapping edges (texel 127 against texel 0) as inside. The largest step, measured once, is 50; a height field that
+			// stopped tiling leans 45 degrees along its seam, a step of about 90 beside it.
+			const auto component = [&base](uint32_t x, uint32_t y, uint32_t channel)
+			{
+				return std::to_integer<int>(base[(static_cast<size_t>(y % 128) * 128 + x % 128) * 4 + channel]);
+			};
+			for (uint32_t channel = 0; channel < 2; ++channel)
+			{
+				CAPTURE(channel);
+				int largestNormalStep = 0;
+				for (uint32_t y = 0; y < 128; ++y)
+				{
+					for (uint32_t x = 0; x < 128; ++x)
+					{
+						const int right = std::abs(component(x, y, channel) - component(x + 1, y, channel));
+						const int down = std::abs(component(x, y, channel) - component(x, y + 1, channel));
+						largestNormalStep = std::max({ largestNormalStep, right, down });
+					}
+				}
+				CAPTURE(largestNormalStep);
+				CHECK(largestNormalStep <= 56);
+			}
 
 			// The foam: clear and dense texels both, and seamless across the wrapping edges as inside.
 			const std::span<const std::byte> cover = GetMipPixels(foam, 0);
@@ -285,9 +309,12 @@ namespace Engine {
 			{
 				return std::to_integer<int>(cover[static_cast<size_t>(y % 128) * 128 + x % 128]);
 			};
+			// The steps between neighbours inside the texture (x < 127 to the right, y < 127 down), and across its wrapping
+			// edges (texel 127 against texel 0): a seamless texture's wrap steps are no larger than its largest inside step
+			// (measured once: 6 against 75), while a lattice that stopped wrapping steps up to 255 there.
 			int clear = 0;
 			int dense = 0;
-			int largestStep = 0;
+			int interiorStep = 0;
 			int wrapStep = 0;
 			for (uint32_t y = 0; y < 128; ++y)
 			{
@@ -295,17 +322,19 @@ namespace Engine {
 				{
 					clear += value(x, y) == 0 ? 1 : 0;
 					dense += value(x, y) == 255 ? 1 : 0;
-					const int step = std::max(std::abs(value(x, y) - value(x + 1, y)), std::abs(value(x, y) - value(x, y + 1)));
-					largestStep = std::max(largestStep, step);
-					if (x == 127 || y == 127)
-						wrapStep = std::max(wrapStep, step);
+					const int right = std::abs(value(x, y) - value(x + 1, y));
+					const int down = std::abs(value(x, y) - value(x, y + 1));
+					int& rightStep = x == 127 ? wrapStep : interiorStep;
+					rightStep = std::max(rightStep, right);
+					int& downStep = y == 127 ? wrapStep : interiorStep;
+					downStep = std::max(downStep, down);
 				}
 			}
-			CAPTURE(largestStep);
+			CAPTURE(interiorStep);
 			CAPTURE(wrapStep);
 			CHECK(clear > 128 * 128 / 10);
 			CHECK(dense > 0);
-			CHECK(wrapStep <= largestStep);
+			CHECK(wrapStep <= interiorStep);
 		}
 
 		TEST_CASE("BuiltinTextures: the generated texels match the hashes recorded in every configuration")
