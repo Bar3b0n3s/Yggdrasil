@@ -190,6 +190,8 @@ namespace Engine {
 				// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): the draws per level, the items
 				// cross-fading two levels and those beyond their cull distance.
 				Utils::DrawSupportingMetric("Mesh LODs", std::format("{} draws / {} cross-fades / {} distance-culled", Utils::MeshLodDrawsLabel(view.MeshLodDraws), view.LodCrossFades, view.DistanceCulledMeshes));
+				// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: the fourth phase 8 row, after M46's).
+				Utils::DrawSupportingMetric("Water", std::format("{} surfaces{}", view.WaterSurfaces, view.Underwater ? " (under water)" : ""));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

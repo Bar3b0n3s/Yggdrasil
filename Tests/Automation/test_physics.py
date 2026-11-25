@@ -10,7 +10,8 @@ PHYSICS_SURFACE_UNUSED; test_body_info_reports_a_squeezed_character covers its W
 squeezed and squeezedBy). test_joint_info_reads_a_joint_in_play reads physics.jointInfo (M37,
 Docs/Decisions/0054-m37-joints.md decision 10) and its errors. test_vehicle_info_reads_a_vehicle_in_play reads
 physics.vehicleInfo (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), through a vehicle and a wheel,
-and its errors.
+and its errors. test_body_info_reports_buoyancy reads M47's buoyancy block (Docs/Decisions/0065-m47-water.md
+decision 3).
 """
 
 from __future__ import annotations
@@ -338,6 +339,23 @@ class PhysicsTests(AutomationTestCase):
             client.call("physics.vehicleInfo", {"entity": "/Plain"})
         self.assert_engine_error(no_vehicle.exception, engine_client.NOT_FOUND, "NotFound")
         self.assertEqual(no_vehicle.exception.issues[0]["pointer"], "/entity")
+
+    def test_body_info_reports_buoyancy(self) -> None:
+        """M47 (Docs/Decisions/0065-m47-water.md decision 3): a floating body reports its water and its volumes; the
+        others report null."""
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Sea", "components": {"Water": {}}})
+        client.call("entity.create", {"name": "Crate", "components": {
+            "Transform": {"Translation": [70, 0.25, 0]}, "RigidBody": {"Type": "Dynamic", "Mass": 250},
+            "BoxCollider": {"HalfExtents": [0.5, 0.5, 0.5]}, "Buoyancy": {}}})
+        self.create_ground_and_ball(client, height=40.0)
+        client.call("play.start", {"mode": "simulate", "lockstep": True})
+        client.call("play.step", {"ticks": 120, "render": "none"})
+        crate = client.call("physics.bodyInfo", {"entity": "/Crate"})["buoyancy"]
+        self.assertEqual(crate["water"]["path"], "/Sea")
+        self.assertAlmostEqual(crate["totalVolume"], 1.0, places=3)
+        self.assertAlmostEqual(crate["submergedVolume"], 0.25, delta=0.05)
+        self.assertIsNone(client.call("physics.bodyInfo", {"entity": "/Ball"})["buoyancy"])
         client.call("play.stop")
 
 

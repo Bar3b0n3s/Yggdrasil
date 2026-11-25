@@ -19,6 +19,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/luau-gameplay/joints` ([joints.md](joints.md)): joints between bodies: `HingeJoint`, `SliderJoint`, `DistanceJoint` and `FixedJoint`, their limits and motors, driving them from scripts, `GetAngle`, `GetPosition`, `GetDistance`, `GetForce` and `GetTorque`, breaking and `OnJointBreak`, mending.
 - `skills/luau-gameplay/vehicles` ([vehicles.md](vehicles.md)): wheeled vehicles: `WheeledVehicle` and `VehicleWheel`, driving one from scripts, `GetSpeed`, `GetContact`, `GetSlip` and the other reads, a trailer, tuning the top speed (a rev-limiting torque curve), the ride height and rollover.
 - `skills/luau-gameplay/navigation` ([navigation.md](navigation.md)): the `Navigation` module: paths, closest points, walks along the surface and random points on the baked navigation mesh, an agent type per query, determinism in the fixed step and a chaser behaviour.
+- `skills/luau-gameplay/water` ([water.md](water.md)): water in scripts: `Physics.SampleWater` and the `Water` proxy's `SampleHeight`, `SampleNormal`, `SampleVelocity` and `IsUnderwater` at the world's time, the tide and the storm, floating with `Buoyancy` or a script's float points (`RigidBody:AddForceAtPosition`), and wading and swimming by the depth under a character's feet.
 
 ## Script shape
 

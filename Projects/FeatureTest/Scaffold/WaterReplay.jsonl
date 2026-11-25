@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Water.scene"}}
+{"method": "play.step", "params": {"ticks": 600, "render": "None", "input": [{"tick": 60, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 200, "type": "Action", "name": "Fire", "state": "Tap"}, {"tick": 400, "type": "Action", "name": "Fire", "state": "Tap"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Water.replay", "expect": [{"tick": 50, "luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Storms == 0 and Scene.FindByName(\"Sea\").Water.WaveScale < 1"}, {"tick": 100, "luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Storms == 1 and Scene.FindByName(\"Sea\").Water.WaveScale == 2"}, {"tick": 300, "luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Storms == 1 and d.Shoves == 1"}, {"tick": 600, "luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nlocal y = Scene.FindByName(\"Boat\").Transform.WorldPosition.y\nreturn d.Shoves == 2 and math.abs(y) < 2"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

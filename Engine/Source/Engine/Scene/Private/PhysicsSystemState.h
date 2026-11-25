@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Time.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Physics/CharacterController.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
@@ -98,6 +99,15 @@ namespace Engine {
 		std::vector<PhysicsAssetInput> AssetInputs{};
 		// M36: whether the world holds a non-empty list of collider surfaces for the body (SendSurfaces).
 		bool HasSurfaces = false;
+	};
+
+	// M47: one buoyant owner's runtime state (PhysicsSystem::State::Buoyancy): the planes and settings its body was last
+	// applied with (the wake rule compares both bit for bit) and that application's report.
+	struct PhysicsBuoyancyEntry
+	{
+		std::vector<PhysicsFluidPlane> Planes{};
+		PhysicsBuoyancySettings Settings{};
+		PhysicsBuoyancyReport Report{};
 	};
 
 	// One created character (§9.6).
@@ -587,6 +597,16 @@ namespace Engine {
 		// The solver priorities of every constraint in force (§9.10, §9.11): the joints take their entities' ranks in UUID order
 		// from 0, then the vehicles theirs, so no two share a priority; called whenever either set in force changes.
 		void RankConstraints();
+
+		// --- Buoyancy (M47, Docs/Decisions/0065-m47-water.md decision 3; Scene/PhysicsSystemBuoyancy.cpp) -----------------
+		// Per owner holding a Buoyancy, by UUID: the fluid planes and settings its body was last applied with (runtime state,
+		// never hashed; the wake rule compares them bit for bit) and the report of that application (physics.bodyInfo's
+		// buoyancy).
+		std::map<UUID, PhysicsBuoyancyEntry> Buoyancy;
+
+		// PreStep item 4c: floats every effectively enabled Buoyancy's Dynamic body, in canonical order of the owners, on the
+		// planes its colliders' waters give at `step`'s world time; reports one that cannot float (PHYSICS_BUOYANCY_INVALID).
+		void ApplyBuoyancyItem(const SimStep& step);
 	};
 
 }

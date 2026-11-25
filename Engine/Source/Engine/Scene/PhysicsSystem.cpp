@@ -7,6 +7,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Reflection/FieldType.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/BuoyancyComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/ColliderSurfaceComponent.h"
@@ -1807,6 +1808,10 @@ namespace Engine {
 		// 4b. M44: the vehicles' driver input, in canonical order of the vehicles (PhysicsSystemVehicles.cpp).
 		state.ApplyVehicleInput();
 
+		// 4c (M47, Docs/Decisions/0065-m47-water.md decision 3; after M44's 4b at the merge): buoyancy, over the Buoyancy owners in
+		// canonical order (PhysicsSystemBuoyancy.cpp).
+		state.ApplyBuoyancyItem(step);
+
 		// 5. Characters: a Transform write teleports them, then each runs its update with the velocity of its last
 		// MoveCharacter, which the update consumes.
 		const glm::vec3 gravity = state.World->GetGravity();
@@ -2719,6 +2724,13 @@ namespace Engine {
 			report.Character = state.MakeCharacterState(*character->Controller);
 			if (state.World->IsBodyValid(character->Controller->GetInnerBody()))
 				report.CenterOfMass = state.World->GetCenterOfMassPosition(character->Controller->GetInnerBody());
+		}
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): an owner holding a Buoyancy reports what PreStep's item 4c last
+		// applied (zero before it was applied and when it is skipped as invalid).
+		if (const ConstEntity owner = state.Specification.RuntimeScene->FindEntityByID(report.Owner); owner.IsValid() && owner.HasComponent<BuoyancyComponent>())
+		{
+			const auto found = state.Buoyancy.find(report.Owner);
+			report.Buoyancy = found != state.Buoyancy.end() ? found->second.Report : PhysicsBuoyancyReport{};
 		}
 		report.LayerName = report.Layer < state.Layers.GetLayerCount() ? state.Layers.GetName(report.Layer) : std::string();
 		if (const auto owned = state.PairsByOwner.find(report.Owner); owned != state.PairsByOwner.end())

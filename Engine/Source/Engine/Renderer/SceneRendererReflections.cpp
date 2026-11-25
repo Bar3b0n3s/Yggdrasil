@@ -19,6 +19,7 @@
 #include "Engine/Renderer/SkyAtmosphere.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/TerrainPass.h"
+#include "Engine/Renderer/WaterGeometry.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
@@ -46,17 +47,19 @@
 //
 // Prepare (PreparePlanarReflections, at the end of the Prepare stage): in a Lit view with a camera outside the wireframe,
 // a snapshot reflection is a candidate when its plane is finite, the camera faces its reflecting side and a draw of its
-// entity survived the main view's culling; its glass's rectangle on screen is the union of those draws' bounds'
-// rectangles, whose pixel area ranks it (RankPlanarReflections: the largest first, ties by entity, at most
-// MaxPlanarReflectionsPerView). Each ranked reflection takes the next slot: its mirror camera (the camera mirrored in its
-// plane, S * View * R, at ComputePlanarReflectionSize of the scene resolution, with ComputePlanarReflectionMipCount's chain
-// for the view's SsrMaxRoughness), its draws (PrepareViewDraws with the mirror camera cropped to the glass's rectangle
-// widened by the chain's blur footprint, ComputePlanarReflectionBlurMargin, and the clip plane; their instance records after
-// the main view's, the shadow casters' and the selection's), its light list (the main view's at their indices, then the
-// lights only it sees, unshadowed), its ViewConstants (ReflectionView 1, ClipPlane, CascadeDepthPlane) and fog. A reflection
-// whose objects cannot be created, and every reflection of a view whose probe constants could not be created (the forward
-// set binds them), falls back for the render (counted as dropped). Then the main view's records of each drawn reflection's
-// glass carry DrawFlagPlanarReflection and its slot.
+// entity survived the main view's culling; its glass's rectangle on screen is the union of those draws' bounds' rectangles
+// (M47: a Water entity's reflection is the water's base plane, a candidate while its surface is on screen, its rectangle
+// ComputeWaterPlanarReflectionScreenRect's and never its entity's meshes'), whose pixel area ranks it
+// (RankPlanarReflections: the largest first, ties by entity, at most MaxPlanarReflectionsPerView). Each ranked reflection
+// takes the next slot: its mirror camera (the camera mirrored in its plane, S * View * R, at ComputePlanarReflectionSize
+// of the scene resolution, with ComputePlanarReflectionMipCount's chain for the view's SsrMaxRoughness), its draws
+// (PrepareViewDraws with the mirror camera cropped to the glass's rectangle widened by the chain's blur footprint,
+// ComputePlanarReflectionBlurMargin, and the clip plane; their instance records after the main view's, the shadow casters'
+// and the selection's), its light list (the main view's at their indices, then the lights only it sees, unshadowed), its
+// ViewConstants (ReflectionView 1, ClipPlane, CascadeDepthPlane) and fog. A reflection whose objects cannot be created,
+// and every reflection of a view whose probe constants could not be created (the forward set binds them), falls back for
+// the render (counted as dropped). Then the main view's records of each drawn reflection's glass carry
+// DrawFlagPlanarReflection and its slot; a water's slot has no glass (the water's record selects it).
 //
 // Forward (RecordPlanarReflections, first in the Forward stage): each slot's mirror view into its reflection under its one
 // row PlanarReflection<k>, which times the whole view, scissored to the rectangle its draws were culled to: the clears, the
@@ -123,7 +126,13 @@ namespace Engine {
 			const std::optional<PlanarReflectionPlane> plane = ComputePlanarReflectionPlane(item);
 			if (!plane || !item.Entity.IsValid() || !IsPlanarReflectionFacing(frame.Camera, *plane))
 				continue;
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3, W47.3; its review's findings 1, 2 and 7): a water's reflection
+			// covers its surface alone (ComputeWaterPlanarReflectionScreenRect: a Rectangle's footprint widened by the sampling
+			// offset and its waves' reach, an Ocean's base plane below the horizon), never its entity's own meshes.
+			const auto water = std::ranges::find(snapshot.Waters, item.Entity, &WaterItem::Entity);
 			std::optional<PlanarReflectionScreenRect> rect;
+			if (water != snapshot.Waters.end())
+				rect = ComputeWaterPlanarReflectionScreenRect(*water, frame.Camera);
 			const auto unite = [&snapshot, &frame, &item, &rect](const std::vector<Detail::SceneRendererDraw>& draws)
 			{
 				for (const Detail::SceneRendererDraw& draw : draws)
@@ -138,8 +147,11 @@ namespace Engine {
 					rect = rect ? PlanarReflectionScreenRect{ .Min = glm::min(rect->Min, drawn->Min), .Max = glm::max(rect->Max, drawn->Max) } : *drawn;
 				}
 			};
-			unite(OpaqueDraws);
-			unite(TransparentDraws);
+			if (water == snapshot.Waters.end())
+			{
+				unite(OpaqueDraws);
+				unite(TransparentDraws);
+			}
 			if (!rect)
 				continue;
 			planes[index] = *plane;
@@ -187,8 +199,9 @@ namespace Engine {
 		frame.PlanarReflectionCount = drawn;
 		frame.PlanarReflections.Count = drawn;
 
-		// The main view's records of a drawn reflection's glass carry its slot (Shared/DrawConstants.h).
-		const auto flag = [this, drawn](const std::vector<Detail::SceneRendererDraw>& draws)
+		// The main view's records of a drawn reflection's glass carry its slot (Shared/DrawConstants.h). A water's slot has no
+		// glass: the water samples it through its record (WaterPass), and its entity's meshes keep their probes and SSR.
+		const auto flag = [this, drawn, &snapshot](const std::vector<Detail::SceneRendererDraw>& draws)
 		{
 			for (const Detail::SceneRendererDraw& draw : draws)
 			{
@@ -198,6 +211,11 @@ namespace Engine {
 				{
 					if (draw.Entity != ReflectionSlots[slot].Entity)
 						continue;
+					if (std::ranges::any_of(snapshot.Waters, [&draw](const WaterItem& water)
+					{
+						return water.Entity == draw.Entity;
+					}))
+						break;
 					InstanceRecord& record = Instances[draw.Instance];
 					record.Flags |= DrawFlagPlanarReflection;
 					record.PlanarReflectionSlot = slot;

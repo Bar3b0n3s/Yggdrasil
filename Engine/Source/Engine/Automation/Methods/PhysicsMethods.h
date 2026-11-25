@@ -83,6 +83,10 @@ namespace Engine {
 		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the world position of the body's centre of mass, in
 		// metres (PhysicsBodyReport::CenterOfMass).
 		glm::vec3 CenterOfMass = glm::vec3(0.0f);
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M44's centerOfMass): a body whose owner holds a
+		// Buoyancy, {water, submergedVolume, totalVolume} (PhysicsBodyReport::Buoyancy, water as {id, name, path} or null);
+		// null for any other body.
+		VariantValue Buoyancy{};
 		uint32_t Tick = 0; // the session's tick when read
 	};
 

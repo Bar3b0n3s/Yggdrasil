@@ -17,6 +17,7 @@
 #include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Methods/StatsMethods.h"
 #include "Engine/Automation/Methods/UiMethods.h"
+#include "Engine/Automation/Methods/WaterMethods.h"
 
 namespace Engine {
 
@@ -45,6 +46,8 @@ namespace Engine {
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 8): ui.tree, after the scene types it uses; phase 2's domains append
 		// in landing order.
 		RegisterUiMethodTypes(registry);
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger): water.sample, after the scene types it uses.
+		RegisterWaterMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -69,6 +72,8 @@ namespace Engine {
 		RegisterPhysics2DMethods(methods);
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 8).
 		RegisterUiMethods(methods);
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3).
+		RegisterWaterMethods(methods);
 	}
 
 }

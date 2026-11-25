@@ -65,6 +65,7 @@ namespace Engine {
 		stats.SkyUpdates = view.SkyUpdates;
 		stats.LodCrossFades = view.LodCrossFades;
 		stats.DistanceCulledMeshes = view.DistanceCulledMeshes;
+		stats.WaterSurfaces = view.WaterSurfaces;
 		if (view.SsrAreaAvailable)
 		{
 			stats.SsrTiles = view.SsrTiles;

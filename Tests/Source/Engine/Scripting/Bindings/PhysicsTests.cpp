@@ -102,6 +102,8 @@ local stone = Physics.GetSurface(near)
 assert(stone and stone.Friction == 0.5 and stone.Restitution == 0 and stone.SurfaceVelocity == vector.zero)
 assert(Physics.GetSurface(empty) == nil and Physics.GetSurface(Scene.FindByName("Character")) == nil)
 assert(Physics.GetSurface(nil) == nil)
+-- M47 (Docs/Decisions/0065-m47-water.md decision 3): a scene without water samples none (Bindings/WaterTests.cpp covers the rest).
+assert(Physics.SampleWater(vector.zero) == nil)
 assert(Physics.GetGravity() == vector.zero)
 Physics.SetGravity(vector.create(0,-2,0))
 assert(Physics.GetGravity() == vector.create(0,-2,0))

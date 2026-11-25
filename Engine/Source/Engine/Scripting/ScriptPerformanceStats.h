@@ -66,6 +66,9 @@ namespace Engine {
 		// RenderDistance's CullDistance (RenderStats' LodCrossFades and DistanceCulledMeshes).
 		uint32_t LodCrossFades = 0;
 		uint32_t DistanceCulledMeshes = 0;
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M46's members): the water surfaces the frame
+		// drew (RenderStats' WaterSurfaces).
+		uint32_t WaterSurfaces = 0;
 	};
 
 }

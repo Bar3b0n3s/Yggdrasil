@@ -75,6 +75,11 @@ namespace Engine {
 		// DissolveNoise, the procedural noise a MaterialParameters dissolve clips by (BuiltinTexture::DissolveNoise), never
 		// compressed.
 		static constexpr AssetHandle DissolveNoiseTexture{ 0x018c };
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger): engine://Textures/{WaterNormal, WaterFoam}, the
+		// water's procedural detail normal map and foam map (BuiltinTexture::WaterNormal and WaterFoam), which a Water whose
+		// NormalMap or FoamTexture is null samples (Renderer/WaterPass.h), never compressed.
+		static constexpr AssetHandle WaterNormalTexture{ 0x018d };
+		static constexpr AssetHandle WaterFoamTexture{ 0x018e };
 		// engine://Fonts/Default: Inter Regular (SIL OFL), Resources/Fonts/Inter-Regular.ttf through FontImporter.
 		static constexpr AssetHandle DefaultFont{ 0x01c1 };
 		// engine://Environments/{Studio, Sky}: Poly Haven CC0 studio_small_09 and kloofendal_48d_partly_cloudy_puresky at 1k,

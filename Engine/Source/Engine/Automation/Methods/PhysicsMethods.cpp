@@ -149,6 +149,13 @@ namespace Engine {
 					result.SqueezedBy = Utils::SummarizeEntityId(context, scene, report->Character->SqueezedBy);
 			}
 			result.CenterOfMass = report->CenterOfMass;
+			// M47: the buoyancy item's last application.
+			if (report->Buoyancy.has_value())
+			{
+				result.Buoyancy = VariantValue(Json{ { "water", Utils::SummarizeNullableEntityId(context, scene, report->Buoyancy->Water).Get() },
+					{ "submergedVolume", report->Buoyancy->SubmergedVolume },
+					{ "totalVolume", report->Buoyancy->TotalVolume } });
+			}
 			result.Tick = ToAutomationCounter(session->GetTick());
 			return result;
 		}
@@ -280,6 +287,10 @@ namespace Engine {
 			.Field("centerOfMass", &PhysicsBodyInfoResult::CenterOfMass,
 				"The world position of the body's centre of mass, in metres: its colliders' centre of mass, moved by a MassProperties' "
 				"CenterOfMassOffset (a character's capsule centre).")
+			.Field("buoyancy", &PhysicsBodyInfoResult::Buoyancy,
+				"For a body whose owner holds a Buoyancy, what the physics last floated it with: {water (the Buoyancy's Water when set; else "
+				"the water whose planes held the most of the submerged volume, null when nothing was submerged; as {id, name, path}), "
+				"submergedVolume, totalVolume (m^3)}, kept while it sleeps and 0 while it is skipped as invalid; null for any other body.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).

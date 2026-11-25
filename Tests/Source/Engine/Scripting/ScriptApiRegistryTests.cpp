@@ -62,6 +62,9 @@ namespace Engine {
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the Wind proxy's Sample method
 		// (ScriptWindTests.cpp).
 		void RunWindBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water proxy's methods and Physics.SampleWater
+		// (Bindings/WaterTests.cpp).
+		void RunWaterBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 	}
 
@@ -189,7 +192,8 @@ namespace Engine {
 				&Test::RunNavigationBindingsCoverage,
 				&Test::RunJointsBindingsCoverage,
 				&Test::RunVehiclesBindingsCoverage,
-				&Test::RunWindBindingsCoverage
+				&Test::RunWindBindingsCoverage,
+				&Test::RunWaterBindingsCoverage
 			};
 			Test::ScriptTestFixture catalog;
 			REQUIRE(catalog.Start());

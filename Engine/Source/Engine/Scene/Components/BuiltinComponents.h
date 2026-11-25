@@ -8,6 +8,7 @@
 #include "Engine/Scene/Components/BoneAttachmentComponent.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/BuoyancyComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
@@ -73,6 +74,7 @@
 #include "Engine/Scene/Components/VehicleWheelComponent.h"
 #include "Engine/Scene/Components/WheeledVehicleComponent.h"
 #include "Engine/Scene/Components/WindComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 
 namespace Engine {
 
@@ -142,7 +144,11 @@ namespace Engine {
 		// RenderDistance (Registration/RenderDistanceRegistration.cpp) and Wind (Registration/WindRegistration.cpp; M46,
 		// Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F). ADR 0060's phase-8 ledger: each in
 		// a category of its own, appended after M44's Vehicles in train order (M47's Water follows).
-		RenderDistanceComponent, WindComponent>;
+		RenderDistanceComponent, WindComponent,
+		// Water (Registration/WaterRegistration.cpp; M47, Docs/Decisions/0065-m47-water.md decision 3). Phase 8's ledger
+		// (Docs/Decisions/0060-skerries-engine-program.md): the twentieth category, after M44's Vehicles and M46's
+		// RenderDistance and Wind, in the train order.
+		WaterComponent, BuoyancyComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -178,8 +184,10 @@ namespace Engine {
 	// 0060's phase-8 ledger's train order.
 	void RegisterRenderDistanceComponents(TypeRegistry& registry);
 	void RegisterWindComponents(TypeRegistry& registry);
+	// M47 (Docs/Decisions/0065-m47-water.md decision 3), last, in phase 8's ledger's train order.
+	void RegisterWaterComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the nineteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the twenty functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

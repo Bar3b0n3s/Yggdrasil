@@ -41,7 +41,12 @@ Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K) the lev
 LodSphere.gltf's ball with its generated levels, both as MeshLods.jsonl imports them, over a 1 km plane under a gale
 and a sun with cascades, seen across the forest by a perspective camera; lod/Forest/gpuMs: the sum of the DepthNormal
 row, the Shadows pass's rows and the ForwardOpaque row; budget 3.0 ms, the Skerries brief S04's trees and rocks),
-captured only when the view drew a coarser level; then (M43,
+captured only when the view drew a coarser level; and (M47, Docs/Decisions/0065-m47-water.md decision 3) the water of a
+generated sea (Assets/Perf/Water.scene: an Ocean with a four-wave swell over a built-in Plane 6 m down, a shadowed sun,
+the Sky environment and SSR on): water/Ocean/gpuMs, the sum of the WaterRefraction and Water rows with the camera 6 m
+up looking 50 degrees down, so the sea fills the view (budget 1.0 ms), captured only when the view drew the water, and
+water/Underwater/gpuMs, the Underwater row with the camera 2.5 m under the surface (budget 0.3 ms), captured only when
+the view recorded the Underwater pass; then (M43,
 Docs/Decisions/0061-m43-static-scenery.md decision 3 and its W43.3 record; the "staticScenery" part) another
 --headless-game-view editor at 1920 x 1080, with the copy's
 Simulation.MaxEntities raised to 32,768, measures on a generated Assets/Perf/StaticScenery.scene (10,000 pairs of a root
@@ -57,9 +62,12 @@ cells, which a perspective camera sees whole, under a shadowed sun):
     hash) less the median of the same round trip in a session of a generated empty scene (no budget);
 captured only when the game view's static set held the 10,000 meshes, it drew no dynamic mesh and the last tick rebuilt
 no static cell, with the tick's, the view's and the extraction's parts, the view's static cells, the visible ones and
-its shadow and ForwardOpaque draws printed.
---only selects some of the parts (playCopy, scenes, navigation, replay, look, staticScenery), a development aid for one
-measurement.
+its shadow and ForwardOpaque draws printed; and (M47; the "water" part, in the --renderer none editor)
+water/Buoyancy64/tickMs: a new scene (Assets/Scenes/PerfWaterBuoyancy64.scene) of an Ocean with a three-wave swell and
+64 Dynamic 400 kg boats, each with four box pontoons on child entities and a Buoyancy; in a lockstep session, the
+play.step time per tick of 8 calls of 30 ticks with render "None", after a warm-up (budget 1.0 ms).
+--only selects some of the parts (playCopy, scenes, navigation, replay, look, staticScenery, water), a development aid
+for one measurement.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
 (--gpu-optional: no frame or GPU times) makes the step a warning. Only a capture that cannot run fails it: a missing
@@ -115,7 +123,12 @@ for index = 0, 149 do
 end
 return stuck"""
 NAVIGATION_METRIC = "navigation/150Agents/tickMs"
-CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay", "look", "staticScenery")
+CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay", "look", "staticScenery", "water")
+# M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: the part water, after M43's staticScenery): 64
+# boats of four pontoons each with a Buoyancy on a swell, in a --renderer none editor's lockstep ticks.
+WATER_BUOYANCY_METRIC = "water/Buoyancy64/tickMs"
+WATER_PERF_SCENE = "Assets/Scenes/PerfWaterBuoyancy64.scene"
+WATER_BOATS = 64
 GENERATED_SCENE = "Assets/Perf/Entities1000.scene"
 GENERATED_EMPTY_SCENE = "Assets/Perf/Empty.scene"
 GENERATED_ENTITIES = 1000
@@ -187,6 +200,15 @@ FOREST_ROCK_ROWS = 50
 FOREST_EXTENT = 1000.0  # metres: the plane's side
 FOREST_BATCH_OPS = 500
 FOREST_PASSES = ("DepthNormal", "DirectionalShadows", "SpotShadows", "ForwardOpaque")
+# M47: the look part's sea (module docstring), the rows its two metrics sum and its camera's two poses.
+WATER_LOOK_SCENE = "Assets/Perf/Water.scene"
+WATER_OCEAN_METRIC = "water/Ocean/gpuMs"
+WATER_OCEAN_PASSES = ("WaterRefraction", "Water")
+WATER_UNDERWATER_METRIC = "water/Underwater/gpuMs"
+WATER_UNDERWATER_PASSES = ("Underwater",)
+WATER_LOOK_CAMERA = "/Camera"
+WATER_ABOVE_POSE = {"Translation": [0, 6, 0], "EulerAngles": [-50, 0, 0]}
+WATER_UNDER_POSE = {"Translation": [0, -2.5, 0], "EulerAngles": [-10, 0, 0]}
 DEVICE_PROBE_TIMEOUT_SECONDS = 120.0
 CALL_TIMEOUT_SECONDS = 120.0
 STEP_TIMEOUT_SECONDS = 600.0
@@ -598,15 +620,46 @@ class Capture:
         if still_view.get("skyUpdates", 0) != 0:
             self.warnings.append(f"{SKY_STATIC_METRIC}: the still sky's light was regenerated; not captured")
         else:
-            self.sky_metric(SKY_STATIC_METRIC, still)
+            self.look_metric(SKY_STATIC_METRIC, still)
         if turning_view.get("skyUpdates", 0) != 1 or turning_view.get("relitIrradianceVolumes", 0) != 1:
             self.warnings.append(f"{SKY_TURNING_METRIC}: the turning sky's light was not regenerated with its volume "
                                  f"relit; not captured")
         else:
-            self.sky_metric(SKY_TURNING_METRIC, turning)
+            self.look_metric(SKY_TURNING_METRIC, turning)
 
-    def sky_metric(self, name: str, samples: list[float]) -> None:
-        """The sky's metric `name` from `samples`; a warning without any."""
+    def water_look_cost(self, client: Any) -> None:
+        """water/Ocean/gpuMs and water/Underwater/gpuMs (module docstring); an engine error makes both a warning, and a
+        view without GPU times, or one that drew no water (the first) or did not record the Underwater pass (the
+        second), makes that one a warning."""
+        try:
+            self.call(client, "scene.new", {"path": WATER_LOOK_SCENE, "template": "Empty", "discardChanges": True})
+            self.call(client, "edit.batch", {"label": "Perf: sea", "ops": water_look_ops()},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            ocean = self.play_samples(client, WATER_OCEAN_PASSES)
+            # The camera goes under the surface in the open scene, unsaved, as fog_cost removes its Fog.
+            self.call(client, "entity.update",
+                      {"entity": WATER_LOOK_CAMERA, "components": {"Transform": WATER_UNDER_POSE}})
+            underwater = self.play_samples(client, WATER_UNDERWATER_PASSES)
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"{WATER_OCEAN_METRIC}, {WATER_UNDERWATER_METRIC}: {detail}; not captured")
+            return
+        samples, view = ocean
+        if view.get("waterSurfaces", 0) < 1:
+            self.warnings.append(f"{WATER_OCEAN_METRIC}: the game view drew no water; not captured")
+        else:
+            self.look_metric(WATER_OCEAN_METRIC, samples)
+        samples, view = underwater
+        if not view.get("underwater", False):
+            self.warnings.append(f"{WATER_UNDERWATER_METRIC}: the game view did not record the Underwater pass; not "
+                                 f"captured")
+        else:
+            self.look_metric(WATER_UNDERWATER_METRIC, samples)
+
+    def look_metric(self, name: str, samples: list[float]) -> None:
+        """The metric `name` of a look part's samples, or a warning without any."""
         if not samples:
             self.warnings.append(f"{name}: the game view reported no GPU times; not captured")
             return
@@ -730,6 +783,34 @@ class Capture:
         self.metrics.append(metric)
         self.console.print(f"  {NAVIGATION_METRIC}: median {metric.median:.3f} ms per tick")
 
+    def water(self, client: Any) -> None:
+        """water/Buoyancy64/tickMs (module docstring); an engine error makes it a warning."""
+        ops = water_buoyancy_ops()
+        playing = False
+        try:
+            self.call(client, "scene.new", {"path": WATER_PERF_SCENE, "template": "Empty", "discardChanges": True},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "edit.batch", {"label": "Perf: 64 buoyant boats", "ops": ops},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            self.call(client, "play.start", {"lockstep": True})
+            playing = True
+            self.call(client, "play.step", {"ticks": WARM_UP_TICKS, "render": "None"}, timeout=STEP_TIMEOUT_SECONDS)
+            metric = perf.summarize(WATER_BUOYANCY_METRIC, "ms", self.step_chunks(client, "None"))
+        except (self.engine_client.EngineError, ValueError) as error:
+            engine_error = isinstance(error, self.engine_client.EngineError)
+            detail = f"{error.method}: {error.detail}" if engine_error else str(error)
+            self.warnings.append(f"{WATER_BUOYANCY_METRIC}: {detail}; not captured")
+            return
+        finally:
+            if playing:
+                try:
+                    self.call(client, "play.stop", {})
+                except self.engine_client.EngineError as error:
+                    self.warnings.append(f"{WATER_BUOYANCY_METRIC}: play.stop failed: {error.detail}")
+        self.metrics.append(metric)
+        self.console.print(f"  {WATER_BUOYANCY_METRIC}: median {metric.median:.3f} ms per tick")
+
     def replay(self, client: Any) -> None:
         """replay/Determinism/tickMs (module docstring)."""
         samples: list[float] = []
@@ -816,6 +897,51 @@ def ssr_floor_ops() -> list[dict[str, Any]]:
             "Transform": {"Translation": [-4.0 + index * 2.5, 1.5, -3.0], "Scale": [0.6, 3, 0.6]},
             "MeshRenderer": {"Mesh": BUILTIN_CUBE_MESH, "Materials": ["Assets/Perf/Rough.material"]}}}})
     return ops
+
+
+def water_buoyancy_ops() -> list[dict[str, Any]]:
+    """The edit.batch ops of water/Buoyancy64/tickMs's scene: an Ocean with a three-wave swell, then WATER_BOATS Dynamic
+    400 kg boats on an 8-column grid 6 m apart, each with a Buoyancy and four 1 m x 0.6 m x 0.8 m box pontoons on child
+    entities."""
+    swell = [{"Direction": 10, "Wavelength": 24, "Amplitude": 0.6, "Steepness": 0.6},
+             {"Direction": 75, "Wavelength": 9, "Amplitude": 0.2, "Steepness": 0.8, "Speed": 3},
+             {"Direction": -40, "Wavelength": 4, "Amplitude": 0.05, "Steepness": 1}]
+    ops: list[dict[str, Any]] = [{"method": "entity.create",
+                                  "params": {"name": "PerfSea", "components": {"Water": {"Waves": swell}}}}]
+    for index in range(WATER_BOATS):
+        name = f"PerfBoat{index:02}"
+        ops.append({"method": "entity.create",
+                    "params": {"name": name, "components": {
+                        "Transform": {"Translation": [(index % 8) * 6.0, 0.3, (index // 8) * 6.0]},
+                        "RigidBody": {"Type": "Dynamic", "Mass": 400}, "Buoyancy": {}}}})
+        for pontoon, offset in enumerate(([-1.5, 0, -0.8], [1.5, 0, -0.8], [-1.5, 0, 0.8], [1.5, 0, 0.8])):
+            ops.append({"method": "entity.create",
+                        "params": {"name": f"Pontoon{pontoon}", "parent": f"/{name}", "components": {
+                            "Transform": {"Translation": offset}, "BoxCollider": {"HalfExtents": [0.5, 0.3, 0.4]}}}})
+    return ops
+
+
+def water_look_ops() -> list[dict[str, Any]]:
+    """edit.batch ops of the look part's sea: the Sky environment with SSR on, a shadowed sun, an Ocean at y = 0 with a
+    four-wave swell over a 400 m built-in Plane 6 m down, and a perspective camera at WATER_ABOVE_POSE."""
+    swell = [{"Direction": -80, "Wavelength": 60, "Amplitude": 0.3, "Steepness": 0.3},
+             {"Direction": -95, "Wavelength": 16, "Amplitude": 0.18, "Steepness": 0.55, "Phase": 30},
+             {"Direction": -60, "Wavelength": 7, "Amplitude": 0.06, "Steepness": 0.7, "Phase": 140},
+             {"Direction": -120, "Wavelength": 3.2, "Amplitude": 0.025, "Steepness": 0.8, "Phase": 250}]
+    return [
+        {"method": "entity.create", "params": {"name": "Rendering", "components": {
+            "Environment": {"Environment": "engine://Environments/Sky", "Intensity": 0.8, "ShowSkybox": True},
+            "PostProcess": {"SsrEnabled": True}}}},
+        {"method": "entity.create", "params": {"name": "Camera", "components": {
+            "Transform": WATER_ABOVE_POSE,
+            "Camera": {"Primary": True, "Projection": "Perspective", "VerticalFov": 60, "Clear": "Skybox"}}}},
+        {"method": "entity.create", "params": {"name": "Sun", "components": {
+            "Transform": {"EulerAngles": [-40, 150, 0]}, "DirectionalLight": {"Intensity": 2.5, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Seabed", "components": {
+            "Transform": {"Translation": [0, -6, 0], "Scale": [400, 1, 400]},
+            "MeshRenderer": {"Mesh": "engine://Meshes/Plane"}}}},
+        {"method": "entity.create", "params": {"name": "Sea", "components": {"Water": {"Waves": swell}}}},
+    ]
 
 
 def mirror_room_ops() -> list[dict[str, Any]]:
@@ -1040,10 +1166,12 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
                     capture.navigation(client)
                 if "replay" in parts:
                     capture.replay(client)
+                if "water" in parts:
+                    capture.water(client)
 
             if "playCopy" in parts or "scenes" in parts:
                 run_editor(capture, editor, project_file, renderer, root / "UserData", measure)
-            if "navigation" in parts or "replay" in parts:
+            if "navigation" in parts or "replay" in parts or "water" in parts:
                 run_editor(capture, editor, project_file, "none", root / "ReplayUserData", measure_cpu)
             if "look" in parts and renderer == "vulkan":
                 def look(client: Any, _pid: int) -> None:
@@ -1054,6 +1182,7 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
                     capture.mirror_cost(client)
                     capture.sky_cost(client)
                     capture.forest_cost(client)
+                    capture.water_look_cost(client)
 
                 run_editor(capture, editor, project_file, renderer, root / "LookUserData", look,
                            ("--headless-game-view",))

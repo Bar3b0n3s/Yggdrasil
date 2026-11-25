@@ -123,6 +123,11 @@ namespace Engine {
 		std::array<uint32_t, 5> MeshLodDraws{};
 		uint32_t LodCrossFades = 0;
 		uint32_t DistanceCulledMeshes = 0;
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M46's fields): WaterSurfaces, the snapshot's
+		// waters when the Water pass's RecordSurface succeeds (it draws every one), 0 when it does not record or fails; Underwater,
+		// whether the Underwater pass recorded (the camera's near plane may lie under a water and the Water pass drew).
+		uint32_t WaterSurfaces = 0;
+		bool Underwater = false;
 	};
 
 	// M32 (decision 13): the SSR area of one completed frame, which RenderStatsHistory::PublishSsrArea merges into the

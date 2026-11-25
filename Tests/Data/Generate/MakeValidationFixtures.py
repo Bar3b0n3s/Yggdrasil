@@ -87,7 +87,7 @@ COMPONENT_ORDER = [
     "ReflectionProbe", "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation",
     "NavModifier",
     "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "WheeledVehicle", "VehicleWheel", "RenderDistance",
-    "Wind", "ValidatorTarget",
+    "Wind", "Water", "Buoyancy", "ValidatorTarget",
     "ValidatorFollower",
 ]
 
@@ -1122,6 +1122,25 @@ return Script.Define("Jumper", Jumper)
     item.entities.append(entity("e000000000000042", "Sky", {"Transform": transform(), "Sky": {}}))
     item.entities.append(entity("e000000000000043", "Volume", {
         "Transform": transform(), "IrradianceVolume": {"Data": "7e45000000000045"}}))
+
+    # M47 (Docs/Decisions/0065-m47-water.md decision 3): an Ocean pitched 30 degrees about X, which draws and samples
+    # level; a pool whose one short wave would fold its surface (Steepness 1 x wave number pi x Amplitude 1, past 0.9);
+    # and a Buoyancy on a Kinematic body, which floats nothing.
+    item = fixture("WATER_INVALID")
+    pitched = transform(0, -2, 0)
+    pitched["Rotation"] = [0.25881904, 0, 0, 0.96592583]
+    item.entities.append(entity("e000000000000042", "Sea", {"Transform": pitched, "Water": {}}))
+
+    item = fixture("WATER_WAVES_TOO_STEEP")
+    item.entities.append(entity("e000000000000042", "Pool", {
+        "Transform": transform(0, -2, -20),
+        "Water": {"Shape": "Rectangle", "Waves": [{"Wavelength": 2, "Amplitude": 1, "Steepness": 1}]}}))
+
+    item = fixture("PHYSICS_BUOYANCY_INVALID")
+    raft = body("e000000000000003", "Raft", 0, "Kinematic")
+    raft["Components"]["Buoyancy"] = {}
+    raft["Components"] = {key: raft["Components"][key] for key in COMPONENT_ORDER if key in raft["Components"]}
+    item.entities.append(raft)
 
     return fixtures
 

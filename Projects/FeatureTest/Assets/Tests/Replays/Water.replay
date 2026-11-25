@@ -1,0 +1,364 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "43c294dc2f1702d9",
+		"Path": "Assets/Scenes/Water.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.8.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "07427c60d36ce5eb",
+				"Path": "/Boat/PontoonFrontLeft",
+				"Hash": "9f127a7a858e5f80",
+				"Components": {
+					"Transform": "e23cc75badca3b2e",
+					"MeshRenderer": "ae123d20a8bb805d",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0ecbfc0f669f75fe",
+				"Path": "/Boat/PontoonBackRight",
+				"Hash": "c1da564b6747098b",
+				"Components": {
+					"Transform": "3c3bdd0c727eb53a",
+					"MeshRenderer": "ae123d20a8bb805d",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "146496e79a301f61",
+				"Path": "/Sun",
+				"Hash": "a59634cf07b3c7da",
+				"Components": {
+					"Transform": "9a8160187a3f674b",
+					"DirectionalLight": "a097c37b57c06fa5"
+				}
+			},
+			{
+				"Id": "171d829e6d6bdb59",
+				"Path": "/Cave/WallEast",
+				"Hash": "d850d5dd041342f0",
+				"Components": {
+					"Transform": "1c4abed08cf5be9a",
+					"MeshRenderer": "896d3297852c7dc2",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "18f456031fa98e34",
+				"Path": "/Cave/Floor",
+				"Hash": "5290deab47c2bded",
+				"Components": {
+					"Transform": "2aa7dee30e313ae6",
+					"MeshRenderer": "896d3297852c7dc2",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "1fadfd8aed238382",
+				"Path": "/Grotto",
+				"Hash": "4f33326e74bb7844",
+				"Components": {
+					"Transform": "56ab4fbf82327ece",
+					"Water": "3ef1717457ed5202"
+				}
+			},
+			{
+				"Id": "2e868334c9bef3d6",
+				"Path": "/Boat/PontoonBackLeft",
+				"Hash": "0f54260206c34316",
+				"Components": {
+					"Transform": "e13fc6d5c525b2a3",
+					"MeshRenderer": "ae123d20a8bb805d",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "437ae4bca2558855",
+				"Path": "/Cave/Ceiling",
+				"Hash": "5580bd88363ea4a4",
+				"Components": {
+					"Transform": "a8429c1cda0a3ff5",
+					"MeshRenderer": "896d3297852c7dc2",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "4577d93c5ca3fb85",
+				"Path": "/Cave/WallWest",
+				"Hash": "a471a2c598c0760e",
+				"Components": {
+					"Transform": "85844dcc77522406",
+					"MeshRenderer": "896d3297852c7dc2",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "64c433ee6456a003",
+				"Path": "/Crate",
+				"Hash": "3a78cc4dcf4789a4",
+				"Components": {
+					"Transform": "233deb25dd085506",
+					"MeshRenderer": "cd8beac44770e53a",
+					"RigidBody": "9e7d2f667d234082",
+					"BoxCollider": "5c8184944c7a623b",
+					"Buoyancy": "4d6ffa56cd1084ac"
+				}
+			},
+			{
+				"Id": "769e3e7fc21136a3",
+				"Path": "/Boat/PontoonFrontRight",
+				"Hash": "4fb19fbf4d2ba1d8",
+				"Components": {
+					"Transform": "95dc8175bf9dede0",
+					"MeshRenderer": "ae123d20a8bb805d",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "7782d0c200e352d2",
+				"Path": "/Boat/Deck",
+				"Hash": "6a555b9bb87c814f",
+				"Components": {
+					"Transform": "7ea5de18cbf822fe",
+					"MeshRenderer": "cd8beac44770e53a"
+				}
+			},
+			{
+				"Id": "7c19d795eb8cc89c",
+				"Path": "/Sea",
+				"Hash": "d5b726d871ec33a3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Water": "9466d4edd1fcf442"
+				}
+			},
+			{
+				"Id": "a8b44e549f7b762d",
+				"Path": "/Cave/WallNorth",
+				"Hash": "54fe82ab67484a45",
+				"Components": {
+					"Transform": "404062883a0a4c25",
+					"MeshRenderer": "896d3297852c7dc2",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "ad9a9f2c10fd3ee3",
+				"Path": "/Cave",
+				"Hash": "c9159cccf7bd3d05",
+				"Components": {
+					"Transform": "56ab4fbf82327ece",
+					"RigidBody": "cea9cf4aa5bfe949"
+				}
+			},
+			{
+				"Id": "b4a9bcfe510645ce",
+				"Path": "/Camera",
+				"Hash": "f36fd4cd61347d6f",
+				"Components": {
+					"Transform": "10aedfbbcdcc121d",
+					"Camera": "06bc5d3b8e2a9794"
+				}
+			},
+			{
+				"Id": "c3e52180ddfeb9ee",
+				"Path": "/Pool",
+				"Hash": "ef5a268b1926f0c2",
+				"Components": {
+					"Transform": "df7bf84320352005",
+					"PlanarReflection": "340a8c74bf50a67b",
+					"Water": "c942d9311c2c83e5"
+				}
+			},
+			{
+				"Id": "db2944b9eb2f20b6",
+				"Path": "/Boat",
+				"Hash": "2f63bf39e00eae63",
+				"Components": {
+					"Transform": "762436bbd50816ef",
+					"RigidBody": "1d10dbf478da3bca",
+					"Buoyancy": "540209590a9f655c"
+				}
+			},
+			{
+				"Id": "f64009ddb2306b2a",
+				"Path": "/Cave/WallSouth",
+				"Hash": "186b4c12d66d2bf1",
+				"Components": {
+					"Transform": "7e7b1fc26cee1ae4",
+					"MeshRenderer": "896d3297852c7dc2",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "fca69a62f4eab332",
+				"Path": "/Director",
+				"Hash": "bb8021021626c047",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "9b56c87d4dae1300"
+				}
+			},
+			{
+				"Id": "fcb8833ccc538b0a",
+				"Path": "/Rendering",
+				"Hash": "94e490cf8cc7d1e1",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Environment": "7586b358e68ddc60",
+					"PostProcess": "8a0da1673d97fdb6"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "0000000000000202",
+				"Path": "engine://Environments/Sky",
+				"Type": "Environment",
+				"Hash": "326cd6c99922bd8b"
+			},
+			{
+				"Handle": "2dbf092f33eb546f",
+				"Path": "Assets/Materials/Water/Rock.material",
+				"Type": "Material",
+				"Hash": "6853871845201290"
+			},
+			{
+				"Handle": "5b6b24e0d738d794",
+				"Path": "Assets/Scripts/Water/WaterDirector.luau",
+				"Type": "Script",
+				"Hash": "8d8c6d22b7b16539"
+			},
+			{
+				"Handle": "5f7ac2a669149a31",
+				"Path": "Assets/Materials/Water/Hull.material",
+				"Type": "Material",
+				"Hash": "253e8f7805c4812f"
+			},
+			{
+				"Handle": "98ff47d5d6208ff8",
+				"Path": "Assets/Textures/Particles/Flame.png",
+				"Type": "Texture",
+				"Hash": "1ff4528c02bfbc40"
+			},
+			{
+				"Handle": "b518e426191e70b0",
+				"Path": "Assets/Textures/Uncompressed/Rgba.png",
+				"Type": "Texture",
+				"Hash": "a103b47d529add8e"
+			},
+			{
+				"Handle": "cab643436ba4d146",
+				"Path": "Assets/Materials/Water/Deck.material",
+				"Type": "Material",
+				"Hash": "c732f09090084a25"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 60,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 61,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 200,
+			"Type": "Action",
+			"Name": "Fire",
+			"State": "Down"
+		},
+		{
+			"Tick": 201,
+			"Type": "Action",
+			"Name": "Fire",
+			"State": "Up"
+		},
+		{
+			"Tick": 400,
+			"Type": "Action",
+			"Name": "Fire",
+			"State": "Down"
+		},
+		{
+			"Tick": 401,
+			"Type": "Action",
+			"Name": "Fire",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 50,
+			"Luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Storms == 0 and Scene.FindByName(\"Sea\").Water.WaveScale < 1"
+		},
+		{
+			"Tick": 100,
+			"Luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Storms == 1 and Scene.FindByName(\"Sea\").Water.WaveScale == 2"
+		},
+		{
+			"Tick": 300,
+			"Luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Storms == 1 and d.Shoves == 1"
+		},
+		{
+			"Tick": 600,
+			"Luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nlocal y = Scene.FindByName(\"Boat\").Transform.WorldPosition.y\nreturn d.Shoves == 2 and math.abs(y) < 2"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "32111cd1566e0da8"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "be1df9182bc903c4"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "4c80dbd12a8a6643"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "3ed397c373dba489"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "393b9189a6f55e29"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "734d34cb3b4bf1d1"
+		},
+		{
+			"Tick": 420,
+			"StateHash": "299b54d7b9744848"
+		},
+		{
+			"Tick": 480,
+			"StateHash": "605c4032f5dd67c0"
+		},
+		{
+			"Tick": 540,
+			"StateHash": "3f727dffd584c336"
+		}
+	],
+	"FinalTick": 600,
+	"FinalStateHash": "27bcb12b748cd9cd"
+}

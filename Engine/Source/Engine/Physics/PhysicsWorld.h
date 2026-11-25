@@ -4,6 +4,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Physics/ContactBuffer.h"
+#include "Engine/Physics/PhysicsBuoyancy.h"
 #include "Engine/Physics/PhysicsJoint.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Physics/PhysicsQueries.h"
@@ -431,6 +432,29 @@ namespace Engine {
 		void RestoreVehicleMotion(VehicleHandle vehicle, const PhysicsVehicleState& state);
 		// The number of live vehicles.
 		[[nodiscard]] uint32_t GetVehicleCount() const;
+
+		// --- Buoyancy (M47, Docs/Decisions/0065-m47-water.md decision 3; Physics/PhysicsBuoyancy.h; Physics/PhysicsWorldBuoyancy.cpp)
+		// Floats a Dynamic body on fluid planes, one per collider. Main thread, between steps.
+		//
+		// `planes` holds one plane per collider, indexed by the collider index each sub-shape's user data holds
+		// (GetSubShapeCollider); a sub-shape whose index is at or past planes.size() is out of water. The walk descends the
+		// body's decorated shapes (a rotated and translated shape, any decorator) to its leaf shape or to its compound's
+		// sub-shapes; each takes Jolt's Shape::GetSubmergedVolume at its centre-of-mass transform against its own plane (exact
+		// for a box, a sphere and a convex mesh; a capsule's is its bounding box's, Jolt 5.6.0's ConvexShape volume), and
+		// the total and submerged volumes and the centres of buoyancy are summed (CompoundShape::GetSubmergedVolume's loop, one
+		// plane each). Then Jolt's Body::ApplyBuoyancyImpulse overload that takes those volumes, under the body's lock, with
+		// the buoyancy B = BuoyancyScale * Density * V_total * invMass, so that Jolt's fluid density B / (V_total * invMass) is
+		// the water's scaled and the force is BuoyancyScale * rho * g * V_submerged against the world's gravity, times the body's
+		// GravityFactor as Jolt scales it (as it scales the body's weight, so a body's draft does not depend on its
+		// GravityFactor, and a body with GravityFactor 0 feels no buoyancy); the fluid velocity is the planes' velocities
+		// weighted by their colliders' submerged volumes. The result gives the volumes, each plane's among them. A body with
+		// nothing submerged gets no impulse. It wakes no body: the caller wakes one whose water changed (PreStep's wake rule).
+		// Errors, with nothing applied: InvalidArgument for a handle that names no live body, a body that is not Dynamic, a
+		// body that cannot translate (every translation axis locked, so Jolt's inverse mass is 0 and its buoyancy would divide
+		// by it), a plane in water with a non-finite member, a point beyond MaxPhysicsCoordinate or a normal that is not unit,
+		// settings outside their bounds (PhysicsBuoyancySettings), or a non-finite or non-positive deltaTime.
+		[[nodiscard]] Result<PhysicsBuoyancyResult> ApplyBuoyancy(BodyHandle body, std::span<const PhysicsFluidPlane> planes,
+			const PhysicsBuoyancySettings& settings, float deltaTime);
 	private:
 		// The Jolt objects (Physics/Private/PhysicsWorldState.h, shared by the world's .cpp files and CharacterController).
 		struct State;

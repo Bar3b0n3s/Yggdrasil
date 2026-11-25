@@ -672,6 +672,25 @@
 			]
 		},
 		{
+			"File": "Water.jsonl",
+			"IdSeed": 4401,
+			"Renderer": "none"
+		},
+		{
+			"File": "WaterReplay.jsonl",
+			"IdSeed": 4402,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenWater.jsonl",
+			"IdSeed": 4403,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenWater",
+				"Assets/Scenes/GoldenWater"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

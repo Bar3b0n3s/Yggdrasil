@@ -90,6 +90,7 @@ namespace Engine {
 			view.SkyUpdates = 1;         // M45
 			view.LodCrossFades = 6;      // M46
 			view.DistanceCulledMeshes = 8;
+			view.WaterSurfaces = 2; // M47
 			view.Passes.push_back({ .Name = "Forward", .CpuMilliseconds = 1.0, .GpuMilliseconds = 2.0, .GpuAvailable = true, .DrawCalls = 10, .Dispatches = 0, .Triangles = 300 });
 			view.Passes.push_back({ .Name = "Shadows", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.5, .GpuAvailable = false, .DrawCalls = 4, .Dispatches = 0, .Triangles = 120 });
 			view.Passes.push_back({ .Name = "Skinning", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.25, .GpuAvailable = true, .DrawCalls = 0, .Dispatches = 5, .Triangles = 0 });
@@ -106,6 +107,7 @@ namespace Engine {
 			CHECK(stats.SkyUpdates == 1);
 			CHECK(stats.LodCrossFades == 6);
 			CHECK(stats.DistanceCulledMeshes == 8);
+			CHECK(stats.WaterSurfaces == 2);
 			CHECK(stats.DrawCalls == 14);
 			CHECK(stats.Triangles == 420);
 			// Only the passes with a GPU sample add to the GPU time.

@@ -6,6 +6,7 @@
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PlanarReflectionComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
@@ -111,6 +112,9 @@ namespace Engine {
 		static void FindIssues(const Scene& scene, ConstEntity entity, const PlanarReflectionComponent& reflection, AssetManager& assets,
 			std::vector<PlanarReflectionSceneIssue>& issues)
 		{
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3, W47.3): a Water's reflection is its base plane, which needs no mesh.
+			if (entity.HasComponent<WaterComponent>())
+				return;
 			const std::string path = scene.GetEntityPath(entity);
 			const MeshRendererComponent* renderer = entity.TryGetComponent<MeshRendererComponent>();
 			if (renderer == nullptr || !renderer->Mesh.IsValid())

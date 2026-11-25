@@ -48,6 +48,8 @@ namespace Engine {
 			stats.PlanarReflections = 2;
 			stats.DroppedPlanarReflections = 1;
 			stats.CulledPlanarReflections = 6;
+			stats.WaterSurfaces = 3; // M47
+			stats.Underwater = true;
 			stats.PlanarReflectionEntities = { UUID(0x2a), UUID(0x17) };
 			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set, its cells seen, the dynamic items.
 			stats.StaticItems = 20000;
@@ -85,6 +87,8 @@ namespace Engine {
 			CHECK(summary.PlanarReflections == 2);
 			CHECK(summary.DroppedPlanarReflections == 1);
 			CHECK(summary.CulledPlanarReflections == 6);
+			CHECK(summary.WaterSurfaces == 3);
+			CHECK(summary.Underwater);
 			CHECK(summary.PlanarReflectionEntities == std::vector<std::string>{ UUID(0x2a).ToString(), UUID(0x17).ToString() });
 			CHECK(summary.StaticItems == 20000);
 			CHECK(summary.StaticCells == 64);
@@ -133,6 +137,8 @@ namespace Engine {
 			CHECK(unavailable.DynamicItems == 0);
 			CHECK(unavailable.SkyUpdates == 0);
 			CHECK(unavailable.RelitIrradianceVolumes == 0);
+			CHECK(unavailable.WaterSurfaces == 0);
+			CHECK_FALSE(unavailable.Underwater);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")

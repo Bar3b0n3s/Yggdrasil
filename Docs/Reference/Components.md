@@ -62,7 +62,7 @@ Every component of the type registry, in canonical component order: the order of
 | `ParticleLook` | Particles | Serializable, ScriptVisible, EditorVisible, Removable | How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter. |
 | `IrradianceVolume` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it. |
 | `ReflectionProbe` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it. |
-| `PlanarReflection` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before. |
+| `PlanarReflection` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before. On an entity with a Water, the water reflects in its base plane (its Normal and Offset are not read). |
 | `Terrain` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit. |
 | `TerrainCollider` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn. |
 | `MaterialParameters` | MaterialParameters | Serializable, ScriptVisible, EditorVisible, Removable | Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes. |
@@ -77,6 +77,8 @@ Every component of the type registry, in canonical component order: the order of
 | `VehicleWheel` | Vehicles | Serializable, ScriptVisible, EditorVisible, Removable | Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins. |
 | `RenderDistance` | RenderDistance | Serializable, ScriptVisible, EditorVisible, Removable | How far and in which level of detail the MeshRenderer on this entity draws: a cull distance, a bias on its mesh's level switches, the shadow's coarser level and the width of the cross-fades. A MeshRenderer without one takes the defaults. |
 | `Wind` | Wind | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's wind (one per scene): it bends, sways and flutters the meshes whose material has wind enabled, and scripts read it with Wind:Sample. |
+| `Water` | Water | Serializable, ScriptVisible, EditorVisible, Removable | A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike. |
+| `Buoyancy` | Water | Serializable, ScriptVisible, EditorVisible, Removable | Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag. |
 
 ## ID
 
@@ -1824,7 +1826,7 @@ Script members of `ReflectionProbe`:
 
 ## PlanarReflection
 
-Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before.
+Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before. On an entity with a Water, the water reflects in its base plane (its Normal and Offset are not read).
 
 - Category: Probes
 - Version: 1
@@ -1834,16 +1836,16 @@ Makes the flat surface this entity's MeshRenderer draws a true mirror: each view
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Normal` | `Vec3` | `[0,0,1]` |  |  |  | The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. |
-| `Offset` | `Float` | `0` | -10000 to 10000 | m |  | The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. |
+| `Normal` | `Vec3` | `[0,0,1]` |  |  |  | The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. Not read on a Water, which reflects in its base plane. |
+| `Offset` | `Float` | `0` | -10000 to 10000 | m |  | The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. Not read on a Water. |
 | `ResolutionScale` | `Float` | `0.5` | 0.25 to 1 |  |  | The reflection's size as a share of the view's scene resolution: 0.5 renders it at half the width and height, a quarter of the pixels. |
 
 Script members of `PlanarReflection`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Normal` | proxy field | `vector` | read/write | All | The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. |
-| `Offset` | proxy field | `number` | read/write | All | The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. |
+| `Normal` | proxy field | `vector` | read/write | All | The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. Not read on a Water, which reflects in its base plane. |
+| `Offset` | proxy field | `number` | read/write | All | The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. Not read on a Water. |
 | `ResolutionScale` | proxy field | `number` | read/write | All | The reflection's size as a share of the view's scene resolution: 0.5 renders it at half the width and height, a quarter of the pixels. |
 
 ## Terrain
@@ -2384,6 +2386,98 @@ Script members of `Wind`:
 | `Strength` | proxy field | `number` | read/write | All | The steady wind speed, in metres per second; a gale is about 20. |
 | `Turbulence` | proxy field | `number` | read/write | All | How much the gusts vary across positions and turn the wind sideways: 0 blows straight and in step everywhere, 1 is most unsteady. |
 
+## Water
+
+A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike.
+
+- Category: Water
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Shape` | `WaterShape` | `"Ocean"` |  |  |  | Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). |
+| `Size` | `Vec2` | `[20,20]` | 0.1 to 1e+05 | m |  | A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). |
+| `Depth` | `Float` | `5` | 0 to 1e+05 | m |  | How far a Rectangle's volume reaches below its base, in metres. |
+| `Headroom` | `Float` | `10` | 0 to 1e+05 | m |  | How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. |
+| `Waves` | `Array<WaterWave>` | `[]` |  |  |  | At most eight Gerstner waves summed over the base; empty is a calm surface. |
+| `WaveScale` | `Float` | `1` | 0 to 10 |  |  | Multiplies every wave's amplitude: 0 is calm, above 1 a storm. |
+| `Current` | `Vec2` | `[0,0]` | -100 to 100 | m/s |  | The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave. |
+| `Density` | `Float` | `1000` | 1 to 20000 | kg/m^3 |  | The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre. |
+| `ShallowColor` | `Color3` | `[0.1,0.55,0.5]` | 0 to 1 |  |  | The linear colour of shallow water, over the bottom it shows. |
+| `DeepColor` | `Color3` | `[0.01,0.07,0.12]` | 0 to 1 |  |  | The linear colour deep water absorbs toward. |
+| `Clarity` | `Float` | `4` | 0.01 to 1000 | m |  | The metres of water column over which the bottom fades toward DeepColor. |
+| `Roughness` | `Float` | `0.05` | 0.02 to 1 |  |  | The surface's perceptual roughness: low is a sharp sun glint and clear reflections. |
+| `RefractionStrength` | `Float` | `0.3` | 0 to 1 |  |  | How far the waves bend the view of what lies under the surface. |
+| `FoamAmount` | `Float` | `0.5` | 0 to 1 |  |  | How much foam the crests and the shallows show: 0 none. |
+| `ShoreFoamDepth` | `Float` | `0.5` | 0 to 10 | m |  | The water column, in metres, under which foam gathers where the surface meets the ground or an object. |
+| `DetailNormalStrength` | `Float` | `0.5` | 0 to 1 |  |  | How strongly the small-scale detail normals ripple the surface. |
+| `DetailScale` | `Float` | `4` | 0.1 to 1000 | m |  | The metres one repeat of the detail normal map covers. |
+| `DetailDrift` | `Vec2` | `[2,1]` | -100 to 100 | m/s |  | How fast the detail normals drift along the water's local X and Z axes, in metres per second. |
+| `UnderwaterColor` | `Color3` | `[0.07,0.3,0.33]` | 0 to 1 |  |  | The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves). |
+| `UnderwaterVisibility` | `Float` | `15` | 0.1 to 10000 | m |  | The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind. |
+| `NormalMap` | `AssetRef(Texture)` | `null` |  |  |  | The detail normal map; null takes the built-in WaterNormal. |
+| `FoamTexture` | `AssetRef(Texture)` | `null` |  |  |  | The foam's texture; null takes the built-in WaterFoam. |
+
+Script members of `Water`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Clarity` | proxy field | `number` | read/write | All | The metres of water column over which the bottom fades toward DeepColor. |
+| `Current` | proxy field | `vector` | read/write | All | The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave. |
+| `DeepColor` | proxy field | `Color` | read/write | All | The linear colour deep water absorbs toward. |
+| `Density` | proxy field | `number` | read/write | All | The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre. |
+| `Depth` | proxy field | `number` | read/write | All | How far a Rectangle's volume reaches below its base, in metres. |
+| `DetailDrift` | proxy field | `vector` | read/write | All | How fast the detail normals drift along the water's local X and Z axes, in metres per second. |
+| `DetailNormalStrength` | proxy field | `number` | read/write | All | How strongly the small-scale detail normals ripple the surface. |
+| `DetailScale` | proxy field | `number` | read/write | All | The metres one repeat of the detail normal map covers. |
+| `FoamAmount` | proxy field | `number` | read/write | All | How much foam the crests and the shallows show: 0 none. |
+| `FoamTexture` | proxy field | `AssetRef?` | read/write | All | The foam's texture; null takes the built-in WaterFoam. |
+| `Headroom` | proxy field | `number` | read/write | All | How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. |
+| `IsUnderwater` | method | `(self: Water, position: vector, time: number?) -> boolean` |  | All | Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. A position beyond 1e9 m in any coordinate is an error. |
+| `NormalMap` | proxy field | `AssetRef?` | read/write | All | The detail normal map; null takes the built-in WaterNormal. |
+| `RefractionStrength` | proxy field | `number` | read/write | All | How far the waves bend the view of what lies under the surface. |
+| `Roughness` | proxy field | `number` | read/write | All | The surface's perceptual roughness: low is a sharp sun glint and clear reflections. |
+| `SampleHeight` | method | `(self: Water, position: vector, time: number?) -> number?` |  | All | Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. A position beyond 1e9 m in any coordinate is an error. |
+| `SampleNormal` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. |
+| `SampleVelocity` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. |
+| `ShallowColor` | proxy field | `Color` | read/write | All | The linear colour of shallow water, over the bottom it shows. |
+| `Shape` | proxy field | `WaterShape` | read/write | All | Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). |
+| `ShoreFoamDepth` | proxy field | `number` | read/write | All | The water column, in metres, under which foam gathers where the surface meets the ground or an object. |
+| `Size` | proxy field | `vector` | read/write | All | A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). |
+| `UnderwaterColor` | proxy field | `Color` | read/write | All | The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves). |
+| `UnderwaterVisibility` | proxy field | `number` | read/write | All | The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind. |
+| `WaveScale` | proxy field | `number` | read/write | All | Multiplies every wave's amplitude: 0 is calm, above 1 a storm. |
+| `Waves` | proxy field | `{{Direction: number, Wavelength: number, Amplitude: number, Steepness: number, Speed: number, Phase: number}}` | read/write | All | At most eight Gerstner waves summed over the base; empty is a calm surface. |
+
+## Buoyancy
+
+Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag.
+
+- Category: Water
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `RigidBody`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Water` | `EntityRef` | `null` |  |  |  | The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre. |
+| `BuoyancyScale` | `Float` | `1` | 0 to 10 |  |  | Multiplies the buoyant force: 1 is physical, 0 none. |
+| `LinearDrag` | `Float` | `2` | 0 to 100 |  |  | The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). |
+| `AngularDrag` | `Float` | `0.05` | 0 to 100 |  |  | The water's drag on the body's turning (Jolt's angular drag coefficient). |
+
+Script members of `Buoyancy`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AngularDrag` | proxy field | `number` | read/write | All | The water's drag on the body's turning (Jolt's angular drag coefficient). |
+| `BuoyancyScale` | proxy field | `number` | read/write | All | Multiplies the buoyant force: 1 is physical, 0 none. |
+| `LinearDrag` | proxy field | `number` | read/write | All | The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). |
+| `Water` | proxy field | `Entity?` | read/write | All | The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -2519,6 +2613,19 @@ A differential through which a WheeledVehicle's engine drives two of its wheels.
 | `LeftRightSplit` | `Float` | `0.5` | 0 to 1 |  |  | The engine torque's share of the right wheel: 0 all left, 1 all right. |
 | `LimitedSlipRatio` | `Float` | `1.4` | 0 to 1000 |  |  | 0 for an open differential, else above 1: the largest ratio of the faster side's speed to the slower's before the torque goes to the slower one. |
 | `EngineTorqueRatio` | `Float` | `1` | 0 to 1 |  |  | This differential's share of the engine torque; the shares of a vehicle's differentials that name a wheel sum to 1. |
+
+### WaterWave
+
+One Gerstner wave of a Water, in the water's local frame.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Direction` | `Float` | `0` |  | deg |  | The direction the wave travels, in degrees about +Y in the water's local XZ plane: 0 along local +X, 90 along local -Z. |
+| `Wavelength` | `Float` | `20` | 0.1 to 2000 | m |  | The distance from crest to crest, in metres. |
+| `Amplitude` | `Float` | `0.2` | 0 to 20 | m |  | The height of a crest above the base, in metres, before the water's WaveScale. |
+| `Steepness` | `Float` | `0.5` | 0 to 1 |  |  | Gerstner's steepness Q: 0 is a sine wave, 1 the sharpest crest; scaled down with the others when their sum would fold the surface (WATER_WAVES_TOO_STEEP). |
+| `Speed` | `Float` | `0` | 0 to 200 | m/s |  | The speed of the crests, in metres per second; 0 takes deep water's speed for the wavelength. |
+| `Phase` | `Float` | `0` |  | deg |  | The wave's phase at time 0, in degrees. |
 
 ## Enums
 
@@ -2856,3 +2963,12 @@ How a WheeledVehicle's wheels find the ground under them.
 | `Ray` | One ray down each suspension: the cheapest, and a wheel drops into a crack narrower than it. |
 | `Sphere` | A sphere of the vehicle's smallest wheel Radius swept down each suspension. |
 | `Cylinder` | Each wheel's own cylinder, its Radius and Width, swept down its suspension: the wide tyre. |
+
+### WaterShape
+
+What a Water covers.
+
+| Value | Description |
+|---|---|
+| `Ocean` | An unbounded sea: all of X and Z and everything below its surface; one a scene. |
+| `Rectangle` | A bounded water (a pool, a canal, a cave lake): Size along the entity's local X and Z centred on it, from Depth below its base to Headroom above it. |

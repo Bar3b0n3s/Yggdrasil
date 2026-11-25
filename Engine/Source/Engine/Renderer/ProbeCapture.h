@@ -32,7 +32,8 @@
 //     (Docs/Decisions/0047-m32-fog-ssr.md decision 4): the scene's fog is off too (RenderSnapshot::Fog), so a probe bakes
 //     the light alone and the views fog it where they shade it, never twice. M42 (Docs/Decisions/0059-m42-planar-reflections.md
 //     decision 3): so are the planar reflections (RenderSnapshot::PlanarReflections), one bounce as the probes' term, so a
-//     mirror bakes as its material draws without them.
+//     mirror bakes as its material draws without them. M47 (Docs/Decisions/0065-m47-water.md decision 3): so are the waters
+//     (RenderSnapshot::Waters), as the fog is: the sea is out of probe bakes, and a bake under water sees the seabed dry.
 //   - Deterministic for a device class, as the environment bake is (no temporal noise, no atomics deciding a sum or an
 //     order): two captures of one snapshot give equal texels, and the CPU steps below are pure with IEEE-exact operations,
 //     sqrt and DetMath only, so two bakes of one scene write byte-identical files (the acceptance "two probe bakes are

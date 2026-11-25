@@ -100,6 +100,10 @@ namespace Engine {
 		std::vector<uint32_t> MeshLodDraws{};
 		uint32_t LodCrossFades = 0;
 		uint32_t DistanceCulledMeshes = 0;
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M46's fields): RenderStats::WaterSurfaces and
+		// Underwater.
+		uint32_t WaterSurfaces = 0;
+		bool Underwater = false;
 	};
 
 	struct StatsGetResult

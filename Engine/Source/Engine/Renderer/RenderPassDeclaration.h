@@ -41,7 +41,10 @@
 // rows SkyLuts, SkyIbl and ProbeRelight) and its Sky directly after Skybox in Forward (the procedural sky in the skybox's place,
 // row Sky; Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), declared by its W45.1 with their rows and target and
 // without pipelines, as M26's contract declared its passes; W45.2 set their PipelineCount (9 and 1) and Programs with the
-// passes (87 pipelines), and W45.3 the relight's (10, 88 pipelines). M47's Water follows Sky.
+// passes (87 pipelines), and W45.3 the relight's (10, 88 pipelines). M47's contract (C47, Docs/Decisions/0065-m47-water.md
+// decision 2) declares Water (after Sky, before Ssr) and Underwater (first in HdrPost, before Taa) M26's way, with their rows
+// and without pipelines until W47.2's render stream (Water's two) and W47.3 (Underwater's one) set them, both of the program
+// Water (91 pipelines).
 
 namespace Engine {
 
@@ -109,6 +112,12 @@ namespace Engine {
 		// M45 (decision 3): the procedural sky, drawn into SceneColor in the Skybox's place (Renderer/SkyPass.h).
 		inline constexpr std::array<std::string_view, 1> SkyPrograms = { "Sky" };
 		inline constexpr std::array<std::string_view, 1> SkyRows = { "Sky" };
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water pass's rows (the copy of SceneColor, then the surfaces)
+		// and its target, and the Underwater pass's row.
+		inline constexpr std::array<std::string_view, 1> WaterPrograms = { "Water" };
+		inline constexpr std::array<std::string_view, 2> WaterRows = { "WaterRefraction", "Water" };
+		inline constexpr std::array<std::string_view, 1> WaterTargets = { "WaterRefraction" };
+		inline constexpr std::array<std::string_view, 1> UnderwaterRows = { "Underwater" };
 		// M26 (C26.1, R-SSR; decision 18, stream X-D): the Ssr program (Passes/Ssr.slang, Renderer/SsrPass.h).
 		inline constexpr std::array<std::string_view, 1> SsrPrograms = { "Ssr" };
 		inline constexpr std::array<std::string_view, 1> SsrRows = { "SSR" };
@@ -227,6 +236,13 @@ namespace Engine {
 		// depth 0 into SceneColor as the Skybox's, drawn in its place when the snapshot's Sky lights the view and its camera clears
 		// to the skybox, in mirror views too. SkyPass's one pipeline of the program Sky. M47's Water follows it.
 		{ .Name = "Sky", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::SkyPrograms, .StatsRows = Detail::SkyRows, .Targets = Detail::SceneColorTargets },
+		// M47 (Docs/Decisions/0065-m47-water.md decisions 2 and 3; phase 8's ledger: after M45's Sky, before Ssr): the snapshot's
+		// waters in a Lit view with a camera outside the wireframe, after a copy of SceneColor into WaterRefraction (row
+		// WaterRefraction), each surface drawn into SceneColor, SceneNormals, SceneVelocity and SceneRoughness (and EntityId with
+		// picking), SceneDepth tested and written, so SSR traces over it (row Water; Renderer/WaterPass.h). Its contract (C47)
+		// declared it with its rows and target and without pipelines; W47.2's render stream set its two pipelines of the program
+		// Water (the surface, and the surface with EntityId).
+		{ .Name = "Water", .Stage = RenderStage::Forward, .PipelineCount = 2, .Programs = Detail::WaterPrograms, .StatsRows = Detail::WaterRows, .Targets = Detail::WaterTargets },
 		// M26 (C26.1, R-SSR; decisions 13 and 18): glossy reflections traced over the opaque image with the depth pyramid into
 		// SsrColor, falling back to the probes, composited into SceneColor before the transparent pass draws over them;
 		// recorded only with PostProcess's SsrEnabled. SsrPass's three pipelines of the program Ssr (stream X-D's trace and
@@ -258,9 +274,16 @@ namespace Engine {
 		// SceneVelocity in a view with TAA, SceneDepth read as a texture; before M33 it drew with the QuadBatcher's Hdr and
 		// HdrAdditive pipelines and declared none.
 		{ .Name = "Particles", .Stage = RenderStage::Sprites, .PipelineCount = 3, .Programs = Detail::ParticlesPrograms, .StatsRows = Detail::ParticlesRows },
-		// M26 (C26.1, R-TAA; decisions 10, 13 and 17): the jittered HDR image resolved against its history (TaaHistory), first
-		// in HdrPost so bloom and exposure read the resolved image; recorded only with AntiAliasing Taa in a Lit view outside
-		// the wireframe and pixel-art mode. TaaPass's one compute pipeline of the program Taa (stream X-C).
+		// M47 (Docs/Decisions/0065-m47-water.md decisions 2 and 3; phase 8's ledger: first in HdrPost, before Taa): the view under
+		// a water's surface fogged toward its UnderwaterColor over its UnderwaterVisibility, with the waterline where the camera
+		// straddles the surface, recorded when the camera's near plane may lie under a water, before TAA so the transparents and
+		// particles under the surface are fogged too. Declared by C47 with its row and without pipelines; W47.3 sets its one
+		// pipeline of the program Water (WaterPass::RecordUnderwater).
+		{ .Name = "Underwater", .Stage = RenderStage::HdrPost, .PipelineCount = 1, .Programs = Detail::WaterPrograms, .StatsRows = Detail::UnderwaterRows },
+		// M26 (C26.1, R-TAA; decisions 10, 13 and 17): the jittered HDR image resolved against its history (TaaHistory), in
+		// HdrPost before Bloom and Exposure (after M47's Underwater), so they read the resolved image; recorded only with
+		// AntiAliasing Taa in a Lit view outside the wireframe and pixel-art mode. TaaPass's one compute pipeline of the program
+		// Taa (stream X-C).
 		{ .Name = "Taa", .Stage = RenderStage::HdrPost, .PipelineCount = 1, .Programs = Detail::TaaPrograms, .StatsRows = Detail::TaaRows, .Targets = Detail::TaaTargets },
 		{ .Name = "Bloom", .Stage = RenderStage::HdrPost, .PipelineCount = 3, .Programs = Detail::BloomPrograms, .StatsRows = Detail::BloomRows, .Targets = Detail::BloomTargets },
 		// M26 (C26.1, R-AEX; decisions 13 and 15): the luminance histogram of the image Tonemap exposes and the adapted exposure,

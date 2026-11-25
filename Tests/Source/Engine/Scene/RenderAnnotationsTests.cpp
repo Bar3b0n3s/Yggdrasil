@@ -21,6 +21,7 @@
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -28,6 +29,8 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
+
+#include <glm/gtc/quaternion.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -186,6 +189,49 @@ namespace Engine {
 			hidden.Flags = RenderViewFlags::EditorOverlays;
 			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, hidden));
 			CHECK(hidden.Icons.empty());
+		}
+
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): with the editor's overlays, a Rectangle Water's volume is outlined: its
+		// footprint at its yaw and its world X and Z scale, from Depth below its base to Headroom above it. An Ocean is unbounded
+		// and draws nothing, and a view without the overlays draws no outline.
+		TEST_CASE("RenderAnnotations: a Rectangle Water's volume is outlined, and an Ocean draws no outline")
+		{
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Entity pool = fixture.GetScene().CreateEntity("Pool");
+			pool.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(4.0f, 2.0f, -3.0f);
+				transform.Rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+				transform.Scale = glm::vec3(2.0f, 1.0f, 0.5f);
+			});
+			pool.AddComponent<WaterComponent>(WaterComponent{ .Shape = WaterShape::Rectangle, .Size = glm::vec2(6.0f, 8.0f), .Depth = 3.0f, .Headroom = 1.0f });
+			fixture.GetScene().CreateEntity("Sea").AddComponent<WaterComponent>();
+			TransformSystem::Update(fixture.GetScene());
+			auto view = AnnotationView();
+			view.Flags = RenderViewFlags::EditorOverlays;
+			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, view));
+			REQUIRE(view.AnnotationDraw.GetSize() == 1);
+			const auto* box = std::get_if<DebugBox>(&view.AnnotationDraw.GetCommands()[0].Shape);
+			REQUIRE(box != nullptr);
+			// The base at y = 2: from 3 m below it to 1 m above, so centred at y = 1 with a half height of 2.
+			CHECK(box->Center.x == doctest::Approx(4.0f));
+			CHECK(box->Center.y == doctest::Approx(1.0f));
+			CHECK(box->Center.z == doctest::Approx(-3.0f));
+			// Size (6, 8) times the X and Z scale (2, 0.5): half extents 6 and 2 along the turned axes.
+			CHECK(box->HalfExtents.x == doctest::Approx(6.0f));
+			CHECK(box->HalfExtents.y == doctest::Approx(2.0f));
+			CHECK(box->HalfExtents.z == doctest::Approx(2.0f));
+			// A quarter turn about +Y: local +X lies along world -Z.
+			const glm::vec3 axisX = box->Rotation * glm::vec3(1.0f, 0.0f, 0.0f);
+			CHECK(axisX.x == doctest::Approx(0.0f).epsilon(1e-5));
+			CHECK(axisX.y == doctest::Approx(0.0f).epsilon(1e-5));
+			CHECK(axisX.z == doctest::Approx(-1.0f));
+			CHECK(view.AnnotationDraw.GetCommands()[0].Color == glm::vec4(0.2f, 0.65f, 1.0f, 1.0f));
+			// Without the editor's overlays, no outline.
+			auto plain = AnnotationView();
+			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, plain));
+			CHECK(plain.AnnotationDraw.IsEmpty());
 		}
 
 		// M21 (C21.2, decision 28, stream P3): with Colliders, AppendRenderAnnotations appends the 2D colliders after the 3D ones

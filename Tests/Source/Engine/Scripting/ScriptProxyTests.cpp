@@ -259,6 +259,11 @@ return true
 				// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the default Wind's velocity at the
 				// origin at time 0, its steady Strength along +X.
 				{ "Wind.Sample", "assert(holders.Wind.Wind:Sample(vector.zero, 0) == vector.create(5, 0, 0))" },
+				// M47 (Docs/Decisions/0065-m47-water.md decision 3): the calm default Ocean's own surface at time 0.
+				{ "Water.SampleHeight", "assert(holders.Water.Water:SampleHeight(vector.zero) ~= nil)" },
+				{ "Water.SampleNormal", "assert(holders.Water.Water:SampleNormal(vector.zero) == vector.create(0, 1, 0))" },
+				{ "Water.SampleVelocity", "assert(holders.Water.Water:SampleVelocity(vector.zero) == vector.zero)" },
+				{ "Water.IsUnderwater", "assert(holders.Water.Water:IsUnderwater(vector.create(0, -1000000, 0)))" },
 			};
 			const std::set<std::string_view> identityReads = { "Entity.ID", "Entity.IsValid", "Entity.__eq" };
 			// Reads of a system's state of the entity, which is leaving with it (decision 4, "Unchanged").

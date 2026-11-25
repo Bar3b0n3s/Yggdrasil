@@ -52,10 +52,13 @@ PERF_REPORT_NAME = "Perf.json"
 # Docs/Decisions/0061-m43-static-scenery.md decision 3; M45's sky at 1920 x 1080, still and with its sun turned every
 # tick, Skerries' brief S03's time-lapse, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; M46's forest of
 # 2,000 trees and 4,000 rocks with levels of detail at 1920 x 1080, the Skerries brief S04's trees and rocks,
-# Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K). Exceeding one is a warning.
+# Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; M47's full-screen sea at 1920 x 1080, its
+# underwater view and its 64 floating boats, Skerries' brief S01's cost check, Docs/Decisions/0065-m47-water.md decision
+# 3). Exceeding one is a warning.
 BUDGETS = {"playCopy/1000Entities": 30.0, "fog/Fog/gpuCostMs": 0.5, "navigation/150Agents/tickMs": 8.0,
            "reflections/Mirrors3/gpuMs": 2.0, "staticScenery/20000Entities/cpuMs": 2.0, "sky/Static/gpuMs": 0.3,
-           "sky/Turning/gpuMs": 0.6, "lod/Forest/gpuMs": 3.0}
+           "sky/Turning/gpuMs": 0.6, "lod/Forest/gpuMs": 3.0, "water/Ocean/gpuMs": 1.0, "water/Underwater/gpuMs": 0.3,
+           "water/Buoyancy64/tickMs": 1.0}
 
 _CAPTURE_MEMBERS = {"format": str, "version": int, "commit": str, "config": str, "host": dict, "metrics": list,
                     "scenes": list, "warnings": list}

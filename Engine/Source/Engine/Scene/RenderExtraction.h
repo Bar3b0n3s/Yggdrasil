@@ -64,12 +64,20 @@
 // holds a PlanarReflection and a MeshRenderer that is Visible with a mesh gives one PlanarReflectionItem, in canonical
 // order, in every view (an edit scene's included), at the rendered world matrix its mesh item draws at, so the reflection
 // follows the glass between ticks; without a drawn mesh the component gives none (RENDER_REFLECTION_INVALID,
-// Scene/PlanarReflectionValidation.h).
+// Scene/PlanarReflectionValidation.h). M47's opt-in: on an entity whose Water is drawn, the component gives the water's base
+// plane instead (its rendered translation, Normal (0, 1, 0), Offset 0), whatever the entity's meshes, which the renderer
+// never takes for its glass.
+//
+// Waters (M47, Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger): every effectively enabled Water but an Ocean
+// after the scene's first gives one WaterItem, in canonical order, in every view (an edit scene's included), at its rendered
+// world matrix, so a tide written in the fixed step moves smoothly; its waves are resolved as the queries resolve them
+// (Scene/WaterQueries.h's ResolveWater, Physics/WaterWaves.h), with their phases at request.SimulationTime (0 in an edit view,
+// so an edit scene shows the waves at time 0), and its detail drift at that time wrapped by its DetailScale.
 //
 // Static scenery (M43, Docs/Decisions/0061-m43-static-scenery.md decision 3, W43.2). Extraction visits, in canonical order,
 // only the entities that hold a component it draws or lights from (the holders of MeshRenderer, the three lights, Text,
 // Environment, PostProcess, Fog, SpriteRenderer, Light2D, TilemapRenderer, ParticleEmitter, IrradianceVolume,
-// ReflectionProbe, PlanarReflection and Terrain, each once), not every entity: the whole-scene walk's order of the
+// ReflectionProbe, PlanarReflection, Terrain and M47's Water, each once), not every entity: the whole-scene walk's order of the
 // entities that draw, so a scene without Static extracts exactly as before. A scene that holds a Static has a render static
 // cache (Scene/RenderStaticCache.h), which each extraction refreshes (Scene::RefreshStaticSet) and hands every view as the
 // snapshot's StaticSet: the MeshRenderer of an entity the set holds gives no item in Meshes and no PickTable entry, and
@@ -241,6 +249,12 @@ namespace Engine {
 	//     PickId after the meshes' (the entity's mesh PickId when its MeshRenderer gave an item in Meshes, else a PickTable
 	//     entry appended after every mesh's, in the terrains' order: M43, also for a static entity's terrain), in every view
 	//     and every scene, edit scenes included.
+	//   - Waters (M47, Docs/Decisions/0065-m47-water.md decision 3): every effectively enabled entity's Water but an Ocean
+	//     after the first, in canonical order, by the rule of the file comment's Waters paragraph, with Shape, Size, Depth,
+	//     Headroom and the look as they are, and NormalMap and FoamTexture as handles; each is pickable, its PickId after the
+	//     terrains' (the entity's existing PickTable entry when it has one, else one appended after every terrain's, in the
+	//     waters' order), in every view and every scene, edit scenes included. PreviousWorld and PreviousPhases stay empty: the
+	//     view's RenderViewHistory fills them.
 	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
 	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
 	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's

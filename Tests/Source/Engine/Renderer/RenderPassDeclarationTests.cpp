@@ -29,6 +29,7 @@
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
 #include "Engine/Renderer/UpscalePass.h"
+#include "Engine/Renderer/WaterPass.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <algorithm>
@@ -121,11 +122,14 @@ namespace Engine {
 			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get. M42's four
 			// (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) first in the Forward stage, before
 			// ForwardOpaque: 41. M45's four (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger):
-			// SkyLuts, SkyIbl and ProbeRelight after LightClusters, and Sky after Skybox: 45.
-			constexpr std::array<std::string_view, 45> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
+			// SkyLuts, SkyIbl and ProbeRelight after LightClusters, and Sky after Skybox: 45. M47's three
+			// (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger): WaterRefraction and Water after M45's Sky, and
+			// Underwater after Particles, first in HdrPost: 48.
+			constexpr std::array<std::string_view, 48> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
 				"DepthNormal", "TerrainDepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters", "SkyLuts",
 				"SkyIbl", "ProbeRelight", "PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3", "ForwardOpaque",
-				"TerrainForward", "Skybox", "Sky", "SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA", "Bloom",
+				"TerrainForward", "Skybox", "Sky", "WaterRefraction", "Water", "SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D",
+				"Particles", "Underwater", "TAA", "Bloom",
 				"Exposure", "Tonemap", "FXAA", "Text",
 				"Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
 				"Overlays", "Labels", "Letterbox" };
@@ -197,9 +201,11 @@ namespace Engine {
 			CHECK((find("TerrainForward") - 1)->Name == "ForwardOpaque");
 			CHECK((find("TerrainForward") + 1)->Name == "Skybox");
 			CHECK(find("Ssr")->Stage == RenderStage::Forward);
-			// M45's Sky sits between the Skybox and SSR (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
-			CHECK((find("Ssr") - 1)->Name == "Sky");
-			CHECK((find("Ssr") - 2)->Name == "Skybox");
+			// M45's Sky sits between the Skybox and SSR (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), then M47's
+			// Water (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger).
+			CHECK((find("Ssr") - 1)->Name == "Water");
+			CHECK((find("Ssr") - 2)->Name == "Sky");
+			CHECK((find("Ssr") - 3)->Name == "Skybox");
 			CHECK((find("Ssr") + 1)->Name == "ForwardTransparent");
 			CHECK(find("Particles")->Stage == RenderStage::Sprites);
 			CHECK((find("Particles") - 1)->Name == "Lights2D");
@@ -217,6 +223,51 @@ namespace Engine {
 			CHECK(find("Ssr")->Targets[0] == "SsrColor");
 			REQUIRE(find("Taa")->Targets.size() == 1);
 			CHECK(find("Taa")->Targets[0] == "TaaHistory");
+		}
+
+		// M47's contract (C47, Docs/Decisions/0065-m47-water.md decisions 2 and 3; phase 8's ledger): the Water pass after the
+		// skybox and before SSR in Forward, with its two rows and its WaterRefraction target, and the Underwater pass first in
+		// HdrPost, before TAA; declared without pipelines until W47.2's render stream and W47.3 set them, as M26's contract
+		// declared its passes. W47.2's render stream gives Water its two pipelines of the program Water (the surface, and the
+		// surface with EntityId), and W47.3 Underwater its one of the same program.
+		TEST_CASE("RenderPassDeclarations: the water comes after the skybox and before SSR, and the underwater view first in HdrPost")
+		{
+			const auto find = [](std::string_view name)
+			{
+				const auto found = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [name](const RenderPassDeclaration& declaration)
+				{
+					return declaration.Name == name;
+				});
+				REQUIRE_MESSAGE(found != ScenePassDeclarations.end(), name);
+				return found;
+			};
+			const auto water = find("Water");
+			CHECK(water->Stage == RenderStage::Forward);
+			// After M45's Sky, which follows the Skybox (phase 8's train order).
+			CHECK((water - 1)->Name == "Sky");
+			CHECK((water - 2)->Name == "Skybox");
+			CHECK((water + 1)->Name == "Ssr");
+			REQUIRE(water->StatsRows.size() == 2);
+			CHECK(water->StatsRows[0] == "WaterRefraction");
+			CHECK(water->StatsRows[1] == "Water");
+			REQUIRE(water->Targets.size() == 1);
+			CHECK(water->Targets[0] == "WaterRefraction");
+			const auto underwater = find("Underwater");
+			CHECK(underwater->Stage == RenderStage::HdrPost);
+			CHECK((underwater - 1)->Stage == RenderStage::Sprites);
+			CHECK((underwater + 1)->Name == "Taa");
+			REQUIRE(underwater->StatsRows.size() == 1);
+			CHECK(underwater->StatsRows[0] == "Underwater");
+			CHECK(underwater->Targets.empty());
+			CHECK(water->PipelineCount == 2);
+			CHECK(water->PipelineCount == WaterPass::SurfacePipelineCount);
+			REQUIRE(water->Programs.size() == 1);
+			CHECK(water->Programs[0] == "Water");
+			CHECK(underwater->PipelineCount == 1);
+			CHECK(underwater->PipelineCount == WaterPass::UnderwaterPipelineCount);
+			REQUIRE(underwater->Programs.size() == 1);
+			CHECK(underwater->Programs[0] == "Water");
+			CHECK(WaterPass::GetLayoutDescriptions().size() == WaterPass::PipelineCount);
 		}
 
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger): the planar reflections first in the Forward
@@ -270,7 +321,9 @@ namespace Engine {
 			REQUIRE(sky != ScenePassDeclarations.end());
 			CHECK(sky->Stage == RenderStage::Forward);
 			CHECK((sky - 1)->Name == "Skybox");
-			CHECK((sky + 1)->Name == "Ssr");
+			// M47's Water follows it, before SSR (phase 8's train order).
+			CHECK((sky + 1)->Name == "Water");
+			CHECK((sky + 2)->Name == "Ssr");
 			REQUIRE(sky->StatsRows.size() == 1);
 			CHECK(sky->StatsRows[0] == "Sky");
 			REQUIRE(sky->Targets.size() == 1);
@@ -291,8 +344,9 @@ namespace Engine {
 			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14), 77 with M33's Particles pass
 			// (Docs/Decisions/0048-m33-particle-look.md decision 4) and 76 without M26's HdrAdditive, which M33's merge removed
 			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3); 88
-			// with M45's sky (its lighting 10, its pass 1; Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
-			CHECK(GetDeclaredPipelineCount() == 88);
+			// with M45's sky (its lighting 10, its pass 1; Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3); 91 with M47's
+			// Water pass (2) and Underwater pass (1) (Docs/Decisions/0065-m47-water.md decision 3).
+			CHECK(GetDeclaredPipelineCount() == 91);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -322,8 +376,8 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
 			CHECK(QuadBatcher::PipelineCount == 5);
 			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain, 88 with
-			// M45's sky.
-			CHECK(GetDeclaredPipelineCount() == 88);
+			// M45's sky, 91 with M47's Water and Underwater passes.
+			CHECK(GetDeclaredPipelineCount() == 91);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -355,8 +409,10 @@ namespace Engine {
 			// 1 and the Ssr pass's 2, decision 13, and the terrain pass's 3, decision 22), M32's 1 (the Ssr classification,
 			// Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and M33's 3 (the Particles pass,
 			// Docs/Decisions/0048-m33-particle-look.md decision 4), less the QuadBatcher's HdrAdditive, which M33's merge removed
-			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			static_assert(GetDeclaredPipelineCount() == 88);
+			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3),
+			// M45's 11 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3) and M47's 3 (the Water pass's surfaces and the
+			// Underwater pass, Docs/Decisions/0065-m47-water.md decision 3).
+			static_assert(GetDeclaredPipelineCount() == 91);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

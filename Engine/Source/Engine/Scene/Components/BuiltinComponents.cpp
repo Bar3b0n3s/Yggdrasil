@@ -32,6 +32,7 @@ namespace Engine {
 		RegisterVehiclesComponents(registry);
 		RegisterRenderDistanceComponents(registry);
 		RegisterWindComponents(registry);
+		RegisterWaterComponents(registry);
 
 		// The startup check of §5.4: every listed type is registered, in list order and nothing else, so the registration
 		// order (the canonical component order of files) is exactly BuiltinComponents. A mismatch would reorder or drop

@@ -281,6 +281,9 @@ export type VehicleWheelCast = "Ray" | "Sphere" | "Cylinder"
 -- Which view viewport.screenshot renders.
 export type ViewportView = "Scene" | "Game"
 
+-- What a Water covers.
+export type WaterShape = "Ocean" | "Rectangle"
+
 -- What a world pause does to the world's playing voices, those of every group but Music and Ui (today the Sfx group's); the Music and Ui groups' play on either way.
 export type WorldPauseSounds = "Pause" | "Finish"
 
@@ -312,7 +315,7 @@ export type MusicState = {Clip: AssetRef, Intro: AssetRef?, Volume: number, Loop
 export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
 
 -- The performance readout of Application.GetStats: frame-paced observations, never simulation state.
-export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number, SkyUpdates: number, LodCrossFades: number, DistanceCulledMeshes: number}
+export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number, SkyUpdates: number, LodCrossFades: number, DistanceCulledMeshes: number, WaterSurfaces: number}
 
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
@@ -346,6 +349,9 @@ export type TestSuiteOptions = {CaseTimeoutTicks: number?}
 
 -- A UI element's laid-out rectangle: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down, in scene pixels for an element of a Screen canvas and in its canvas's own pixels for one of a World canvas, and the canvas it belongs to (Canvas).
 export type UiElementRect = {Min: vector, Max: vector, Canvas: Entity}
+
+-- The surface of the water that holds a point: the Water's entity, the surface's world height, unit normal and velocity (with the current) under the point, and Depth, the height minus the point's y: positive under water.
+export type WaterSample = {Water: Entity, Height: number, Normal: vector, Velocity: vector, Depth: number}
 
 -- Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
 declare extern type Animator with
@@ -509,6 +515,18 @@ declare extern type BoxCollider2D with
 	IsTrigger: boolean
 	-- The rectangle's centre relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
 	Offset: vector
+end
+
+-- Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag.
+declare extern type Buoyancy with
+	-- The water's drag on the body's turning (Jolt's angular drag coefficient). [All modes; Runtime|Test; pure/read; setter mutates]
+	AngularDrag: number
+	-- Multiplies the buoyant force: 1 is physical, 0 none. [All modes; Runtime|Test; pure/read; setter mutates]
+	BuoyancyScale: number
+	-- The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). [All modes; Runtime|Test; pure/read; setter mutates]
+	LinearDrag: number
+	-- The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre. [All modes; Runtime|Test; pure/read; setter mutates]
+	Water: Entity?
 end
 
 -- Renders the scene from the entity, looking down its local -Z axis.
@@ -696,6 +714,8 @@ declare extern type Entity with
 	BoxCollider: BoxCollider?
 	-- The entity's BoxCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	BoxCollider2D: BoxCollider2D?
+	-- The entity's Buoyancy component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Buoyancy: Buoyancy?
 	-- The entity's Camera component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Camera: Camera?
 	-- The entity's CapsuleCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -786,6 +806,8 @@ declare extern type Entity with
 	function GetComponent(self, name: "VehicleWheel"): VehicleWheel?
 	function GetComponent(self, name: "RenderDistance"): RenderDistance?
 	function GetComponent(self, name: "Wind"): Wind?
+	function GetComponent(self, name: "Water"): Water?
+	function GetComponent(self, name: "Buoyancy"): Buoyancy?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -906,6 +928,8 @@ declare extern type Entity with
 	UiToggle: UiToggle?
 	-- The entity's VehicleWheel component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	VehicleWheel: VehicleWheel?
+	-- The entity's Water component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Water: Water?
 	-- The entity's WheeledVehicle component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	WheeledVehicle: WheeledVehicle?
 	-- The entity's Wind component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -1212,11 +1236,11 @@ declare extern type PixelPerfectCamera with
 	ReferenceWidth: number
 end
 
--- Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before.
+-- Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before. On an entity with a Water, the water reflects in its base plane (its Normal and Offset are not read).
 declare extern type PlanarReflection with
-	-- The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. Not read on a Water, which reflects in its base plane. [All modes; Runtime|Test; pure/read; setter mutates]
 	Normal: vector
-	-- The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. Not read on a Water. [All modes; Runtime|Test; pure/read; setter mutates]
 	Offset: number
 	-- The reflection's size as a share of the view's scene resolution: 0.5 renders it at half the width and height, a quarter of the pixels. [All modes; Runtime|Test; pure/read; setter mutates]
 	ResolutionScale: number
@@ -2052,6 +2076,62 @@ declare extern type VehicleWheel with
 	Width: number
 end
 
+-- A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike.
+declare extern type Water with
+	-- The metres of water column over which the bottom fades toward DeepColor. [All modes; Runtime|Test; pure/read; setter mutates]
+	Clarity: number
+	-- The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave. [All modes; Runtime|Test; pure/read; setter mutates]
+	Current: vector
+	-- The linear colour deep water absorbs toward. [All modes; Runtime|Test; pure/read; setter mutates]
+	DeepColor: Color
+	-- The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre. [All modes; Runtime|Test; pure/read; setter mutates]
+	Density: number
+	-- How far a Rectangle's volume reaches below its base, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	Depth: number
+	-- How fast the detail normals drift along the water's local X and Z axes, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	DetailDrift: vector
+	-- How strongly the small-scale detail normals ripple the surface. [All modes; Runtime|Test; pure/read; setter mutates]
+	DetailNormalStrength: number
+	-- The metres one repeat of the detail normal map covers. [All modes; Runtime|Test; pure/read; setter mutates]
+	DetailScale: number
+	-- How much foam the crests and the shallows show: 0 none. [All modes; Runtime|Test; pure/read; setter mutates]
+	FoamAmount: number
+	-- The foam's texture; null takes the built-in WaterFoam. [All modes; Runtime|Test; pure/read; setter mutates]
+	FoamTexture: AssetRef?
+	-- How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. [All modes; Runtime|Test; pure/read; setter mutates]
+	Headroom: number
+	-- Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
+	IsUnderwater: (self: Water, position: vector, time: number?) -> boolean
+	-- The detail normal map; null takes the built-in WaterNormal. [All modes; Runtime|Test; pure/read; setter mutates]
+	NormalMap: AssetRef?
+	-- How far the waves bend the view of what lies under the surface. [All modes; Runtime|Test; pure/read; setter mutates]
+	RefractionStrength: number
+	-- The surface's perceptual roughness: low is a sharp sun glint and clear reflections. [All modes; Runtime|Test; pure/read; setter mutates]
+	Roughness: number
+	-- Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
+	SampleHeight: (self: Water, position: vector, time: number?) -> number?
+	-- Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
+	SampleNormal: (self: Water, position: vector, time: number?) -> vector?
+	-- Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
+	SampleVelocity: (self: Water, position: vector, time: number?) -> vector?
+	-- The linear colour of shallow water, over the bottom it shows. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShallowColor: Color
+	-- Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). [All modes; Runtime|Test; pure/read; setter mutates]
+	Shape: WaterShape
+	-- The water column, in metres, under which foam gathers where the surface meets the ground or an object. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShoreFoamDepth: number
+	-- A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: vector
+	-- The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves). [All modes; Runtime|Test; pure/read; setter mutates]
+	UnderwaterColor: Color
+	-- The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind. [All modes; Runtime|Test; pure/read; setter mutates]
+	UnderwaterVisibility: number
+	-- Multiplies every wave's amplitude: 0 is calm, above 1 a storm. [All modes; Runtime|Test; pure/read; setter mutates]
+	WaveScale: number
+	-- At most eight Gerstner waves summed over the base; empty is a calm surface. [All modes; Runtime|Test; pure/read; setter mutates]
+	Waves: {{Direction: number, Wavelength: number, Amplitude: number, Steepness: number, Speed: number, Phase: number}}
+end
+
 -- Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.
 declare extern type WheeledVehicle with
 	-- The anti-roll bars between pairs of wheels, at most eight. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -2140,7 +2220,7 @@ declare Application: {
 	GetDisplaySettings: () -> DisplaySettings,
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
 	GetPlatform: () -> string,
-	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; SkyUpdates, 1 when it regenerated its Sky's image-based light, else 0; and LodCrossFades, the mesh items it drew cross-fading two levels of detail, DistanceCulledMeshes those beyond their RenderDistance's CullDistance), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
+	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; SkyUpdates, 1 when it regenerated its Sky's image-based light, else 0; LodCrossFades, the mesh items it drew cross-fading two levels of detail, DistanceCulledMeshes those beyond their RenderDistance's CullDistance; and WaterSurfaces, the water surfaces it drew), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
 	GetStats: () -> PerformanceStats,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,
@@ -2370,6 +2450,8 @@ declare Physics: {
 	Raycast: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?,
 	-- All hits sorted by distance then collider UUID. [All modes; Runtime|Test; pure/read]
 	RaycastAll: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> {RaycastHit},
+	-- The surface of the water that holds the world point position at time seconds of world time (default Time.GetTime()): the Rectangle whose volume holds it with the highest surface there, else the scene's Ocean; nil where no water does. Inside a Rectangle's volume the Ocean is masked, so a cave above its lake is dry. A position beyond the world (a coordinate past 1e9 m) is an error, as for every water method. [All modes; Runtime|Test; pure/read]
+	SampleWater: (position: vector, time: number?) -> WaterSample?,
 	-- Set finite gravity within physics bounds for the session. [All modes; Runtime|Test; mutates]
 	SetGravity: (gravity: vector) -> (),
 	-- Closest swept sphere hit; radius obeys collider size bounds. [All modes; Runtime|Test; pure/read]

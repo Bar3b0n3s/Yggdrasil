@@ -61,6 +61,9 @@ namespace Engine {
 			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the Wind proxy's method, after M44's
 			// RegisterVehicles (ADR 0060's phase-8 ledger; M47's RegisterWater follows).
 			ENGINE_TRY(ScriptBindings::RegisterWind(api));
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water proxy's methods, Physics.SampleWater and the WaterSample
+			// alias, last (phase 8's ledger: after M44's RegisterVehicles and M46's RegisterWind).
+			ENGINE_TRY(ScriptBindings::RegisterWater(api));
 			return {};
 		}
 

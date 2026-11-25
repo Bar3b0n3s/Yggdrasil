@@ -17,6 +17,7 @@
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/ViewportCapture.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -239,12 +240,19 @@ namespace Engine {
 
 				// The game view at the requested size, as viewport.screenshot {view: "game"} extracts it, sprites in the project's
 				// sorting layers (M21, Docs/Decisions/0032-m21-contract.md decision 4).
-				const RenderExtractionRequest request{
+				RenderExtractionRequest request{
 					.Width = options.Width,
 					.Height = options.Height,
 					.Quality = { .ShadowMapSize = settings.Rendering.ShadowMapSize, .SsaoHalfResolution = settings.Rendering.SsaoHalfResolution, .SsrHalfResolution = settings.Rendering.SsrHalfResolution },
 					.SortingLayers = settings.SortingLayers.Layers,
 				};
+				if (!options.Camera.empty())
+				{
+					// Another camera of the scene, as viewport.screenshot {camera} renders it.
+					ENGINE_TRY_ASSIGN(const ConstEntity camera, WithContext(std::as_const(*loaded).ResolveEntityPath(options.Camera), std::format("finding the camera of the golden scene '{}'", name)));
+					request.Camera = RenderCameraSource::Entity;
+					request.CameraEntity = camera.GetUUID();
+				}
 				ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(*loaded, request));
 				if (!snapshot.HasCamera)
 					return MakeError(ErrorCode::Validation, "the golden scene '{}' has no primary camera", name);

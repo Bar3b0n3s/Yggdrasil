@@ -3067,11 +3067,11 @@
 			"additionalProperties": false
 		},
 		"PlanarReflection": {
-			"description": "Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before.",
+			"description": "Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before. On an entity with a Water, the water reflects in its base plane (its Normal and Offset are not read).",
 			"type": "object",
 			"properties": {
 				"Normal": {
-					"description": "The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero.",
+					"description": "The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. Not read on a Water, which reflects in its base plane.",
 					"type": "array",
 					"prefixItems": [
 						{
@@ -3088,7 +3088,7 @@
 					"maxItems": 3
 				},
 				"Offset": {
-					"description": "The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box.",
+					"description": "The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. Not read on a Water.",
 					"type": "number",
 					"minimum": -10000,
 					"maximum": 10000
@@ -4238,6 +4238,261 @@
 			},
 			"additionalProperties": false
 		},
+		"Water": {
+			"description": "A body of water at the entity's world height: an unbounded Ocean or a bounded Rectangle, with Gerstner waves of the world's time that scripts, the physics and the renderer sample alike.",
+			"type": "object",
+			"properties": {
+				"Shape": {
+					"description": "Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface).",
+					"enum": ["Ocean", "Rectangle"]
+				},
+				"Size": {
+					"description": "A Rectangle's extent along the entity's local X and Z axes, centred on it, in local units (its scale applies).",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0.1,
+							"maximum": 100000
+						},
+						{
+							"type": "number",
+							"minimum": 0.1,
+							"maximum": 100000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Depth": {
+					"description": "How far a Rectangle's volume reaches below its base, in metres.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100000
+				},
+				"Headroom": {
+					"description": "How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100000
+				},
+				"Waves": {
+					"description": "At most eight Gerstner waves summed over the base; empty is a calm surface.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/WaterWave"
+					}
+				},
+				"WaveScale": {
+					"description": "Multiplies every wave's amplitude: 0 is calm, above 1 a storm.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"Current": {
+					"description": "The water's horizontal flow along its local X and Z axes, in metres per second; it carries floating bodies and moves no wave.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Density": {
+					"description": "The fluid's density, which Buoyancy floats bodies against, in kilograms per cubic metre.",
+					"type": "number",
+					"minimum": 1,
+					"maximum": 20000
+				},
+				"ShallowColor": {
+					"description": "The linear colour of shallow water, over the bottom it shows.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"DeepColor": {
+					"description": "The linear colour deep water absorbs toward.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Clarity": {
+					"description": "The metres of water column over which the bottom fades toward DeepColor.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 1000
+				},
+				"Roughness": {
+					"description": "The surface's perceptual roughness: low is a sharp sun glint and clear reflections.",
+					"type": "number",
+					"minimum": 0.02,
+					"maximum": 1
+				},
+				"RefractionStrength": {
+					"description": "How far the waves bend the view of what lies under the surface.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"FoamAmount": {
+					"description": "How much foam the crests and the shallows show: 0 none.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"ShoreFoamDepth": {
+					"description": "The water column, in metres, under which foam gathers where the surface meets the ground or an object.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"DetailNormalStrength": {
+					"description": "How strongly the small-scale detail normals ripple the surface.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"DetailScale": {
+					"description": "The metres one repeat of the detail normal map covers.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 1000
+				},
+				"DetailDrift": {
+					"description": "How fast the detail normals drift along the water's local X and Z axes, in metres per second.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"UnderwaterColor": {
+					"description": "The unlit linear radiance the view under the surface fades to, and the surface's colour seen from below outside Snell's window: make it about as bright as the lit scene it veils (the default suits daylight; dim it at dusk, at night and in caves).",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"UnderwaterVisibility": {
+					"description": "The distance, in metres, over which the fog under the surface veils about 63 % (1 - 1/e) of what lies behind.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 10000
+				},
+				"NormalMap": {
+					"description": "The detail normal map; null takes the built-in WaterNormal.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Texture"
+				},
+				"FoamTexture": {
+					"description": "The foam's texture; null takes the built-in WaterFoam.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Texture"
+				}
+			},
+			"additionalProperties": false
+		},
+		"Buoyancy": {
+			"description": "Floats the Dynamic body of the entity's RigidBody on water: each solid collider is submerged against the surface under it, with the water's density and drag.",
+			"type": "object",
+			"properties": {
+				"Water": {
+					"description": "The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"BuoyancyScale": {
+					"description": "Multiplies the buoyant force: 1 is physical, 0 none.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"LinearDrag": {
+					"description": "The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"AngularDrag": {
+					"description": "The water's drag on the body's turning (Jolt's angular drag coefficient).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -4743,6 +4998,45 @@
 			},
 			"additionalProperties": false
 		},
+		"WaterWave": {
+			"description": "One Gerstner wave of a Water, in the water's local frame.",
+			"type": "object",
+			"properties": {
+				"Direction": {
+					"description": "The direction the wave travels, in degrees about +Y in the water's local XZ plane: 0 along local +X, 90 along local -Z.",
+					"type": "number"
+				},
+				"Wavelength": {
+					"description": "The distance from crest to crest, in metres.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 2000
+				},
+				"Amplitude": {
+					"description": "The height of a crest above the base, in metres, before the water's WaveScale.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 20
+				},
+				"Steepness": {
+					"description": "Gerstner's steepness Q: 0 is a sine wave, 1 the sharpest crest; scaled down with the others when their sum would fold the surface (WATER_WAVES_TOO_STEEP).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Speed": {
+					"description": "The speed of the crests, in metres per second; 0 takes deep water's speed for the wavelength.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 200
+				},
+				"Phase": {
+					"description": "The wave's phase at time 0, in degrees.",
+					"type": "number"
+				}
+			},
+			"additionalProperties": false
+		},
 		"Entity": {
 			"description": "One entity: its entity keys, then its components.",
 			"type": "object",
@@ -4976,6 +5270,12 @@
 						},
 						"Wind": {
 							"$ref": "#/$defs/Wind"
+						},
+						"Water": {
+							"$ref": "#/$defs/Water"
+						},
+						"Buoyancy": {
+							"$ref": "#/$defs/Buoyancy"
 						}
 					},
 					"additionalProperties": true

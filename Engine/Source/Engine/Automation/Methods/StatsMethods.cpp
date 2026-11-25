@@ -119,6 +119,8 @@ namespace Engine {
 		result.MeshLodDraws.assign(stats.MeshLodDraws.begin(), stats.MeshLodDraws.end());
 		result.LodCrossFades = stats.LodCrossFades;
 		result.DistanceCulledMeshes = stats.DistanceCulledMeshes;
+		result.WaterSurfaces = stats.WaterSurfaces;
+		result.Underwater = stats.Underwater;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -225,7 +227,14 @@ namespace Engine {
 			.Field("lodCrossFades", &StatsViewSummary::LodCrossFades,
 				"Mesh items the frame drew inside a fade band, cross-fading two levels of detail with complementary dither.")
 			.Field("distanceCulledMeshes", &StatsViewSummary::DistanceCulledMeshes,
-				"Mesh items the frame did not draw because the camera is at or beyond their RenderDistance's CullDistance.");
+				"Mesh items the frame did not draw because the camera is at or beyond their RenderDistance's CullDistance.")
+			.Field("waterSurfaces", &StatsViewSummary::WaterSurfaces,
+				"Water surfaces the frame drew: every effectively enabled Water of the view's snapshot (one Ocean at most) in a Lit view with "
+				"a camera outside the wireframe; 0 in data and debug views, the wireframe and a frame whose Water pass failed. Their cost is "
+				"the WaterRefraction and Water rows.")
+			.Field("underwater", &StatsViewSummary::Underwater,
+				"Whether the frame recorded the Underwater pass: the camera's near plane may lie under a water's surface (its cost is the "
+				"Underwater row).");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")
