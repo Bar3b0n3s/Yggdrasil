@@ -21,10 +21,13 @@
 // Membership. An item for every entity that is effectively static (HierarchyStaticTag), effectively enabled (no
 // HierarchyDisabledTag), not pending destruction, and holds a MeshRenderer that is Visible with a Mesh, except an entity that
 // also holds a SkinnedMesh, a PlanarReflection, or a MaterialParameters whose UVScroll is not zero: those stay in
-// RenderSnapshot::Meshes. The item is render extraction's MeshRenderer item at the entity's current world matrix (its
-// WorldTransformComponent, or TransformSystem::ComputeWorldMatrix before the first TransformSystem::Update gave it one), with
-// no interpolation and no PreviousWorld, its MaterialParameters resolved at time 0 (ResolveMaterialParameters: without a
-// scroll they are the same at any time), and PickId 0.
+// RenderSnapshot::Meshes. Whether an item morphs depends also on its mesh (morph targets with a non-zero default weight
+// deform an item that sets no weight), which extraction never reads: such an item joins the set, and the renderer draws it
+// undeformed and reports it (Docs/Decisions/0061-m43-static-scenery.md, the W43.2 record). The item is render
+// extraction's MeshRenderer item at the entity's current world matrix (its WorldTransformComponent, or
+// TransformSystem::ComputeWorldMatrix before the first TransformSystem::Update gave it one), with no interpolation and no
+// PreviousWorld, its MaterialParameters resolved at time 0 (ResolveMaterialParameters: without a scroll they are the same
+// at any time), and PickId 0.
 //
 // Cells. Each item lies in the cell of its world origin: (floor(x / StaticCellSize), floor(z / StaticCellSize)) of its
 // matrix's translation, a non-finite coordinate in cell 0 and a huge one clamped to the int32 range. The set lists its cells
@@ -48,7 +51,8 @@
 // world-change list and dropped dirty marks evaluate every static entity and every held item again, which rebuilds only the
 // cells whose items changed. Versions come from one counter of the cache, from 1, shared by its cells and sets: unique only
 // within this scene's set, for change detection within it (the edit scene and its play copy hand out the same versions);
-// what a renderer prepares from a cell is keyed by the cell object, the Ref<const RenderStaticCell> it holds while cached.
+// what a renderer prepares from a cell is keyed by the cell object, the Ref<const RenderStaticCell> it holds while cached,
+// and its meshes' and materials' mirror versions (an asset reload rebuilds no cell).
 //
 // The Debug check (ENGINE_DEBUG builds, Dependencies.lua): each refresh first checks every HierarchyStaticTag against the
 // Static rule (VerifyHierarchyStaticTags, StaticScenery.h), since the set follows the tags, then builds the whole set afresh
@@ -84,8 +88,6 @@ namespace Engine {
 		// Whether the set holds `entity`'s MeshRenderer as a static item, as of the last Refresh.
 		[[nodiscard]] bool HoldsItem(entt::entity entity) const;
 
-		// The set of the last Refresh (null before the first).
-		[[nodiscard]] const Ref<const RenderStaticSet>& GetSet() const { return m_Set; }
 		// The items of the last Refresh's set.
 		[[nodiscard]] size_t GetItemCount() const { return m_Items.size() - m_FreeItems.size(); }
 		// StaticCellRebuilds: the cells the last Refresh rebuilt or removed.

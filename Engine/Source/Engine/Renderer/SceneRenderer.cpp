@@ -377,17 +377,6 @@ namespace Engine {
 			return std::isfinite(exposure) ? exposure : 1.0f;
 		}
 
-		// The material slot `slot` of `item` drawing a submesh of a mesh with `defaults`: the item's slot when it is set,
-		// else the mesh's default material, else the built-in Default material.
-		static AssetHandle SelectMaterial(const MeshDrawItem& item, std::span<const AssetHandle> defaults, uint32_t slot)
-		{
-			if (slot < item.Materials.size() && item.Materials[slot].IsValid())
-				return item.Materials[slot];
-			if (slot < defaults.size() && defaults[slot].IsValid())
-				return defaults[slot];
-			return BuiltinAssetHandles::DefaultMaterial;
-		}
-
 		// A 1x1 RGBA16_FLOAT cube of zeros: EnvSpecular of a view without an environment map, so the forward set always binds a
 		// cube (the shader reads it only when EnvironmentConstants::HasEnvironment is set). A startup object of the pass list,
 		// not an asset upload: a render target cleared once by one command list executed at once, kept in ShaderResource.
@@ -879,6 +868,20 @@ namespace Engine {
 		Materials.ReleaseUnused();
 	}
 
+	AssetHandle Detail::SelectSubmeshMaterial(const MeshDrawItem& item, std::span<const AssetHandle> defaults, uint32_t slot)
+	{
+		if (slot < item.Materials.size() && item.Materials[slot].IsValid())
+			return item.Materials[slot];
+		if (slot < defaults.size() && defaults[slot].IsValid())
+			return defaults[slot];
+		return BuiltinAssetHandles::DefaultMaterial;
+	}
+
+	bool Detail::IsFiniteMatrix(const glm::mat4& matrix)
+	{
+		return Utils::IsFinite(matrix);
+	}
+
 	Result<Detail::SceneRendererMaterial> SceneRenderer::State::ResolveMaterial(AssetHandle handle)
 	{
 		// The mirror is valid until the next upload: everything needed is taken now.
@@ -905,6 +908,9 @@ namespace Engine {
 		Status status;
 		std::map<AssetHandle, Detail::SceneRendererMaterial> materials;
 		std::set<AssetHandle> culledMaterials; // the materials of culled submeshes this render looked at
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's draws first (SceneRendererStatic.cpp), so
+		// each opaque one, ahead in snapshot order, sorts before the dynamic draws of its key.
+		AppendStaticViewDraws(frame, camera, mirror, opaque, transparent, materials, culledMaterials, status);
 		std::vector<GpuSubmesh> submeshes;
 		std::vector<AssetHandle> defaults;
 		for (size_t index = 0; index < snapshot.Meshes.size(); ++index)
@@ -952,7 +958,7 @@ namespace Engine {
 				const GpuSubmesh& submesh = submeshes[submeshIndex];
 				if (submesh.IndexCount == 0)
 					continue;
-				const AssetHandle materialHandle = Utils::SelectMaterial(item, defaults, submesh.MaterialSlot);
+				const AssetHandle materialHandle = Detail::SelectSubmeshMaterial(item, defaults, submesh.MaterialSlot);
 				// M23 (C23.3): a deformed item's submeshes are culled by its deformed bounds.
 				const Aabb& bounds = deform.Deformed ? deform.Bounds : submesh.Bounds;
 				// M42: a mirror view also culls what lies wholly behind its glass.
@@ -1062,14 +1068,32 @@ namespace Engine {
 		reorder(opaque, opaqueKeys);
 		reorder(transparent, transparentKeys);
 
-		// M23 (R-INST): the draws' instance records in their order, opaque then transparent, and their instanced draws.
-		const auto appendInstances = [this, &snapshot](std::vector<Detail::SceneRendererDraw>& draws)
+		// M23 (R-INST): the draws' instance records in their order, opaque then transparent, and their instanced draws. M43: a
+		// static draw's records are the static set's, read through InstanceIndices: an opaque one has its entries already, a
+		// transparent one takes its entry now, in the sorted order, so a run of them of one key reads consecutive entries.
+		const auto appendInstances = [this, &snapshot](std::vector<Detail::SceneRendererDraw>& draws, bool transparentDraws)
 		{
 			std::vector<MeshInstanceKey> keys;
 			keys.reserve(draws.size());
 			Instances.reserve(Instances.size() + draws.size());
 			for (Detail::SceneRendererDraw& draw : draws)
 			{
+				if (draw.StaticInstances != 0)
+				{
+					if (transparentDraws)
+					{
+						const uint32_t record = draw.Instance;
+						draw.Instance = static_cast<uint32_t>(InstanceIndices.size());
+						InstanceIndices.push_back({ .Record = record });
+					}
+					draw.Batch = 1;
+					keys.push_back({ .Pipeline = draw.ForwardVariant,
+						.Material = draw.MaterialHandle,
+						.Mesh = draw.Mesh,
+						.Submesh = draw.Submesh,
+						.VertexStream = Detail::StaticVertexStream });
+					continue;
+				}
 				const MeshDrawItem& item = snapshot.Meshes[draw.SnapshotIndex];
 				draw.Instance = static_cast<uint32_t>(Instances.size());
 				draw.Batch = 1;
@@ -1091,8 +1115,8 @@ namespace Engine {
 					draws[batch.First + index].Batch = index == 0 ? batch.Count : 0;
 			}
 		};
-		appendInstances(opaque);
-		appendInstances(transparent);
+		appendInstances(opaque, false);
+		appendInstances(transparent, true);
 		return status;
 	}
 
@@ -1155,17 +1179,30 @@ namespace Engine {
 			}
 			DrawConstants constants{};
 			constants.FirstInstance = draw.Instance;
+			// M43: a static draw reads its instances through InstanceIndices; its batch's draws stand for their instances.
+			uint32_t instances = draw.Batch;
+			if (draw.StaticInstances != 0)
+			{
+				constants.Flags = DrawConstantsStaticInstances;
+				instances = 0;
+				for (uint32_t member = 0; member < draw.Batch; ++member)
+					instances += draws[index + member].StaticInstances;
+			}
 			commandList.setPushConstants(&constants, sizeof(constants));
-			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(draw.IndexCount).setInstanceCount(draw.Batch).setStartIndexLocation(draw.IndexOffset));
+			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(draw.IndexCount).setInstanceCount(instances).setStartIndexLocation(draw.IndexOffset));
 			++counters.DrawCalls;
-			counters.Triangles += draw.IndexCount / 3 * draw.Batch;
+			counters.Triangles += draw.IndexCount / 3 * instances;
 		}
 		if (target != nullptr)
 			return; // a mirror view's draws are not the main view's (SceneRenderStats)
+		// The submesh draws the list stands for (M43: an opaque static draw stands for each instance of its key).
+		uint32_t submeshDraws = 0;
+		for (const Detail::SceneRendererDraw& draw : draws)
+			submeshDraws += draw.StaticInstances != 0 ? draw.StaticInstances : 1U;
 		if (pass == Detail::SceneRendererMeshPass::ForwardOpaque || pass == Detail::SceneRendererMeshPass::ForwardTransparent)
-			Stats.MeshDraws += static_cast<uint32_t>(draws.size());
+			Stats.MeshDraws += submeshDraws;
 		if (pass == Detail::SceneRendererMeshPass::ForwardTransparent)
-			Stats.TransparentDraws = static_cast<uint32_t>(draws.size());
+			Stats.TransparentDraws = submeshDraws;
 	}
 
 	SceneRenderer::SceneRenderer(ConstructionKey /*key*/)
@@ -1425,6 +1462,13 @@ namespace Engine {
 		state.ImageRevision = snapshot.SceneRevision;
 		state.ImageGeneration = state.Generation;
 		state.ImagePickTable = frame.Picking ? std::vector<UUID>(snapshot.PickTable.begin(), snapshot.PickTable.end()) : std::vector<UUID>();
+		// M43: the static cells whose records the picking prepass wrote, which their pick ids resolve against.
+		state.ImageStaticPicks.clear();
+		if (frame.Picking)
+		{
+			for (const Detail::SceneRendererStaticCellRef& reference : frame.StaticCells)
+				state.ImageStaticPicks.push_back({ .First = reference.FirstRecord, .Cell = reference.Prepared->Cell });
+		}
 		state.FinalTarget = 0;
 		commandList.beginMarker("SceneRenderer");
 		state.RecordViewSetup(frame);
@@ -1453,10 +1497,17 @@ namespace Engine {
 		state.ReleaseUnusedReflections();
 		std::set<size_t> visibleMeshes;
 		for (const auto& draw : state.OpaqueDraws)
-			visibleMeshes.insert(draw.SnapshotIndex);
+		{
+			if (draw.StaticInstances == 0)
+				visibleMeshes.insert(draw.SnapshotIndex);
+		}
 		for (const auto& draw : state.TransparentDraws)
-			visibleMeshes.insert(draw.SnapshotIndex);
-		stats.VisibleMeshes = static_cast<uint32_t>(visibleMeshes.size());
+		{
+			if (draw.StaticInstances == 0)
+				visibleMeshes.insert(draw.SnapshotIndex);
+		}
+		// M43: the static items the view drew a submesh of, as the dynamic items.
+		stats.VisibleMeshes = static_cast<uint32_t>(visibleMeshes.size()) + frame.StaticVisibleItems;
 		stats.CulledSubmeshes = state.Stats.CulledSubmeshes;
 		stats.ShadowedSpotLights = static_cast<uint32_t>(frame.Spots.Tiles.size());
 		stats.DroppedSpotShadows = frame.Spots.Dropped;
@@ -1474,6 +1525,12 @@ namespace Engine {
 		stats.DroppedPlanarReflections = frame.DroppedPlanarReflections;
 		stats.CulledPlanarReflections = frame.CulledPlanarReflections;
 		stats.PlanarReflectionEntities = std::move(frame.PlanarReflectionEntities);
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set rendered, the cells the camera's view did not
+		// cull, and the snapshot's dynamic mesh items.
+		stats.StaticItems = frame.StaticItems;
+		stats.StaticCells = frame.StaticCellCount;
+		stats.StaticCellsVisible = frame.StaticCellsVisible;
+		stats.DynamicItems = static_cast<uint32_t>(snapshot.Meshes.size());
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1564,6 +1621,9 @@ namespace Engine {
 			commandList.writeBuffer(LightBuffer, Lights.data(), Lights.size() * sizeof(ShaderLight));
 		if (!Instances.empty())
 			commandList.writeBuffer(InstanceBuffer, Instances.data(), Instances.size() * sizeof(InstanceRecord));
+		// M43: the static draws' indices into the static records.
+		if (!InstanceIndices.empty())
+			commandList.writeBuffer(InstanceIndexBuffer, InstanceIndices.data(), InstanceIndices.size() * sizeof(InstanceIndex));
 		// M26 (C26.1, R-GI-PROBE; stream Q-B): the probes' constants, and their mirrors' copies when the view's probes changed.
 		Utils::RecordProbeUploads(commandList, ProbeResources, frame.Probes);
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the view's planar reflections, and each drawn slot's
@@ -1809,6 +1869,9 @@ namespace Engine {
 		OpaqueDraws.clear();
 		TransparentDraws.clear();
 		Instances.clear();
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's records and cells, before any draw.
+		InstanceIndices.clear();
+		PrepareStaticSet(frame);
 		// M23 (C23.3): this render's deformations, resolved as the passes look at their items.
 		++DeformRender;
 		ItemDeforms.assign(snapshot.Meshes.size(), Detail::SceneRendererItemDeform{});
@@ -1845,6 +1908,8 @@ namespace Engine {
 				frame.ShadowCasters = std::move(*casters);
 			else
 				frame.KeepFirstError(std::unexpected(std::move(casters).error()));
+			// M43: the static casters, culled and grouped by key per face (one draw per key and face).
+			PrepareStaticShadows(frame);
 		}
 		if (frame.Selection)
 		{
@@ -1860,7 +1925,9 @@ namespace Engine {
 			const std::vector<DeformedVertexSource> selectedSources = PrepareVertexSources(frame, selected);
 			for (size_t position = 0; position < selected.size(); ++position)
 				sources[selected[position]] = selectedSources[position];
-			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources);
+			// M43: a selected static item's record is copied into Instances, so Selection.slang reads it there.
+			const std::vector<MeshDrawItem> staticSelected = CollectSelectedStaticItems(frame);
+			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources, staticSelected);
 		}
 		const GpuEnvironment* environment = hasCamera && frame.IsLit && !frame.Wireframe ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
 		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
@@ -1927,6 +1994,7 @@ namespace Engine {
 		});
 		recording.EndPass({});
 		ENGINE_TRY(EnsureInstanceBuffer());
+		ENGINE_TRY(EnsureInstanceIndexBuffer(frame));
 		const bool halfPoints = Utils::HasHalfTierPointShadow(frame.Points);
 		return EnsureFrameTargets(frame.Picking, frame.Ao, frame.HalfAo, frame.Cascades.Count != 0 ? snapshot.Quality.ShadowMapSize : 0, !frame.Spots.Tiles.empty(),
 			!frame.Points.Lights.empty() ? GetPointShadowFaceSize(snapshot.Quality.ShadowMapSize) : 0,
@@ -2202,6 +2270,10 @@ namespace Engine {
 			.PointHalfFramebuffers = Targets.PointShadowHalfFramebuffers,
 			.Cache = &ShadowCache,
 			.DissolveNoise = frame.DissolveNoise,
+			.StaticDraws = &frame.StaticShadows,
+			.StaticKeys = StaticCasterKeys,
+			.StaticInstances = GetStaticInstancesBinding(frame),
+			.InstanceIndices = InstanceIndexBuffer,
 		};
 		auto result = Pipelines->Shadows->Record(*frame.CommandList, *frame.Recording, ShadowBindings, inputs);
 		if (!result)
@@ -2229,6 +2301,9 @@ namespace Engine {
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+				// M43: the static records and the view's indices into them.
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
 			};
 			auto created = ViewBindings.GetOrCreate(*Device, desc, *Pipelines->Layouts.PrepassView);
 			if (created)
@@ -2244,6 +2319,8 @@ namespace Engine {
 					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
 					nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 					nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
+					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
 				};
 				auto overdrawSet = ViewBindings.GetOrCreate(*Device, overdraw, *Pipelines->Layouts.OverdrawView);
 				if (overdrawSet)
@@ -2413,6 +2490,9 @@ namespace Engine {
 		};
 		for (uint32_t slot = 0; slot < MaxPlanarReflectionsPerView; ++slot)
 			desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(Utils::PlanarReflectionsRegister + slot, planarReflections[slot]));
+		// M43: the static records and the view's indices into them.
+		desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)));
+		desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer));
 		return desc;
 	}
 

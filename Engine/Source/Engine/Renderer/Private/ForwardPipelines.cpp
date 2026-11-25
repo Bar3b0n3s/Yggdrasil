@@ -47,6 +47,8 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::Texture_SRV(BrdfLutRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(DissolveNoiseRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(StaticInstancesRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstanceIndicesRegister),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
 										nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)),
@@ -58,6 +60,8 @@ namespace Engine {
 			return MakeSetLayout(0, {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(StaticInstancesRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstanceIndicesRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
 										nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)),
 									});
@@ -65,7 +69,7 @@ namespace Engine {
 
 		[[nodiscard]] static nvrhi::BindingLayoutDesc MakeForwardViewLayout()
 		{
-			// M42: b7 and t17 to t20 (PlanarReflectionSlotCount images) after the M31 items.
+			// M42: b7 and t17 to t20 (PlanarReflectionSlotCount images) after the M31 items; M43: t21 and t22 after them.
 			static_assert(PlanarReflectionSlotCount == 4);
 			return MakeSetLayout(0, {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
@@ -94,6 +98,8 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 1),
 										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 2),
 										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 3),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(StaticInstancesRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstanceIndicesRegister),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(ShadowCompareRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),

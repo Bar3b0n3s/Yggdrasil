@@ -99,6 +99,14 @@ namespace Engine {
 		uint32_t DroppedPlanarReflections = 0;
 		uint32_t CulledPlanarReflections = 0;
 		std::vector<UUID> PlanarReflectionEntities{};
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; ADR 0060's ledger: first of phase 8's rows): the snapshot's
+		// static set the frame rendered (RenderSnapshot::StaticSet: its items and its cells), the cells the camera's view did
+		// not cull (its static work follows them), and the snapshot's dynamic mesh items (RenderSnapshot::Meshes). VisibleMeshes
+		// and CulledSubmeshes count the static items and submeshes as they count the dynamic ones.
+		uint32_t StaticItems = 0;
+		uint32_t StaticCells = 0;
+		uint32_t StaticCellsVisible = 0;
+		uint32_t DynamicItems = 0;
 	};
 
 	// M32 (decision 13): the SSR area of one completed frame, which RenderStatsHistory::PublishSsrArea merges into the

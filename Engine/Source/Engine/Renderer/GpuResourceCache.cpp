@@ -13,7 +13,12 @@
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/CommandListRecording.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Renderer/RenderPrepare.h"
+#include "Engine/Renderer/RenderStaticSet.h"
+#include "Shared/DrawConstants.h"
+#include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
 
 #include <glm/gtc/packing.hpp>
@@ -26,6 +31,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -48,6 +54,13 @@
 // have no placeholder (§7.2): an entry remembers a failed load or upload for its (handle, version), so the failure is
 // reported once and nothing is retried until the asset's version changes. LUTs and heightfields (M26) are kept as
 // environments are.
+//
+// The static records (M43, Docs/Decisions/0061-m43-static-scenery.md decision 3) are ranges of one buffer: each held cell's
+// range by its first record (StaticRanges, which also finds a free place's neighbours), each cell's first record by its
+// object (StaticFirst, for lookups only), and the free places below the high-water mark StaticEnd, coalesced (StaticFree). An
+// acquisition plans the new ranges first-fit on copies and commits them only once their records are written, so a failed
+// attempt leaves every range as it was; a freed place is reused only by a later acquisition, after the frame that last read
+// it was submitted (CollectStale).
 
 namespace Engine {
 
@@ -84,6 +97,74 @@ namespace Engine {
 			// M23 (decision 9): the cache's shared default attribute stream, which a mesh upload may grow.
 			DefaultAttributeStream* DefaultAttributes = nullptr;
 		};
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): one held static cell's range of the static record buffer:
+		// the cell, held so its object (the range's key) is never another cell's, its record count, and whether an
+		// AcquireStaticRecords used it since the last CollectStale.
+		struct StaticRecordRange
+		{
+			Ref<const RenderStaticCell> Cell{};
+			uint32_t Count = 0;
+			bool Used = false;
+		};
+
+		// M43: the free place [first, first + count) returned to `free`, merged with its free neighbours, or, when it ends at
+		// `end`, taken off the high-water mark with the free place before it.
+		void FreeStaticPlace(std::map<uint32_t, uint32_t>& free, uint32_t& end, uint32_t first, uint32_t count)
+		{
+			auto next = free.lower_bound(first);
+			if (next != free.begin())
+			{
+				const auto previous = std::prev(next);
+				if (previous->first + previous->second == first)
+				{
+					first = previous->first;
+					count += previous->second;
+					free.erase(previous);
+				}
+			}
+			if (next != free.end() && first + count == next->first)
+			{
+				count += next->second;
+				free.erase(next);
+			}
+			if (first + count == end)
+				end = first;
+			else
+				free[first] = count;
+		}
+
+		// M43: the first record of a place of `count` records: the lowest free place that holds it (the rest stays free), else
+		// the high-water mark, which moves past it.
+		[[nodiscard]] uint32_t TakeStaticPlace(std::map<uint32_t, uint32_t>& free, uint32_t& end, uint32_t count)
+		{
+			for (auto place = free.begin(); place != free.end(); ++place)
+			{
+				if (place->second < count)
+					continue;
+				const uint32_t first = place->first;
+				const uint32_t rest = place->second - count;
+				free.erase(place);
+				if (rest != 0)
+					free[first + count] = rest;
+				return first;
+			}
+			const uint32_t first = end;
+			end += count;
+			return first;
+		}
+
+		// M43: the records of `cell`'s items at `first` (GpuResourceCache::AcquireStaticRecords).
+		void AppendStaticRecords(const RenderStaticCell& cell, uint32_t first, std::vector<InstanceRecord>& records)
+		{
+			for (size_t index = 0; index < cell.Items.size(); ++index)
+			{
+				const MeshDrawItem& item = cell.Items[index];
+				InstanceRecord record = MakeMeshInstanceRecord(item, item.ReceiveShadows ? DrawFlagReceiveShadows : 0U);
+				record.EntityId = StaticPickIdBase + first + static_cast<uint32_t>(index);
+				records.push_back(record);
+			}
+		}
 
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): whether GpuResourceCache::TrimUnused releases the mirror
 		// `key`: a replaced version (as CollectStale), or the mirror of an asset the manager no longer has loaded (released or
@@ -889,6 +970,15 @@ namespace Engine {
 		bool BlockPathLogged = false;
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26): the cache's registration with its device.
 		GpuRecreationRegistration Recreation{};
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static record buffer and its ranges (the file comment):
+		// its capacity and high-water mark in records, each held range by its first record, each held cell's first record and
+		// the free places below the mark, by their first record with their counts.
+		nvrhi::BufferHandle StaticRecords{};
+		uint32_t StaticCapacity = 0;
+		uint32_t StaticEnd = 0;
+		std::map<uint32_t, StaticRecordRange> StaticRanges;
+		std::map<const RenderStaticCell*, uint32_t> StaticFirst;
+		std::map<uint32_t, uint32_t> StaticFree;
 
 		[[nodiscard]] UploadContext GetContext()
 		{
@@ -912,6 +1002,15 @@ namespace Engine {
 		// that released every mesh without a stream leaves none of the cache's buffers alive; the next such mesh creates it
 		// again.
 		void ReleaseUnboundDefaultAttributes();
+		// M43: one attempt of AcquireStaticRecords (RetryAfterTrim's): plans `set`'s new ranges on copies, creates a grown buffer
+		// aside, writes the new ranges' records (a grown buffer's every range) through one command list executed at once, and
+		// only then commits, `firsts` holding each cell's first record. Errors: those of the creations (Gpu), with nothing
+		// changed.
+		[[nodiscard]] Status TryAcquireStaticRecords(const RenderStaticSet& set, std::vector<uint32_t>& firsts);
+		// M43: drops the static record buffer with every range.
+		void ClearStaticRecords();
+		// M43: the records the held static ranges hold.
+		[[nodiscard]] size_t CountStaticRecords() const;
 	};
 
 	GpuResourceCache::GpuResourceCache(GraphicsDevice& device, AssetManager& assets)
@@ -1177,6 +1276,20 @@ namespace Engine {
 		m_State->Meshes.CollectStale(*m_State->Assets, releaseUnused);
 		m_State->Textures.CollectStale(*m_State->Assets, releaseUnused);
 		m_State->ReleaseUnboundDefaultAttributes();
+		// M43: the static ranges no acquisition used since the last collection are free from now on, in record order.
+		State& state = *m_State;
+		for (auto range = state.StaticRanges.begin(); range != state.StaticRanges.end();)
+		{
+			if (range->second.Used)
+			{
+				range->second.Used = false;
+				++range;
+				continue;
+			}
+			state.StaticFirst.erase(range->second.Cell.get());
+			FreeStaticPlace(state.StaticFree, state.StaticEnd, range->first, range->second.Count);
+			range = state.StaticRanges.erase(range);
+		}
 	}
 
 	void GpuResourceCache::Clear()
@@ -1189,6 +1302,7 @@ namespace Engine {
 		m_State->Meshes.Clear();
 		m_State->Textures.Clear();
 		m_State->DefaultAttributes = {};
+		m_State->ClearStaticRecords(); // M43
 	}
 
 	void GpuResourceCache::ReleaseGpuObjects()
@@ -1228,6 +1342,9 @@ namespace Engine {
 		m_State->Meshes.TrimUnused(assets);
 		m_State->Textures.TrimUnused(assets);
 		m_State->ReleaseUnboundDefaultAttributes();
+		// M43: the static records are rebuilt from their cells by the next acquisition, compacted, so the buffer goes with its
+		// free places; a command list recorded with it holds it until it completes.
+		m_State->ClearStaticRecords();
 	}
 
 	GpuResourceCacheStats GpuResourceCache::GetStats() const
@@ -1241,7 +1358,145 @@ namespace Engine {
 			.IrradianceVolumeCount = m_State->IrradianceVolumes.size(),
 			.LutCount = m_State->Luts.size(),
 			.HeightfieldCount = m_State->Heightfields.size(),
+			.StaticCellCount = m_State->StaticRanges.size(),
+			.StaticRecordCount = m_State->CountStaticRecords(),
+			.StaticRecordCapacity = m_State->StaticCapacity,
 		};
+	}
+
+	Result<std::vector<uint32_t>> GpuResourceCache::AcquireStaticRecords(const RenderStaticSet& set)
+	{
+		State& state = *m_State;
+		uint64_t records = 0;
+		for (const Ref<const RenderStaticCell>& cell : set.Cells)
+			records += cell->Items.size();
+		// Every record's pick id must stay below 2^32, after StaticPickIdBase.
+		if (records >= StaticPickIdBase)
+			return MakeError(ErrorCode::InvalidArgument, "a static set of {} instance records exceeds the {} static pick ids", records, StaticPickIdBase);
+		std::vector<uint32_t> firsts(set.Cells.size(), 0);
+		ENGINE_TRY(RetryAfterTrim(*state.Device, std::format("the static set's {} instance records", records), [&state, &set, &firsts]()
+		{
+			return state.TryAcquireStaticRecords(set, firsts);
+		}));
+		return firsts;
+	}
+
+	nvrhi::IBuffer* GpuResourceCache::GetStaticRecordBuffer() const
+	{
+		return m_State->StaticRecords.Get();
+	}
+
+	Status GpuResourceCache::State::TryAcquireStaticRecords(const RenderStaticSet& set, std::vector<uint32_t>& firsts)
+	{
+		// The held ranges first; a steady set, all of whose cells are held, only marks them used.
+		std::vector<size_t> missing;
+		for (size_t index = 0; index < set.Cells.size(); ++index)
+		{
+			const RenderStaticCell& cell = *set.Cells[index];
+			if (const auto found = StaticFirst.find(&cell); found != StaticFirst.end())
+				firsts[index] = found->second;
+			else if (!cell.Items.empty()) // no record, no range (a published cell always holds an item)
+				missing.push_back(index);
+		}
+		// The new ranges, planned on copies of the free places and the mark (first-fit, in the set's order).
+		std::map<uint32_t, uint32_t> free = missing.empty() ? std::map<uint32_t, uint32_t>() : StaticFree;
+		uint32_t end = StaticEnd;
+		std::vector<std::pair<size_t, uint32_t>> added; // (the cell's index in the set, its first record)
+		for (const size_t index : missing)
+		{
+			firsts[index] = TakeStaticPlace(free, end, static_cast<uint32_t>(set.Cells[index]->Items.size()));
+			added.emplace_back(index, firsts[index]);
+		}
+
+		// A buffer that cannot hold the mark grows aside and is written whole: the kept ranges at their places, and the new.
+		nvrhi::BufferHandle buffer = StaticRecords;
+		uint32_t capacity = StaticCapacity;
+		const bool grows = end > StaticCapacity;
+		if (grows)
+		{
+			const uint64_t grown = std::max({ uint64_t{ StaticRecordMinimumCapacity }, std::bit_ceil(uint64_t{ end }), uint64_t{ StaticCapacity } * 2 });
+			capacity = static_cast<uint32_t>(std::min<uint64_t>(grown, StaticPickIdBase));
+			nvrhi::BufferDesc desc;
+			desc.byteSize = uint64_t{ capacity } * sizeof(InstanceRecord);
+			desc.structStride = sizeof(InstanceRecord);
+			desc.initialState = nvrhi::ResourceStates::ShaderResource;
+			desc.keepInitialState = true;
+			desc.debugName = "GpuResourceCache.StaticInstances";
+			ENGINE_TRY_ASSIGN(buffer, Device->CreateBuffer(desc));
+		}
+		std::vector<std::pair<uint32_t, const RenderStaticCell*>> written; // (first record, cell), in record order
+		if (grows)
+		{
+			for (const auto& [first, range] : StaticRanges)
+				written.emplace_back(first, range.Cell.get());
+		}
+		for (const auto& [index, first] : added)
+			written.emplace_back(first, set.Cells[index].get());
+		std::ranges::sort(written);
+		if (!written.empty())
+		{
+			// Each run of adjacent ranges is one write.
+			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
+				Device->CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
+			CommandListRecording recording(*Device, *commandList);
+			std::vector<InstanceRecord> records;
+			uint32_t runFirst = written.front().first;
+			const auto write = [&commandList, &buffer, &records, &runFirst]()
+			{
+				commandList->writeBuffer(buffer, records.data(), records.size() * sizeof(InstanceRecord), uint64_t{ runFirst } * sizeof(InstanceRecord));
+				records.clear();
+			};
+			for (const auto& [first, cell] : written)
+			{
+				if (first != runFirst + records.size())
+				{
+					write();
+					runFirst = first;
+				}
+				AppendStaticRecords(*cell, first, records);
+			}
+			if (!records.empty())
+				write();
+			recording.Execute();
+		}
+
+		// Committed: every range of the set is held and used.
+		if (!missing.empty())
+		{
+			StaticRecords = std::move(buffer);
+			StaticCapacity = capacity;
+			StaticEnd = end;
+			StaticFree = std::move(free);
+		}
+		for (const auto& [index, first] : added)
+		{
+			StaticRanges[first] = StaticRecordRange{ .Cell = set.Cells[index], .Count = static_cast<uint32_t>(set.Cells[index]->Items.size()) };
+			StaticFirst[set.Cells[index].get()] = first;
+		}
+		for (size_t index = 0; index < set.Cells.size(); ++index)
+		{
+			if (const auto range = StaticRanges.find(firsts[index]); !set.Cells[index]->Items.empty() && range != StaticRanges.end())
+				range->second.Used = true;
+		}
+		return {};
+	}
+
+	void GpuResourceCache::State::ClearStaticRecords()
+	{
+		StaticRecords = nullptr;
+		StaticCapacity = 0;
+		StaticEnd = 0;
+		StaticRanges.clear();
+		StaticFirst.clear();
+		StaticFree.clear();
+	}
+
+	size_t GpuResourceCache::State::CountStaticRecords() const
+	{
+		size_t records = 0;
+		for (const StaticRecordRange& range : StaticRanges | std::views::values)
+			records += range.Count;
+		return records;
 	}
 
 	// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): as GetEnvironment, an irradiance volume without a

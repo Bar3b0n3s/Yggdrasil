@@ -20,25 +20,29 @@ namespace Engine {
 	// The side of a static cell, in metres: an engine constant, not a project setting (ADR 0061 decision 4).
 	inline constexpr float StaticCellSize = 32.0f;
 
-	// The pick ids of static records start here (2^31): a static record's id is StaticPickIdBase plus its cell's slot and its
-	// index in the cell (the encoding is the renderer's, W43.2's record), so the records never change with the frame's
-	// dynamic items, whose ids stay dense from 1 in snapshot order.
+	// The pick ids of static records start here (2^31): a static record's id is StaticPickIdBase plus its index in the static
+	// record buffer, which is its cell's first record there plus its index in the cell (GpuResourceCache::AcquireStaticRecords;
+	// AsyncPicker resolves it against the cell's PickTable), so the records never change with the frame's dynamic items, whose
+	// ids stay dense from 1 in snapshot order.
 	inline constexpr uint32_t StaticPickIdBase = 0x80000000u;
 
 	// One cell of the static set: the items whose world origin lies in the XZ square Key * StaticCellSize to (Key + 1) *
 	// StaticCellSize, in canonical order of their entities. Immutable once published: a change makes a new cell with a new
 	// Version (copy on write). Version is unique only within one scene's set and serves change detection within it (the
 	// edit scene and its play copy hand out the same versions); a renderer keys what it prepared from a cell by the cell
-	// object, the Ref<const RenderStaticCell> it holds while the preparation is cached. The renderer derives the cell's
-	// bounds from its items' meshes, so a large item enlarges its cell (a loose grid).
+	// object, the Ref<const RenderStaticCell> it holds while the preparation is cached, and its meshes' and materials' mirror
+	// versions (an asset reload rebuilds no cell). The renderer derives the cell's bounds from its items' meshes, so a large
+	// item enlarges its cell (a loose grid).
 	struct RenderStaticCell
 	{
 		glm::ivec2 Key = glm::ivec2(0);
 		uint64_t Version = 0;
 		// Each static entity's MeshRenderer that is Visible with a Mesh, at its current world matrix (no interpolation, so
 		// PreviousWorld stays empty: a static record's previous matrix is its matrix), its MaterialParameters resolved; never
-		// skinned, morphed, mirrored glass (PlanarReflection) or scrolling (MaterialParameters.UVScroll non-zero): those stay
-		// in RenderSnapshot::Meshes. PickId is 0: the renderer assigns static pick ids (StaticPickIdBase).
+		// skinned (SkinnedMesh), mirrored glass (PlanarReflection) or scrolling (MaterialParameters.UVScroll non-zero): those
+		// stay in RenderSnapshot::Meshes. An item whose mesh morphs by its default weights is here, since extraction never
+		// reads a mesh, and draws undeformed (the renderer reports it once). PickId is 0: the renderer assigns static pick ids
+		// (StaticPickIdBase).
 		std::vector<MeshDrawItem> Items{};
 		// The entity of each item, by item index: what a static pick id resolves to.
 		std::vector<UUID> PickTable{};

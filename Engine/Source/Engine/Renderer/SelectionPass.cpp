@@ -209,16 +209,17 @@ namespace Engine {
 	}
 
 	SelectionDrawSet SelectionPass::PrepareDraws(GpuResourceCache& cache, const RenderSnapshot& snapshot, bool instancing,
-		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources)
+		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources, std::span<const MeshDrawItem> staticItems)
 	{
 		ENGINE_CORE_ASSERT(sources.empty() || sources.size() == snapshot.Meshes.size(), "the items' vertex sources are none or one per item");
 		SelectionDrawSet set;
 		if (!snapshot.HasCamera || snapshot.SelectedEntities.empty())
 			return set;
 		std::vector<MeshInstanceKey> keys;
-		for (size_t itemIndex = 0; itemIndex < snapshot.Meshes.size(); ++itemIndex)
+		// M43: the snapshot's items, then the selected static items, whose copies' records join the view's Instances.
+		for (size_t itemIndex = 0; itemIndex < snapshot.Meshes.size() + staticItems.size(); ++itemIndex)
 		{
-			const MeshDrawItem& item = snapshot.Meshes[itemIndex];
+			const MeshDrawItem& item = itemIndex < snapshot.Meshes.size() ? snapshot.Meshes[itemIndex] : staticItems[itemIndex - snapshot.Meshes.size()];
 			// M23 (C23.3): a deformed item's vertices (SkinningPass.h).
 			const DeformedVertexSource source = itemIndex < sources.size() ? sources[itemIndex] : DeformedVertexSource{};
 			if (!item.Mesh.IsValid() || !item.Entity.IsValid() || std::ranges::find(snapshot.SelectedEntities, item.Entity) == snapshot.SelectedEntities.end()

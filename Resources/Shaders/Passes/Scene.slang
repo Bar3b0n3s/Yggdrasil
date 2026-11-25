@@ -31,7 +31,10 @@
 // always multiplies the base colour (RGBA), as glTF defines it; a mesh without the stream binds (0, 0) and opaque white.
 // Every draw is instanced (M23, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is
 // the view's instance record Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places
-// it and whose draw flags (and, for the picking prepass, pick id) the vertex shader hands to the fragment shaders, flat.
+// it and whose draw flags (and, for the picking prepass, pick id) the vertex shader hands to the fragment shaders, flat;
+// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): instance i of a static draw is the static set's record
+// StaticInstances[InstanceIndices[Draw.FirstInstance + i].Record] (t21 and t22), every record read through
+// Common/Instances.slang.
 // Four vertex entries transform a vertex with the same NoContraction products, one per set of outputs its fragment
 // shaders read, since the validation layer reports a flat integer output a fragment shader does not read
 // (WARNING-Shader-OutputNotConsumed): VSMain for PSForward, VSPrepass (with the current and previous clip positions, M26)
@@ -119,6 +122,10 @@ Texture2D<float4> PlanarReflections0 : register(t17, space0);
 Texture2D<float4> PlanarReflections1 : register(t18, space0);
 Texture2D<float4> PlanarReflections2 : register(t19, space0);
 Texture2D<float4> PlanarReflections3 : register(t20, space0);
+// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's GPU-resident records and the view's indices
+// into them, which a static draw's instances read (Common/Instances.slang).
+StructuredBuffer<InstanceRecord> StaticInstances : register(t21, space0);
+StructuredBuffer<InstanceIndex> InstanceIndices : register(t22, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -144,6 +151,8 @@ const uint DebugView = 0;
 #include "Common/Fog.slang"
 // The planar reflections' term over the declarations above (M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3).
 #include "Common/PlanarReflections.slang"
+// The instance records over the declarations above (M43, Docs/Decisions/0061-m43-static-scenery.md decision 3).
+#include "Common/Instances.slang"
 
 struct VertexInput
 {
@@ -179,7 +188,8 @@ struct VertexOutput
 	// The instance record's draw flags (a fragment shader has no instance index to read the record with).
 	nointerpolation uint Flags : DRAWFLAGS;
 	// M31: the instance record's index in Instances, whose material parameters the fragment shaders read with
-	// DrawFlagMaterialParameters.
+	// DrawFlagMaterialParameters (M43: its instance index, StaticInstanceIndexBit set for a static record, which the fragment
+	// shaders read through LoadInstanceRecord, Common/Instances.slang).
 	nointerpolation uint Instance : INSTANCE;
 };
 
@@ -299,7 +309,7 @@ float2 GetSurfaceTexCoord(VertexOutput input, uint uv1Flag)
 {
 	float2 texCoord = GetMapTexCoord(input.TexCoord, input.TexCoord1, uv1Flag);
 	if (HasMaterialParameters(input))
-		texCoord += Instances[input.Instance].UVOffset;
+		texCoord += LoadInstanceRecord(input.Instance).UVOffset;
 	return texCoord;
 }
 
@@ -358,7 +368,7 @@ Surface EvaluateSurface(VertexOutput input, bool isFrontFace)
 	surface.Emissive = (Material.Flags & MaterialFlagEmissiveMap) != 0 ? Material.Emissive * emissiveMap : Material.Emissive;
 	if (HasMaterialParameters(input))
 	{
-		const InstanceRecord record = Instances[input.Instance];
+		const InstanceRecord record = LoadInstanceRecord(input.Instance);
 		surface.BaseColor.rgb *= record.Tint;
 		surface.Emissive += record.Emissive;
 		if (record.DissolveAmount > 0.0)
@@ -404,22 +414,15 @@ float3 GetDebugViewValue(Surface surface)
 	}
 }
 
-// The index in Instances of instance `instance` of the draw. SV_VulkanInstanceID is gl_InstanceIndex itself, which counts
-// from 0 within the draw since every draw's own first instance is 0; SV_InstanceID would subtract the base instance and
-// need the DrawParameters capability, which needs the shaderDrawParameters device feature.
-uint GetInstanceIndex(uint instance)
-{
-	return Draw.FirstInstance + instance;
-}
-
-// Instance `instance` of the draw: its record.
+// Instance `instance` of the draw: its record (M43: a dynamic draw's in Instances, a static draw's in StaticInstances, at
+// Common/Instances.slang's GetInstanceIndex).
 InstanceRecord GetInstance(uint instance)
 {
-	return Instances[GetInstanceIndex(instance)];
+	return LoadInstanceRecord(GetInstanceIndex(instance));
 }
 
-// The vertex placed by `record`, the record at `recordIndex` of Instances: every vertex entry's position comes from these
-// two products.
+// The vertex placed by `record`, the record at instance index `recordIndex` (GetInstanceIndex's): every vertex entry's
+// position comes from these two products.
 VertexOutput TransformVertex(VertexInput input, InstanceRecord record, uint recordIndex)
 {
 	const bool mirrored = IsMirrored(record.Flags);
@@ -500,7 +503,7 @@ uint GetCoverage(VertexOutput input, Surface surface)
 	bool clipped = false;
 	if (HasMaterialParameters(input))
 	{
-		const InstanceRecord record = Instances[input.Instance];
+		const InstanceRecord record = LoadInstanceRecord(input.Instance);
 		if (record.DissolveAmount > 0.0)
 			clipped = IsDissolved(record, SampleDissolveNoise(input, record));
 		clipped = clipped || record.Opacity < GetFadeThreshold(uint2(input.Position.xy));
@@ -639,7 +642,7 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 	// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): on a drawn planar reflection's glass, its reflection in
 	// place of the probes' or environment's specular, under the same energy terms below.
 	if ((input.Flags & DrawFlagPlanarReflection) != 0)
-		prefiltered = ShadePlanarReflection(Instances[input.Instance].PlanarReflectionSlot, input.WorldPosition, roughness, alpha, prefiltered);
+		prefiltered = ShadePlanarReflection(LoadInstanceRecord(input.Instance).PlanarReflectionSlot, input.WorldPosition, roughness, alpha, prefiltered);
 	const float3 multiScatter = singleScatter * energyCompensation;
 	const float occlusion = min(surface.Occlusion, SampleGtao(AmbientOcclusion, LinearViewDepth, SceneNormals, uint2(input.Position.xy)));
 	radiance += irradiance * diffuseColor * saturate(float3(1.0) - multiScatter) * MultiBounceAmbientOcclusion(occlusion, diffuseColor);
