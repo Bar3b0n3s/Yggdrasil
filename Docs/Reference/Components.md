@@ -75,6 +75,8 @@ Every component of the type registry, in canonical component order: the order of
 | `FixedJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break. |
 | `WheeledVehicle` | Vehicles | Serializable, ScriptVisible, EditorVisible, Removable | Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick. |
 | `VehicleWheel` | Vehicles | Serializable, ScriptVisible, EditorVisible, Removable | Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins. |
+| `RenderDistance` | RenderDistance | Serializable, ScriptVisible, EditorVisible, Removable | How far and in which level of detail the MeshRenderer on this entity draws: a cull distance, a bias on its mesh's level switches, the shadow's coarser level and the width of the cross-fades. A MeshRenderer without one takes the defaults. |
+| `Wind` | Wind | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's wind (one per scene): it bends, sways and flutters the meshes whose material has wind enabled, and scripts read it with Wind:Sample. |
 
 ## ID
 
@@ -2326,6 +2328,61 @@ Script members of `VehicleWheel`:
 | `SuspensionMinLength` | proxy field | `number` | read/write | All | The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength. |
 | `SuspensionPreload` | proxy field | `number` | read/write | All | How far the spring is compressed at full droop, in metres, so it pushes already there. |
 | `Width` | proxy field | `number` | read/write | All | The wheel's width, in metres (never scaled); a Cylinder cast uses it. |
+
+## RenderDistance
+
+How far and in which level of detail the MeshRenderer on this entity draws: a cull distance, a bias on its mesh's level switches, the shadow's coarser level and the width of the cross-fades. A MeshRenderer without one takes the defaults.
+
+- Category: RenderDistance
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `MeshRenderer`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `CullDistance` | `Float` | `0` | 0 to 1e+05 | m |  | Beyond this distance from a view's camera, in metres, the mesh draws and casts nothing in that view, fading out across the last FadeWidth of it; 0 leaves only the camera's FarClip. |
+| `LodBias` | `Float` | `1` | 0.01 to 100 |  |  | Multiplies the mesh's screen size before its levels' switch sizes compare it: 2 keeps each finer level until half its switch size, 0.5 switches to coarser levels twice as early. |
+| `ShadowLodOffset` | `UInt32` | `1` | 0 to 4 |  |  | How many levels coarser than its view's level the mesh's shadow draws, clamped to its last level; 0 casts from the drawn level. |
+| `FadeWidth` | `Float` | `0.1` | 0 to 0.5 |  |  | The band around each level switch, and before CullDistance, as a share of the switch size or the distance, across which two levels cross-fade by dither (or the last fades out); 0 switches sharply. |
+
+Script members of `RenderDistance`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `CullDistance` | proxy field | `number` | read/write | All | Beyond this distance from a view's camera, in metres, the mesh draws and casts nothing in that view, fading out across the last FadeWidth of it; 0 leaves only the camera's FarClip. |
+| `FadeWidth` | proxy field | `number` | read/write | All | The band around each level switch, and before CullDistance, as a share of the switch size or the distance, across which two levels cross-fade by dither (or the last fades out); 0 switches sharply. |
+| `LodBias` | proxy field | `number` | read/write | All | Multiplies the mesh's screen size before its levels' switch sizes compare it: 2 keeps each finer level until half its switch size, 0.5 switches to coarser levels twice as early. |
+| `ShadowLodOffset` | proxy field | `number` | read/write | All | How many levels coarser than its view's level the mesh's shadow draws, clamped to its last level; 0 casts from the drawn level. |
+
+## Wind
+
+The scene's wind (one per scene): it bends, sways and flutters the meshes whose material has wind enabled, and scripts read it with Wind:Sample.
+
+- Category: Wind
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene
+- Requires: none
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Direction` | `Vec3` | `[1,0,0]` |  |  |  | Where the wind blows, in world axes; only its horizontal part (X and Z) counts, normalized, and it must not be zero. |
+| `Strength` | `Float` | `5` | 0 to 100 | m/s |  | The steady wind speed, in metres per second; a gale is about 20. |
+| `GustStrength` | `Float` | `3` | 0 to 100 | m/s |  | The speed gusts add to Strength at their peak, in metres per second. |
+| `GustFrequency` | `Float` | `0.2` | 0 to 10 | Hz |  | How many gusts pass a point each second; they travel with the wind, so their wavelength is Strength / GustFrequency. 0 holds the gusts still. |
+| `Turbulence` | `Float` | `0.25` | 0 to 1 |  |  | How much the gusts vary across positions and turn the wind sideways: 0 blows straight and in step everywhere, 1 is most unsteady. |
+
+Script members of `Wind`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Direction` | proxy field | `vector` | read/write | All | Where the wind blows, in world axes; only its horizontal part (X and Z) counts, normalized, and it must not be zero. |
+| `GustFrequency` | proxy field | `number` | read/write | All | How many gusts pass a point each second; they travel with the wind, so their wavelength is Strength / GustFrequency. 0 holds the gusts still. |
+| `GustStrength` | proxy field | `number` | read/write | All | The speed gusts add to Strength at their peak, in metres per second. |
+| `Sample` | method | `(self: Wind, position: vector, time: number?) -> vector` |  | All | Read the wind's velocity, in metres per second, at the world point position and the world time in seconds (the world's clock, Time.GetTime, when time is nil): the steady Strength along the horizontal Direction plus the gusts, which travel with the wind, and Turbulence's sideways part. The same bits in every configuration, so gameplay may use it. |
+| `Strength` | proxy field | `number` | read/write | All | The steady wind speed, in metres per second; a gale is about 20. |
+| `Turbulence` | proxy field | `number` | read/write | All | How much the gusts vary across positions and turn the wind sideways: 0 blows straight and in step everywhere, 1 is most unsteady. |
 
 ## Structs
 

@@ -428,6 +428,7 @@ namespace Engine {
 			const SelectionRenderInputs inputs{ .Snapshot = identity ? &snapshot : &overlaySnapshot,
 				.Draws = &frame.SelectionDraws,
 				.Instances = InstanceBuffer,
+				.Wind = WindConstantsBuffer,
 				.SceneDepth = identity ? Targets.SceneDepth.Get() : OutputTargets.Depth.Get(),
 				.Mask = identity ? Targets.SelectionMask.Get() : OutputTargets.SelectionMask.Get(),
 				.Scratch = identity ? Targets.SelectionScratch.Get() : OutputTargets.SelectionScratch.Get(),

@@ -12,7 +12,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | BatchRequest | `.jsonl` | none | [Schemas/BatchRequest.schema.json](Schemas/BatchRequest.schema.json) |
 | GameManifest | `Game.json` | 2 | [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json) |
 | Graph | `.graph` | 2 | [Schemas/Graph.schema.json](Schemas/Graph.schema.json) |
-| Material | `.material` | 2 | [Schemas/Material.schema.json](Schemas/Material.schema.json) |
+| Material | `.material` | 3 | [Schemas/Material.schema.json](Schemas/Material.schema.json) |
 | Prefab | `.prefab` | 1 | [Schemas/Prefab.schema.json](Schemas/Prefab.schema.json) |
 | Project | `.eproj` | 1 | [Schemas/Project.schema.json](Schemas/Project.schema.json) |
 | Provenance | `Automation/Provenance.json` | 1 | [Schemas/Provenance.schema.json](Schemas/Provenance.schema.json) |
@@ -388,12 +388,12 @@ The kind of a graph field, variable or method parameter or result: its Luau Fiel
 
 A PBR metallic-roughness material (§6.5).
 
-Header: `"Format": "Material", "Version": 2`. Schema: [Schemas/Material.schema.json](Schemas/Material.schema.json).
+Header: `"Format": "Material", "Version": 3`. Schema: [Schemas/Material.schema.json](Schemas/Material.schema.json).
 
 ```json
 {
 	"Format": "Material",
-	"Version": 2,
+	"Version": 3,
 	"BaseColor": [0.9, 0.15, 0.15, 1],
 	"BaseColorMap": null,
 	"BaseColorUVSet": "UV0",
@@ -415,7 +415,14 @@ Header: `"Format": "Material", "Version": 2`. Schema: [Schemas/Material.schema.j
 	"AlphaCutoff": 0.5,
 	"DoubleSided": false,
 	"UVScale": [1, 1],
-	"UVOffset": [0, 0]
+	"UVOffset": [0, 0],
+	"Wind": {
+		"Enabled": false,
+		"Bend": 0.1,
+		"Branch": 0.1,
+		"Flutter": 0.02,
+		"Stiffness": 0.5
+	}
 }
 ```
 
@@ -1060,8 +1067,8 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Environment | `.hdr` | Environment | 2 | `EnvironmentImportSettings` | yes |
 | Font | `.otf` | Font | 5 | `FontImportSettings` | yes |
 | Font | `.ttf` | Font | 5 | `FontImportSettings` | yes |
-| Gltf | `.glb` | Prefab | 3 | `GltfImportSettings` | yes |
-| Gltf | `.gltf` | Prefab | 3 | `GltfImportSettings` | yes |
+| Gltf | `.glb` | Prefab | 4 | `GltfImportSettings` | yes |
+| Gltf | `.gltf` | Prefab | 4 | `GltfImportSettings` | yes |
 | Graph | `.graph` | Script | 1 | none | yes |
 | Heightfield | `.heightfield` | Heightfield | 1 | none | yes |
 | IrradianceVolume | `.irradiance` | IrradianceVolume | 1 | none | yes |

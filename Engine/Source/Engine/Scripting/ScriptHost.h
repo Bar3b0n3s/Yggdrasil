@@ -13,6 +13,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -62,6 +63,15 @@ namespace Engine {
 		bool WorldPaused = false;
 		uint64_t WorldHeldTicks = 0;
 	};
+
+	// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): the world's tick of `frame`, which holds while the world
+	// is paused: the session's tick less the ticks the world pause has held it. The held ticks never exceed the session's (the
+	// world's clock starts with the session's and only falls behind it). Time.GetTick and Time.GetTime, Wind:Sample's default
+	// time and the tasks on the world's clock all read it.
+	[[nodiscard]] inline uint64_t GetWorldTick(const ScriptFrameState& frame)
+	{
+		return frame.Tick - std::min(frame.WorldHeldTicks, frame.Tick);
+	}
 
 	struct ScriptEnvironment
 	{

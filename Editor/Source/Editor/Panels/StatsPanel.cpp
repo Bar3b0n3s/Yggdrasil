@@ -11,6 +11,8 @@
 
 #include <imgui.h>
 
+#include <span>
+
 namespace Engine {
 
 	namespace Utils {
@@ -22,6 +24,17 @@ namespace Engine {
 			ImGui::TextWrapped("%.*s", static_cast<int>(label.size()), label.data());
 			ImGui::TableNextColumn();
 			ImGui::TextWrapped("%.*s", static_cast<int>(value.size()), value.data());
+		}
+
+		// M46: a view's draws per level of detail, "<level 0> / <level 1> / ...", as many as the summary holds ("0" for none).
+		static std::string MeshLodDrawsLabel(std::span<const uint32_t> draws)
+		{
+			if (draws.empty())
+				return "0";
+			std::string label = std::to_string(draws.front());
+			for (const uint32_t count : draws.subspan(1))
+				label += std::format(" / {}", count);
+			return label;
 		}
 
 		static std::string SupportingMemoryLabel(float bytes)
@@ -174,6 +187,9 @@ namespace Engine {
 				Utils::DrawSupportingMetric("Static scenery", std::format("{} items, {} / {} cells", view.StaticItems, view.StaticCellsVisible, view.StaticCells));
 				// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
 				Utils::DrawSupportingMetric("Sky", std::format("{} updates / {} relit volumes", view.SkyUpdates, view.RelitIrradianceVolumes));
+				// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): the draws per level, the items
+				// cross-fading two levels and those beyond their cull distance.
+				Utils::DrawSupportingMetric("Mesh LODs", std::format("{} draws / {} cross-fades / {} distance-culled", Utils::MeshLodDrawsLabel(view.MeshLodDraws), view.LodCrossFades, view.DistanceCulledMeshes));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

@@ -10,7 +10,7 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [2]
+			"enum": [3]
 		},
 		"BaseColor": {
 			"description": "The linear base colour and alpha, multiplied with BaseColorMap.",
@@ -182,8 +182,49 @@
 			],
 			"minItems": 2,
 			"maxItems": 2
+		},
+		"Wind": {
+			"description": "How meshes drawn with the material move in the scene's Wind (Material version 3; disabled by default).",
+			"$ref": "#/$defs/MaterialWind"
 		}
 	},
 	"required": ["Format", "Version"],
-	"additionalProperties": false
+	"additionalProperties": false,
+	"$defs": {
+		"MaterialWind": {
+			"description": "How a material's surface moves in the scene's Wind: its vertices lean, sway and flutter alike in every pass (Material version 3).",
+			"type": "object",
+			"properties": {
+				"Enabled": {
+					"description": "Whether meshes drawn with the material move in the wind; off, they stand still.",
+					"type": "boolean"
+				},
+				"Bend": {
+					"description": "How far the whole plant leans along the wind: about Bend metres at 1 m of height in a 10 m/s wind, growing with the square of the height above its entity's origin. A vertex's _WIND bend mask (w) holds it still.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Branch": {
+					"description": "How far branches sway with the gusts, times the mesh's _WIND branch weight (x).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Flutter": {
+					"description": "How far leaves flutter along their normals, times the mesh's _WIND flutter weight (z): metres at the entity's scale 1, since the flutter moves along the normal through the entity's transform, so it scales with the entity.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 0.25
+				},
+				"Stiffness": {
+					"description": "How much of the wind the plant resists: its response is x (2 - |x|) with x = speed x (1 - Stiffness) / 10 m/s clamped to [-1, 1], so 0 saturates at 10 m/s and 1 never moves. The response scales the lean, the sway and the flutter.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				}
+			},
+			"additionalProperties": false
+		}
+	}
 }

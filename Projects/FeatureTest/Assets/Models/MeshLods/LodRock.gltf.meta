@@ -1,0 +1,48 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "227b7a641d62dd0b",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 4,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false,
+		"AnimationEvents": [],
+		"Lods": "FromGltf",
+		"LodScreenSizes": [0.45, 0.2],
+		"LodTriangleRatios": [0.5, 0.25, 0.125, 0.0625],
+		"LodMaxError": 0.05,
+		"Wind": {
+			"Enabled": false,
+			"Bend": 0.1,
+			"Branch": 0.1,
+			"Flutter": 0.02,
+			"Stiffness": 0.5
+		}
+	},
+	"SubAssets": [
+		{
+			"Key": "material:0:Stone",
+			"Handle": "cbfee86c82fde771",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:Rock0",
+			"Handle": "761ca6714df01b6b",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "mesh:1:Rock1",
+			"Handle": "6ab34c780c38d8b4",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "mesh:2:Rock2",
+			"Handle": "4dffc754cc567559",
+			"Type": "Mesh"
+		}
+	]
+}

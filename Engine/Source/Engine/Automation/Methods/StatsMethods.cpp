@@ -116,6 +116,9 @@ namespace Engine {
 		result.DynamicItems = stats.DynamicItems;
 		result.SkyUpdates = stats.SkyUpdates;
 		result.RelitIrradianceVolumes = stats.RelitIrradianceVolumes;
+		result.MeshLodDraws.assign(stats.MeshLodDraws.begin(), stats.MeshLodDraws.end());
+		result.LodCrossFades = stats.LodCrossFades;
+		result.DistanceCulledMeshes = stats.DistanceCulledMeshes;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -215,7 +218,14 @@ namespace Engine {
 			.Field("relitIrradianceVolumes", &StatsViewSummary::RelitIrradianceVolumes,
 				"The irradiance volumes baked under a Sky (relightable) that the frame relit by its sky, because the sky's image-based "
 				"light was regenerated, its Intensity changed or the volumes' data was copied to the view again; 0 otherwise. Its cost is in "
-				"the pass row ProbeRelight.");
+				"the pass row ProbeRelight.")
+			.Field("meshLodDraws", &StatsViewSummary::MeshLodDraws,
+				"The frame's mesh draws per level of detail, levels 0 to 4 (5 counts): one per submesh and level drawn, a mesh without "
+				"levels counting at level 0 and an item inside a fade band once at each of its two levels.")
+			.Field("lodCrossFades", &StatsViewSummary::LodCrossFades,
+				"Mesh items the frame drew inside a fade band, cross-fading two levels of detail with complementary dither.")
+			.Field("distanceCulledMeshes", &StatsViewSummary::DistanceCulledMeshes,
+				"Mesh items the frame did not draw because the camera is at or beyond their RenderDistance's CullDistance.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

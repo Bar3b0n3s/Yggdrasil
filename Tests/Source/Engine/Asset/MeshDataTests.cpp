@@ -59,6 +59,27 @@ namespace Engine {
 			return quad;
 		}
 
+		// M46 (MeshData version 3): the coloured quad with the wind stream and two further levels: level 1, authored, one
+		// triangle of three vertices of its own (with their attributes and wind weights), switching at 0.5; level 2,
+		// index-only as a generated level is, level 0's first triangle, switching at 0.25.
+		MeshData MakeLodQuad()
+		{
+			MeshData quad = MakeColoredQuad();
+			for (uint8_t index = 0; index < 4; ++index)
+				quad.Wind.push_back({ .Branch = static_cast<uint8_t>(index * 60), .Phase = 17, .Flutter = 255, .BendMask = static_cast<uint8_t>(index == 0 ? 255 : 0) });
+			const glm::vec3 positions[] = { { -0.5f, -0.5f, 0.0f }, { 0.5f, -0.5f, 0.0f }, { 0.0f, 0.5f, 0.0f } };
+			for (size_t index = 0; index < 3; ++index)
+			{
+				quad.LodVertices.push_back({ .Position = positions[index], .Normal = { 0.0f, 0.0f, 1.0f }, .Tangent = { 1.0f, 0.0f, 0.0f, 1.0f } });
+				quad.LodAttributes.push_back({ .TexCoord1 = { 0.5f, 0.5f }, .Color = { 1.0f, 1.0f, 1.0f, 1.0f } });
+				quad.LodWind.push_back({ .Branch = 128, .Phase = 0, .Flutter = 0, .BendMask = 0 });
+			}
+			quad.LodIndices = { 4, 5, 6, 0, 1, 2 };
+			quad.Lods.push_back({ .ScreenSize = 0.5f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 3 } } });
+			quad.Lods.push_back({ .ScreenSize = 0.25f, .Submeshes = { { .IndexOffset = 3, .IndexCount = 3 } } });
+			return quad;
+		}
+
 	}
 
 	TEST_SUITE("Asset")
@@ -91,7 +112,8 @@ namespace Engine {
 		TEST_CASE("MeshData: a version 2 payload round-trips the attribute stream and refuses the reserved bits")
 		{
 			const MeshData quad = MakeColoredQuad();
-			CHECK(MeshData::FormatVersion == 2);
+			// M46: version 3 keeps version 2's layout for a mesh without the wind stream and levels.
+			CHECK(MeshData::FormatVersion == 3);
 			REQUIRE(ValidateMeshData(quad).has_value());
 			CHECK(GetMeshStreams(quad) == MeshStreams::Attributes);
 			const Buffer payload = SerializeMeshPayload(quad);
@@ -117,15 +139,17 @@ namespace Engine {
 			Buffer skinned = payload;
 			skinned[16] = static_cast<std::byte>(std::to_integer<uint32_t>(skinned[16]) | 2U);
 			CHECK_FALSE(DeserializeMeshPayload(skinned).has_value());
-			// So are the Morph bit without its section, a bit no version defines and a non-zero Reserved word, each a Parse
-			// error.
+			// So are the Morph bit without its section, a bit no version defines and, in version 2's Reserved word (M46's
+			// LodCount), more further levels than a mesh may have or a level without its section, each a Parse error.
 			Buffer morphed = payload;
 			morphed[16] = static_cast<std::byte>(std::to_integer<uint32_t>(morphed[16]) | 4U);
 			Buffer unknown = payload;
 			unknown[19] = std::byte{ 0x80 };
 			Buffer reserved = payload;
 			reserved[20] = std::byte{ 1 };
-			for (const Buffer* refused : { &morphed, &unknown, &reserved })
+			Buffer tooManyLevels = payload;
+			tooManyLevels[20] = std::byte{ 5 };
+			for (const Buffer* refused : { &morphed, &unknown, &reserved, &tooManyLevels })
 			{
 				const Result<MeshData> rejected = DeserializeMeshPayload(*refused);
 				REQUIRE_FALSE(rejected.has_value());
@@ -177,6 +201,112 @@ namespace Engine {
 			shortDeltas.MorphTargets[0].Deltas.pop_back();
 			for (const MeshData* invalid : { &outOfRange, &heavy, &shortSkin, &noJoints, &twice, &shortDeltas })
 				CHECK_FALSE(ValidateMeshData(*invalid).has_value());
+		}
+
+		// M46 (MeshData version 3; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3A): the wind section
+		// follows the morph section, flagged by MeshStreams::Wind, and the levels' section follows it, counted by version 2's
+		// Reserved word; level 0 (Vertices, Indices, Submeshes, Bounds) is what version 2 held.
+		TEST_CASE("MeshData: a version 3 payload with levels and a wind stream reads back equal")
+		{
+			const MeshData quad = MakeLodQuad();
+			REQUIRE_MESSAGE(ValidateMeshData(quad).has_value(), ValidateMeshData(quad).error().ToString());
+			CHECK(GetMeshStreams(quad) == (MeshStreams::Attributes | MeshStreams::Wind));
+			const Buffer payload = SerializeMeshPayload(quad);
+			// The attribute stream's 415 bytes, the wind section (4 x 4), the two counts (8), two level records (2 x (4 + 8)),
+			// three level vertices with their attributes and wind (3 x (48 + 24 + 4)) and six level indices (24).
+			CHECK(payload.size() == 415 + 16 + 8 + 24 + 228 + 24);
+			const Result<MeshData> read = DeserializeMeshPayload(payload);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Wind == quad.Wind);
+			CHECK(read->Lods == quad.Lods);
+			CHECK(read->LodVertices == quad.LodVertices);
+			CHECK(read->LodAttributes == quad.LodAttributes);
+			CHECK(read->LodWind == quad.LodWind);
+			CHECK(read->LodIndices == quad.LodIndices);
+			CHECK(read->Vertices == quad.Vertices);
+			CHECK(read->Indices == quad.Indices);
+			CHECK(SerializeMeshPayload(*read) == payload);
+			Result<AssetRef<MeshData>> loaded = LoadCookedMesh(CookMesh(quad, 4));
+			REQUIRE(loaded.has_value());
+			CHECK(SerializeMeshPayload(**loaded) == payload);
+
+			// A mesh with the wind stream and no levels, and one with index-only levels and no stream, read back too.
+			MeshData windOnly = MakeLodQuad();
+			windOnly.Lods.clear();
+			windOnly.LodVertices.clear();
+			windOnly.LodAttributes.clear();
+			windOnly.LodWind.clear();
+			windOnly.LodIndices.clear();
+			MeshData levelsOnly = MakeQuad();
+			levelsOnly.LodIndices = { 0, 1, 2 };
+			levelsOnly.Lods.push_back({ .ScreenSize = 1.0f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 3 } } });
+			for (const MeshData* mesh : { &windOnly, &levelsOnly })
+			{
+				REQUIRE(ValidateMeshData(*mesh).has_value());
+				const Buffer bytes = SerializeMeshPayload(*mesh);
+				const Result<MeshData> again = DeserializeMeshPayload(bytes);
+				REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+				CHECK(SerializeMeshPayload(*again) == bytes);
+			}
+
+			// The level vertices' streams follow the mesh's: wind weights for another count, attributes without the stream,
+			// screen sizes that do not decrease or leave (0, 1], a range per submesh missing, a range of part of a triangle,
+			// a range past the level indices, level vertices of a skinned mesh and a fifth further level each fail validation.
+			MeshData shortWind = MakeLodQuad();
+			shortWind.Wind.pop_back();
+			MeshData shortLevelWind = MakeLodQuad();
+			shortLevelWind.LodWind.pop_back();
+			MeshData strayAttributes = MakeLodQuad();
+			strayAttributes.Attributes.clear();
+			MeshData rising = MakeLodQuad();
+			rising.Lods[1].ScreenSize = 0.5f;
+			MeshData beyondOne = MakeLodQuad();
+			beyondOne.Lods[0].ScreenSize = 1.5f;
+			MeshData zero = MakeLodQuad();
+			zero.Lods[1].ScreenSize = 0.0f;
+			MeshData noRange = MakeLodQuad();
+			noRange.Lods[0].Submeshes.clear();
+			MeshData partial = MakeLodQuad();
+			partial.Lods[0].Submeshes[0].IndexCount = 2;
+			MeshData pastTheEnd = MakeLodQuad();
+			pastTheEnd.Lods[1].Submeshes[0].IndexOffset = 6;
+			MeshData skinned = MakeSkinnedQuad();
+			skinned.LodVertices = MakeLodQuad().LodVertices;
+			skinned.LodAttributes = MakeLodQuad().LodAttributes;
+			skinned.LodIndices = { 4, 5, 6 };
+			skinned.Lods.push_back({ .ScreenSize = 0.5f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 3 } } });
+			MeshData fifth = MakeLodQuad();
+			for (const float size : { 0.125f, 0.0625f, 0.03125f })
+				fifth.Lods.push_back({ .ScreenSize = size, .Submeshes = { { .IndexOffset = 3, .IndexCount = 3 } } });
+			for (const MeshData* invalid : { &shortWind, &shortLevelWind, &strayAttributes, &rising, &beyondOne, &zero, &noRange, &partial, &pastTheEnd,
+					 &skinned, &fifth })
+				CHECK_FALSE(ValidateMeshData(*invalid).has_value());
+		}
+
+		TEST_CASE("MeshData: a payload whose level addresses a vertex beyond the mesh is refused")
+		{
+			// Level index 4 + 3 = 7 is one past the quad's four vertices and the level's three.
+			MeshData beyond = MakeLodQuad();
+			beyond.LodIndices[2] = 7;
+			const Status invalid = ValidateMeshData(beyond);
+			REQUIRE_FALSE(invalid.has_value());
+			CHECK(invalid.error().GetCode() == ErrorCode::Validation);
+
+			// The same index written into a payload is refused by the reader, never read past the vertices: the level
+			// indices are the payload's last bytes, so the third from the end is the one to raise.
+			Buffer payload = SerializeMeshPayload(MakeLodQuad());
+			const size_t third = payload.size() - 4 * sizeof(uint32_t);
+			payload[third] = std::byte{ 7 };
+			const Result<MeshData> refused = DeserializeMeshPayload(payload);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			// An index-only level of a mesh without level vertices may address level 0's last vertex, never one more.
+			MeshData indexOnly = MakeQuad();
+			indexOnly.LodIndices = { 0, 1, 3 };
+			indexOnly.Lods.push_back({ .ScreenSize = 0.5f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 3 } } });
+			CHECK(ValidateMeshData(indexOnly).has_value());
+			indexOnly.LodIndices[2] = 4;
+			CHECK_FALSE(ValidateMeshData(indexOnly).has_value());
 		}
 
 		TEST_CASE("MeshData: attribute colours outside [0, 1] and non-finite attributes fail validation")
@@ -302,14 +432,15 @@ namespace Engine {
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
-		// M23 (C-MESH2): a third of the mutations start from a version 2 payload with the attribute stream, so its section and
-		// the Streams word are mutated too (Docs/Decisions/0034-m23-contract.md decision 19); since C23.3 another third from
-		// the skinned and morphed quad, so they reach the skin and morph sections' counts, joint indices, names and deltas
-		// (decision 24).
+		// M23 (C-MESH2): a share of the mutations start from a version 2 payload with the attribute stream, so its section and
+		// the Streams word are mutated too (Docs/Decisions/0034-m23-contract.md decision 19); since C23.3 another from the
+		// skinned and morphed quad, so they reach the skin and morph sections' counts, joint indices, names and deltas
+		// (decision 24); since M46 another from a version 3 payload with the wind stream and levels, so they reach the wind
+		// section, the LodCount word and the levels' counts, screen sizes, ranges, vertices and indices.
 		TEST_CASE("MeshData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			const std::array<Buffer, 3> payloads = { SerializeMeshPayload(MakeQuad()), SerializeMeshPayload(MakeColoredQuad()),
-				SerializeMeshPayload(MakeSkinnedQuad()) };
+			const std::array<Buffer, 4> payloads = { SerializeMeshPayload(MakeQuad()), SerializeMeshPayload(MakeColoredQuad()),
+				SerializeMeshPayload(MakeSkinnedQuad()), SerializeMeshPayload(MakeLodQuad()) };
 			const Test::FuzzRun run = Test::RunFuzzCase(0x3E54, 10000, [&payloads](Random& random, uint64_t index)
 			{
 				Buffer mutated = payloads[index % payloads.size()];

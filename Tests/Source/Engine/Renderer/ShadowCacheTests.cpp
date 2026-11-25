@@ -6,15 +6,19 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The static shadow cache (M29, Docs/Decisions/0044-m29-light-limits.md decision 4): a shadowed point light whose light and
@@ -28,6 +32,10 @@ namespace Engine {
 		constexpr AssetHandle CacheStripMesh(0x5c29000000000001);
 		constexpr AssetHandle CacheBlendMaterial(0x5c29000000000002);
 		constexpr AssetHandle CacheMaskMaterial(0x5c29000000000003);
+		// M46: a material with wind (every term), the same one with its wind disabled, and the fixture's quad with a level.
+		constexpr AssetHandle CacheWindMaterial(0x5c29000000000004);
+		constexpr AssetHandle CacheStillMaterial(0x5c29000000000005);
+		constexpr AssetHandle CacheLodQuad(0x5c29000000000006);
 
 		// A strip of two quads along +Y facing +Z (1 m wide, 2 m tall), skinned to two joints (the bottom row to joint 0, the
 		// top to joint 1, the middle half to each), with one morph target that pushes the top row 0.5 m along +Z.
@@ -132,6 +140,47 @@ namespace Engine {
 			PublishMaskMaterial(fixture, 0.5f);
 		}
 
+		// M46: the fixture's quad (positions (+-1, +-1, 0), facing +Z) whose level 1, below the screen size 0.3, is its
+		// lower-right triangle.
+		Ref<MeshData> MakeCacheLodQuad()
+		{
+			Ref<MeshData> mesh = CreateRef<MeshData>();
+			mesh->Vertices = {
+				{ .Position = { -1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 1 } },
+				{ .Position = { 1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 1 } },
+				{ .Position = { 1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
+				{ .Position = { -1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
+			};
+			mesh->Indices = { 0, 1, 2, 0, 2, 3 };
+			mesh->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
+			mesh->Submeshes = { { .IndexCount = 6, .Bounds = mesh->Bounds } };
+			mesh->Slots = { {} };
+			mesh->LodIndices = { 0, 1, 2 };
+			mesh->Lods = { { .ScreenSize = 0.3f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 3 } } } };
+			const Status valid = ValidateMeshData(*mesh);
+			REQUIRE_MESSAGE(valid.has_value(), valid.error().ToString());
+			return mesh;
+		}
+
+		// M46: a storm (gusts, turbulence and a direction off the X axis) at a time where every wave is mid-cycle.
+		RenderWind MakeCacheWind()
+		{
+			return { .Enabled = true, .Direction = glm::vec3(1.0f, 0.3f, 0.5f), .Strength = 18.0f, .GustStrength = 9.0f, .GustFrequency = 0.7f, .Turbulence = 1.0f, .Time = 12.345 };
+		}
+
+		void PublishCacheLodWindAssets(Test::SceneRendererIntegrationFixture& fixture)
+		{
+			const MaterialWind wind{ .Enabled = true, .Bend = 0.25f, .Branch = 0.4f, .Flutter = 0.2f, .Stiffness = 0.1f };
+			Ref<MaterialData> swaying = CreateRef<MaterialData>();
+			swaying->Wind = wind;
+			fixture.Assets().Publish(CacheWindMaterial, swaying);
+			Ref<MaterialData> still = CreateRef<MaterialData>();
+			still->Wind = wind;
+			still->Wind.Enabled = false;
+			fixture.Assets().Publish(CacheStillMaterial, still);
+			fixture.Assets().Publish(CacheLodQuad, MakeCacheLodQuad());
+		}
+
 		// One change of the cached scene: what it does and the maps it leaves cached.
 		struct CacheChange
 		{
@@ -141,11 +190,58 @@ namespace Engine {
 			uint32_t CachedSpots = 0;
 		};
 
+		// M46 (the W46.4 review, finding 2): `snapshot` with its unskinned mesh items moved into a static set built as the scene's
+		// RenderStaticCache builds one (each in the cell of its world origin, cells in key order, items in snapshot order, without
+		// a pick id or a previous matrix); a skinned item stays dynamic, as the cache keeps it. A new set each call: the static
+		// casters' signatures do not depend on the set's identity.
+		RenderSnapshot MakeCacheStaticTwin(RenderSnapshot snapshot)
+		{
+			const auto key = [](float coordinate)
+			{
+				return static_cast<int32_t>(std::floor(static_cast<double>(coordinate) / static_cast<double>(StaticCellSize)));
+			};
+			std::map<std::pair<int32_t, int32_t>, Ref<RenderStaticCell>> cells;
+			std::vector<MeshDrawItem> kept;
+			uint64_t version = 0;
+			for (const MeshDrawItem& item : snapshot.Meshes)
+			{
+				if (!item.JointPalette.empty() || !item.MorphWeights.empty())
+				{
+					kept.push_back(item);
+					continue;
+				}
+				Ref<RenderStaticCell>& cell = cells[{ key(item.World[3].x), key(item.World[3].z) }];
+				if (cell == nullptr)
+				{
+					cell = CreateRef<RenderStaticCell>();
+					cell->Key = glm::ivec2(key(item.World[3].x), key(item.World[3].z));
+					cell->Version = ++version;
+				}
+				MeshDrawItem copy = item;
+				copy.PickId = 0;
+				copy.PreviousWorld.reset();
+				cell->Items.push_back(copy);
+				cell->PickTable.push_back(item.Entity);
+			}
+			Ref<RenderStaticSet> set = CreateRef<RenderStaticSet>();
+			for (const auto& entry : cells)
+				set->Cells.push_back(entry.second);
+			set->Version = ++version;
+			snapshot.StaticSet = set;
+			snapshot.Meshes.assign(kept.begin(), kept.end());
+			return snapshot;
+		}
+
 		// For each change: the scene (after `prepare`, when given) drawn afresh and then reused, the change rendered continuing
 		// the history, its cached counts checked, and its image compared with a render of the changed scene without the cache.
+		// M46: with `statics`, every render draws the scene's static twin (MakeCacheStaticTwin).
 		void CheckCacheChanges(Test::SceneRendererIntegrationFixture& fixture, const std::vector<CacheChange>& changes,
-			const std::function<void(RenderSnapshot&)>& prepare = {})
+			const std::function<void(RenderSnapshot&)>& prepare = {}, bool statics = false)
 		{
+			const auto render = [&fixture, statics](const RenderSnapshot& snapshot)
+			{
+				return fixture.Render(statics ? MakeCacheStaticTwin(snapshot) : snapshot);
+			};
 			for (const CacheChange& change : changes)
 			{
 				CAPTURE(change.Name);
@@ -154,23 +250,23 @@ namespace Engine {
 				if (prepare)
 					prepare(base);
 				SetHistory(base, false);
-				static_cast<void>(fixture.Render(base));
+				static_cast<void>(render(base));
 				SetHistory(base, true);
 				++base.FrameIndex;
-				static_cast<void>(fixture.Render(base));
+				static_cast<void>(render(base));
 				REQUIRE(fixture.Renderer().GetRenderStats().CachedPointShadows == 2);
 				REQUIRE(fixture.Renderer().GetRenderStats().CachedSpotShadows == 1);
 
 				RenderSnapshot changed = base;
 				++changed.FrameIndex;
 				change.Apply(changed, fixture);
-				const Image cached = fixture.Render(changed);
+				const Image cached = render(changed);
 				const RenderStats stats = fixture.Renderer().GetRenderStats();
 				CHECK(stats.CachedPointShadows == change.CachedPoints);
 				CHECK(stats.CachedSpotShadows == change.CachedSpots);
 				SetHistory(changed, false);
 				++changed.FrameIndex;
-				CHECK(fixture.Render(changed).Pixels == cached.Pixels);
+				CHECK(render(changed).Pixels == cached.Pixels);
 			}
 		}
 
@@ -342,6 +438,121 @@ namespace Engine {
 				snapshot.Meshes[CasterA].Parameters = { .DissolveAmount = 1.0f };
 				snapshot.Meshes[SkinnedB].Parameters = { .DissolveAmount = 0.5f };
 			});
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E; the W46.2 review, finding 6): a caster's
+		// signature holds its level and, for a wind caster, its wind response and the render's wind. Caster A with a wind
+		// material under a storm: two renders at one wind time reuse every map (each change's base), and a later time draws
+		// light A's map and the spot atlas, which hold it, again, while light B's stays cached; with its material's wind
+		// disabled the moving wind keeps every map. Caster A as a quad with a level (ShadowLodOffset 0, so it casts the view's
+		// level; at 4.27 m its screen size is 0.17): a LodBias that keeps level 0 (4, then 2) keeps the maps, and one that
+		// brings it below its switch size 0.3 (1) draws them again. Each image equals the render without the cache.
+		TEST_CASE("ShadowCache: a wind caster's map draws again as its wind moves and stays cached while it holds, and a caster's new level draws it again")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishCacheAssets(fixture);
+			PublishCacheLodWindAssets(fixture);
+			const auto advance = [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Wind.Time += 0.3;
+			};
+			const auto swaying = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheWindMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			const std::vector<CacheChange> moved = { { "the wind moved on", advance, 1, 0 } };
+			CheckCacheChanges(fixture, moved, swaying);
+
+			const auto still = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheStillMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			const std::vector<CacheChange> calm = { { "the wind moved on past a caster without wind", advance, 2, 1 } };
+			CheckCacheChanges(fixture, calm, still);
+
+			const auto leveled = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Mesh = CacheLodQuad;
+				snapshot.Meshes[CasterA].Distance = { .LodBias = 4.0f, .ShadowLodOffset = 0 };
+			};
+			const std::vector<CacheChange> levels = {
+				{ "a LodBias that keeps the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 2.0f;
+			}, 2, 1 },
+				{ "a LodBias that changes the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 1.0f;
+			}, 1, 0 },
+			};
+			CheckCacheChanges(fixture, levels, leveled);
+		}
+
+		// M46 (the W46.4 review, finding 2): the static path's M29 signatures. The case above with its casters static (their
+		// twin, MakeCacheStaticTwin; the skinned strip stays dynamic): a spot or point face whose visible static casters hold a
+		// wind caster hashes the render's wind, so a later wind time draws light A's map and the spot atlas again while light B's
+		// stays cached, and the moving wind past caster A without wind keeps every map; a static caster's face signature is its
+		// chosen level's, so a LodBias that keeps caster A's level keeps the maps, one that changes it draws them again, and so
+		// does a camera that moves back a metre (its screen size from 0.34 to 0.28 with LodBias 2, below the switch 0.3).
+		TEST_CASE("ShadowCache: a static wind caster's map draws again as its wind moves, and a static caster's new level draws it again")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishCacheAssets(fixture);
+			PublishCacheLodWindAssets(fixture);
+			const auto advance = [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Wind.Time += 0.3;
+			};
+			const auto swaying = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheWindMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			CheckCacheChanges(fixture, { { "the wind moved on", advance, 1, 0 } }, swaying, true);
+
+			const auto still = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Materials = { CacheStillMaterial };
+				snapshot.Wind = MakeCacheWind();
+			};
+			CheckCacheChanges(fixture, { { "the wind moved on past a caster without wind", advance, 2, 1 } }, still, true);
+
+			const auto leveled = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Mesh = CacheLodQuad;
+				snapshot.Meshes[CasterA].Distance = { .LodBias = 4.0f, .ShadowLodOffset = 0 };
+			};
+			const std::vector<CacheChange> levels = {
+				{ "a LodBias that keeps the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 2.0f;
+			}, 2, 1 },
+				{ "a LodBias that changes the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Distance.LodBias = 1.0f;
+			}, 1, 0 },
+			};
+			CheckCacheChanges(fixture, levels, leveled, true);
+
+			const auto near = [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Mesh = CacheLodQuad;
+				snapshot.Meshes[CasterA].Distance = { .LodBias = 2.0f, .ShadowLodOffset = 0 };
+			};
+			const std::vector<CacheChange> moved = {
+				{ "a camera a metre back, which changes the caster's level", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Camera.Position += glm::vec3(0.0f, 0.0f, 1.0f);
+				snapshot.Camera.View = snapshot.Camera.View * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+			}, 1, 0 },
+			};
+			CheckCacheChanges(fixture, moved, near, true);
 		}
 	}
 

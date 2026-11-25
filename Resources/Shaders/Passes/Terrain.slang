@@ -39,6 +39,7 @@
 #include "Shared/ShaderLight.h"
 #include "Shared/TerrainConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Shared/WindConstants.h"
 #include "Common/ClipPlane.slang"
 #include "Common/Shadows.slang"
 
@@ -70,6 +71,8 @@ ConstantBuffer<ProbeConstants> Probes : register(b4, space0);
 StructuredBuffer<float4> IrradianceProbes : register(t13, space0);
 TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
 Texture2D<float> DissolveNoise : register(t16, space0); // M31: the mesh draws' dissolve noise, which the terrain does not read
+// M46: the mesh draws' wind (Shared/WindConstants.h), which the terrain does not read.
+ConstantBuffer<WindConstants> Wind : register(b8, space0);
 // M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Common/Fog.slang), read by PSForward's lit output.
 ConstantBuffer<FogConstants> Fog : register(b5, space0);
 // M42: the mesh draws' planar reflections, which the terrain does not read (it shares the forward set).

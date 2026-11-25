@@ -3,7 +3,9 @@
 // R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is the view's instance record
 // Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it. Vertices are MeshVertex's
 // position and texture coordinates (binding 0, locations 0 and 1) and the attribute stream (M23, C-MESH2: binding 1,
-// locations 2 and 3), which a Mask caster's alpha test reads: the base colour map's UV set and the vertex colour's alpha.
+// locations 2 and 3), which a Mask caster's alpha test reads: the base colour map's UV set and the vertex colour's alpha;
+// and (M46) MeshVertex's normal (binding 0, location 4) and the wind stream (binding 3, location 5), which a wind caster's
+// displacement reads (Common/Wind.slang).
 // The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment shader, which does
 // not read it, leaves it out of its interface, which the validation layer reports (WARNING-Shader-OutputNotConsumed).
 // M31 (Docs/Decisions/0046-m31-material-parameters.md decision 5): the Mask variants, which an Opaque material takes while
@@ -15,11 +17,14 @@
 // M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): instance i of a static draw is the static set's record
 // StaticInstances[InstanceIndices[Draw.FirstInstance + i].Record] (t21 and t22), every record read through
 // Common/Instances.slang, as Scene.slang reads them.
+// M46 (W46.4): a static wind caster's draw carries its material's wind (DrawConstantsWind), which LoadInstanceRecord gives
+// its record, so it sways as a dynamic one; a static caster is never faded (its entry's fade is 0).
 
 #include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/ShadowCasterConstants.h"
+#include "Common/Wind.slang"
 
 #ifndef ALPHA_MASK
 #define ALPHA_MASK 0
@@ -46,6 +51,10 @@ struct VertexInput
 	float2 TexCoord : TEXCOORD0;
 	float2 TexCoord1 : TEXCOORD1;
 	float4 Color : COLOR;
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): MeshVertex's normal and the wind stream
+	// (vertex binding 3), which the wind's displacement reads for an instance with DrawFlagWind.
+	float3 Normal : NORMAL;
+	float4 Wind : WIND;
 };
 
 struct VertexOutput
@@ -68,7 +77,17 @@ VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	VertexOutput output;
 	const uint index = GetInstanceIndex(instance);
-	float4 clip = mul(Caster.ViewProjection, mul(LoadInstanceRecord(index).World, float4(input.Position, 1.0)));
+	const InstanceRecord record = LoadInstanceRecord(index);
+	float4 world = mul(record.World, float4(input.Position, 1.0));
+	// M46: a wind caster's world position is displaced as the camera's passes displace theirs (Common/Wind.slang); a calm wind
+	// adds exactly 0, so its map equals the map without wind. Any other caster keeps its earlier arithmetic.
+	if (HasWind(record.Flags))
+	{
+		world = float4(ApplyWind(GetWindFrame(false), world.xyz, WindTransform(record.World, float4(0.0, 0.0, 0.0, 1.0)).xyz,
+						   WindTransform(record.World, float4(input.Normal, 0.0)).xyz, input.Wind, record.WindResponse),
+			1.0);
+	}
+	float4 clip = mul(Caster.ViewProjection, world);
 #if ALPHA_MASK
 	output.Instance = index;
 #endif

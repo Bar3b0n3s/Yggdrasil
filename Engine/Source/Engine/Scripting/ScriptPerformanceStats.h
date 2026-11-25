@@ -61,6 +61,11 @@ namespace Engine {
 		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: after M43's members): 1 when
 		// the frame regenerated its Sky's image-based light, else 0 (RenderStats::SkyUpdates).
 		uint32_t SkyUpdates = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; ADR 0060's phase-8 ledger: appended after
+		// M45's SkyUpdates): the mesh items the frame drew cross-fading two levels of detail and those it culled by their
+		// RenderDistance's CullDistance (RenderStats' LodCrossFades and DistanceCulledMeshes).
+		uint32_t LodCrossFades = 0;
+		uint32_t DistanceCulledMeshes = 0;
 	};
 
 }

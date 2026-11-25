@@ -63,6 +63,8 @@ namespace Engine {
 		stats.DroppedPlanarReflections = view.DroppedPlanarReflections;
 		stats.StaticCellsVisible = view.StaticCellsVisible; // M43
 		stats.SkyUpdates = view.SkyUpdates;
+		stats.LodCrossFades = view.LodCrossFades;
+		stats.DistanceCulledMeshes = view.DistanceCulledMeshes;
 		if (view.SsrAreaAvailable)
 		{
 			stats.SsrTiles = view.SsrTiles;

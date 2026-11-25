@@ -43,8 +43,9 @@ namespace Engine {
 			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64; phase 8's in train order: M43's Static
 			// (Docs/Decisions/0061-m43-static-scenery.md decision 3) 65, then M44's MassProperties
 			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3) 66 and its WheeledVehicle and VehicleWheel 68, then M45's Sky
-			// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3) 69.
-			static_assert(BuiltinComponents::Size == 69);
+			// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3) 69, then M46's RenderDistance and Wind
+			// (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F) 71.
+			static_assert(BuiltinComponents::Size == 71);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -750,6 +751,8 @@ namespace Engine {
 				// Joints.
 				"WheeledVehicle",
 				"VehicleWheel",
+				"RenderDistance",
+				"Wind",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -761,7 +764,8 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints", "Vehicles" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints", "Vehicles", "RenderDistance",
+				"Wind" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,

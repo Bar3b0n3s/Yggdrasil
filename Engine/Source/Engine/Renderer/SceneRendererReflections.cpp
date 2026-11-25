@@ -229,7 +229,7 @@ namespace Engine {
 		// the plane.
 		const glm::vec4 clipPlane = ComputePlanarReflectionClipPlane(plane);
 		const CameraData cull = MakePlanarReflectionCullCamera(slot.Camera, widened);
-		const Detail::SceneRendererMirrorCull mirror{ .Excluded = reflection.Entity, .ClipPlane = clipPlane };
+		const Detail::SceneRendererMirrorCull mirror{ .Excluded = reflection.Entity, .ClipPlane = clipPlane, .View = &slot.Camera };
 		frame.KeepFirstError(PrepareViewDraws(frame, snapshot, cull, slot.OpaqueDraws, slot.TransparentDraws, &mirror));
 
 		// The light list: the main view's, whose shadow slots and directional index stay valid, then the lights only the mirror
@@ -379,6 +379,7 @@ namespace Engine {
 				// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static records and the view's indices into them.
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 			};
 			auto prepassSet = ViewBindings.GetOrCreate(*Device, prepassDesc, *Pipelines->Layouts.PrepassView);
 			if (prepassSet)

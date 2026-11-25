@@ -1,0 +1,53 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "beb477bf9c3db4e8",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 4,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false,
+		"AnimationEvents": [],
+		"Lods": "FromGltf",
+		"LodScreenSizes": [0.5, 0.25, 0.125, 0.0625],
+		"LodTriangleRatios": [0.5, 0.25, 0.125, 0.0625],
+		"LodMaxError": 0.05,
+		"Wind": {
+			"Enabled": true,
+			"Bend": 0.15,
+			"Branch": 0.2,
+			"Flutter": 0.03,
+			"Stiffness": 0.4
+		}
+	},
+	"SubAssets": [
+		{
+			"Key": "material:0:Bark",
+			"Handle": "cd8eac61cc2f8fc0",
+			"Type": "Material"
+		},
+		{
+			"Key": "material:1:Leaves",
+			"Handle": "5e967f0db847310f",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:Tree",
+			"Handle": "413469381147ad64",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "mesh:1:TreeMid",
+			"Handle": "a671f8556784122b",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "mesh:2:TreeFar",
+			"Handle": "187ce709160e85e9",
+			"Type": "Mesh"
+		}
+	]
+}

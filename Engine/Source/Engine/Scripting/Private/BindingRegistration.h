@@ -152,6 +152,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterJoints(ScriptApiRegistry& api);
 		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the WheeledVehicle and VehicleWheel proxies' methods.
 		[[nodiscard]] Status RegisterVehicles(ScriptApiRegistry& api);
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the Wind proxy's Sample method.
+		[[nodiscard]] Status RegisterWind(ScriptApiRegistry& api);
 
 	}
 

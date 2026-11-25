@@ -4,12 +4,17 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/MeshLod.h"
+#include "Engine/Renderer/MeshWind.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Shared/DrawConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
+#include "Shared/WindConstants.h"
 
 #include <algorithm>
 #include <array>
@@ -53,17 +58,20 @@ namespace Engine {
 			nvrhi::BindingLayoutDesc view;
 			view.visibility = nvrhi::ShaderType::AllGraphics;
 			view.registerSpaceIsDescriptorSet = true;
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the wind at b8.
 			view.bindings = {
 				nvrhi::BindingLayoutItem::PushConstants(0, sizeof(SelectionMaskConstants)),
 				nvrhi::BindingLayoutItem::Texture_SRV(0),
-				nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister)
+				nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
+				nvrhi::BindingLayoutItem::ConstantBuffer(WindConstantsRegister)
 			};
 			PipelineLayoutDescription description{
 				.Name = std::format("SelectionMask{}", variant),
 				.Program = "SelectionMask",
 				.Entries = { "VSMain", "PSMask" },
 				.Permutation = { { "ALPHA_MASK", masked ? "1" : "0" } },
-				.BindingLayouts = { view }
+				.BindingLayouts = { view },
+				.ConstantBuffers = { { .Set = 0, .Register = WindConstantsRegister, .ByteSize = sizeof(WindConstants) } }
 			};
 			if (masked)
 			{
@@ -141,6 +149,8 @@ namespace Engine {
 		ComputePipeline Dilate{};
 		ComputePipeline Composite{};
 		nvrhi::SamplerHandle Sampler{};
+		// M46 (decision 3G): the calm WindConstants the mask's set binds without SelectionRenderInputs::Wind.
+		nvrhi::BufferHandle CalmWind{};
 	};
 
 	SelectionPass::SelectionPass(ConstructionKey /*key*/)
@@ -164,9 +174,12 @@ namespace Engine {
 				nvrhi::VertexAttributeDesc().setName("POSITION").setFormat(nvrhi::Format::RGB32_FLOAT).setOffset(offsetof(MeshVertex, Position)).setElementStride(sizeof(MeshVertex)),
 				nvrhi::VertexAttributeDesc().setName("TEXCOORD").setFormat(nvrhi::Format::RG32_FLOAT).setOffset(offsetof(MeshVertex, TexCoord)).setElementStride(sizeof(MeshVertex))
 			};
-			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask material's alpha test reads.
+			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask material's alpha test reads; M46: MeshVertex's
+			// normal and the wind stream at 4 and 5, which the wind's displacement reads.
 			const std::array<nvrhi::VertexAttributeDesc, 2> stream = Utils::MakeMeshAttributeStreamAttributes();
 			specification.VertexAttributes.insert(specification.VertexAttributes.end(), stream.begin(), stream.end());
+			specification.VertexAttributes.push_back(Utils::MakeMeshNormalAttribute());
+			specification.VertexAttributes.push_back(Utils::MakeMeshWindStreamAttribute());
 			specification.RenderState.rasterState.frontCounterClockwise = true;
 			specification.RenderState.rasterState.cullMode = variant % 3 == 0 ? nvrhi::RasterCullMode::Back
 				: variant % 3 == 1                                            ? nvrhi::RasterCullMode::Front
@@ -180,6 +193,18 @@ namespace Engine {
 		nvrhi::SamplerDesc sampler;
 		sampler.setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Wrap).setMaxAnisotropy(16.0f);
 		ENGINE_TRY_ASSIGN(state.Sampler, device.CreateSampler(sampler));
+		nvrhi::BufferDesc calm;
+		calm.byteSize = sizeof(WindConstants);
+		calm.isConstantBuffer = true;
+		calm.initialState = nvrhi::ResourceStates::ConstantBuffer;
+		calm.keepInitialState = true;
+		calm.debugName = "SelectionPass.CalmWind";
+		ENGINE_TRY_ASSIGN(state.CalmWind, device.CreateBuffer(calm));
+		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle list, device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
+		CommandListRecording recording(device, *list);
+		const WindConstants calmConstants{};
+		list->writeBuffer(state.CalmWind, &calmConstants, sizeof(calmConstants));
+		recording.Execute();
 		return result;
 	}
 
@@ -209,7 +234,7 @@ namespace Engine {
 	}
 
 	SelectionDrawSet SelectionPass::PrepareDraws(GpuResourceCache& cache, const RenderSnapshot& snapshot, bool instancing,
-		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources, std::span<const MeshDrawItem> staticItems)
+		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources, std::span<const MeshDrawItem> staticItems, bool wind)
 	{
 		ENGINE_CORE_ASSERT(sources.empty() || sources.size() == snapshot.Meshes.size(), "the items' vertex sources are none or one per item");
 		SelectionDrawSet set;
@@ -227,13 +252,20 @@ namespace Engine {
 				continue;
 			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
 			const GpuMesh mesh = cache.GetMesh(item.Mesh);
-			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer)
+			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer || !mesh.WindBuffer)
 				continue;
+			// M46 (decision 3E): the level the camera's view draws most of the item's pixels with; nothing beyond its CullDistance.
+			const MeshLodSelection lods = SelectViewMeshLod(mesh.LodScreenSizes, mesh.Bounds, item.World, item.Distance, snapshot.Camera);
+			if (lods.DrawCount == 0)
+				continue;
+			const uint32_t level = lods.Level;
 			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0.0f;
 			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
 			{
 				const GpuSubmesh& submesh = mesh.Submeshes[submeshIndex];
-				if (submesh.IndexCount == 0)
+				const uint32_t indexOffset = level == 0 ? submesh.IndexOffset : submesh.Lods[level - 1].IndexOffset;
+				const uint32_t indexCount = level == 0 ? submesh.IndexCount : submesh.Lods[level - 1].IndexCount;
+				if (indexCount == 0)
 					continue;
 				AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
 				if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot].IsValid())
@@ -247,20 +279,26 @@ namespace Engine {
 				const uint32_t variant = (masked ? 3U : 0U) + (material.DoubleSided ? 2U : (mirrored ? 1U : 0U));
 				set.Draws.push_back({ .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
 					.Attributes = mesh.AttributeBuffer,
+					.Wind = mesh.WindBuffer,
 					.Indices = mesh.IndexBuffer,
-					.IndexOffset = submesh.IndexOffset,
-					.IndexCount = submesh.IndexCount,
+					.IndexOffset = indexOffset,
+					.IndexCount = indexCount,
 					.Variant = variant,
 					.MaterialConstants = masked ? material.Constants : nvrhi::BufferHandle(),
 					.BaseColorMap = masked ? material.BaseColorMap : nvrhi::TextureHandle(),
 					.Instance = static_cast<uint32_t>(instances.size()) });
-				instances.push_back(MakeMeshInstanceRecord(item));
+				// M46 (decision 3G): a draw whose material has wind sways in a scene with a Wind.
+				const bool swaying = wind && material.Wind.Enabled;
+				InstanceRecord record = MakeMeshInstanceRecord(item, swaying ? DrawFlagWind : 0U);
+				record.WindResponse = swaying ? PackWindResponse(material.Wind) : 0U;
+				instances.push_back(record);
 				// Only a Mask draw binds its material: the other draws of one mesh batch whatever their materials.
 				keys.push_back({ .Pipeline = variant,
 					.Material = masked ? materialHandle : AssetHandle(),
 					.Mesh = item.Mesh,
 					.Submesh = submeshIndex,
-					.VertexStream = source.VertexStream });
+					.VertexStream = source.VertexStream,
+					.Lod = level });
 			}
 		}
 		if (instancing)
@@ -303,7 +341,8 @@ namespace Engine {
 				viewDesc.bindings = {
 					nvrhi::BindingSetItem::PushConstants(0, sizeof(SelectionMaskConstants)),
 					nvrhi::BindingSetItem::Texture_SRV(0, inputs.SceneDepth),
-					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, inputs.Instances)
+					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, inputs.Instances),
+					nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, inputs.Wind != nullptr ? inputs.Wind : state.CalmWind.Get())
 				};
 				ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * viewSet, bindings.GetOrCreate(*state.Device, viewDesc, *pipeline.BindingLayouts[0]));
 				nvrhi::GraphicsState graphics;
@@ -324,6 +363,9 @@ namespace Engine {
 				}
 				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(0));
 				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
+				// M46: slot 2 (no attribute reads it) holds the vertices again, since NVRHI binds the slots as one contiguous range.
+				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(Utils::PreviousPositionSlot));
+				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Wind).setSlot(Utils::MeshWindStreamSlot));
 				graphics.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.Indices).setFormat(nvrhi::Format::R32_UINT));
 				commandList.setGraphicsState(graphics);
 				SelectionMaskConstants constants{};

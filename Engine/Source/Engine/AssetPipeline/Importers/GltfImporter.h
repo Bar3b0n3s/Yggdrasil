@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/MaterialData.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
@@ -24,6 +25,18 @@ namespace Engine {
 		float Time = 0.0f;
 	};
 
+	// M46 (GltfImporter version 4; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3B): registry enum
+	// "GltfLodSource", where an imported mesh's further levels of detail come from (MeshData::Lods).
+	enum class GltfLodSource : uint8_t
+	{
+		None,     // no further level: every mesh is its level 0 alone
+		FromGltf, // the levels the file authors: MSFT_lod node extensions, else sibling nodes named <name>_LOD<n>
+		Generate  // levels meshoptimizer generates from level 0 at LodTriangleRatios, index-only
+	};
+
+	// M46: the most further levels the settings give a switch size or a triangle ratio for (MaxMeshLods - 1).
+	inline constexpr size_t MaxGltfLodSettings = 4;
+
 	// Registry struct "GltfImportSettings" (the §6.4 example's settings).
 	struct GltfImportSettings
 	{
@@ -36,6 +49,17 @@ namespace Engine {
 		// is not 1 to MaxAnimationNameBytes bytes of UTF-8, or outside its clip's [0, Duration], fails the import naming it.
 		// Registered after MergeMeshes with version 3, so an earlier .meta reads as no events.
 		std::vector<GltfAnimationEvent> AnimationEvents{};
+		// M46 (version 4; decision 3B), registered after AnimationEvents, so an earlier .meta reads their defaults and no
+		// .meta is rewritten. Lods: where the further levels come from. LodScreenSizes: per further level k + 1 (at most
+		// MaxGltfLodSettings, each in (0, 1], strictly decreasing), the screen size below which it takes over from level k
+		// (an MSFT_lod node's MSFT_screencoverage extras replace them). LodTriangleRatios: per generated level k + 1 (at most
+		// MaxGltfLodSettings, each in (0, 1)), its share of level 0's triangles. LodMaxError: meshoptimizer's error bound,
+		// relative to the mesh's extent. Wind: the wind block of every material the file imports (Material version 3).
+		GltfLodSource Lods = GltfLodSource::None;
+		std::vector<float> LodScreenSizes{ 0.5f, 0.25f, 0.125f, 0.0625f };
+		std::vector<float> LodTriangleRatios{ 0.5f, 0.25f, 0.125f, 0.0625f };
+		float LodMaxError = 0.05f;
+		MaterialWind Wind{};
 	};
 
 	// glTF 2.0 (.gltf, .glb; Architecture §7.4), parsed with cgltf from memory (cgltf_parse, then an overflow-safe bounds
@@ -138,6 +162,34 @@ namespace Engine {
 	//     The skins and clips reference only sub-assets of their own source, so Import.Dependencies gains nothing for them
 	//     (ADR 0028's phase-2 importer-dependency rule holds: every asset outside the source a skin or clip references is
 	//     listed, and there is none).
+	//   - M46 (version 4, MeshData version 3; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3B):
+	//       - _WIND, a glTF application attribute (VEC4 of float, or normalized unsigned byte or short), clamped to [0, 1],
+	//         becomes the mesh's wind stream (MeshData::Wind, MeshVertexWind's x branch, y phase, z flutter, w bend mask);
+	//         in a mesh where some primitives have it, the others' vertices take (0, 0, 0, 0). The Wind setting becomes
+	//         every imported material's wind block;
+	//       - with Lods FromGltf, a node's MSFT_lod extension names its further levels by "ids" (nodes), its extras'
+	//         MSFT_screencoverage, when it is a strictly decreasing list in (0, 1] of at least one value per level, replacing
+	//         LodScreenSizes (level L takes over at its value L - 1); without the extension, sibling nodes named
+	//         <name>_LOD<n> (n from 0, contiguous) form one group, whose _LOD0 node is placed as an entity named <name>.
+	//         A level is the level node's mesh in its own space (the level node's transform is ignored), with Scale
+	//         applied; a level node and its subtree are never placed. The levels belong to level 0's glTF mesh, so every
+	//         node that draws it draws them;
+	//       - with Lods Generate, every mesh (each skin variant, and "mesh:merged") gets the levels meshoptimizer
+	//         simplifies from level 0 at LodTriangleRatios within LodMaxError (AssetPipeline/Private/MeshSimplifier.h),
+	//         index-only, each submesh on its own with its borders locked;
+	//       - a level k (1-based) switches at LodScreenSizes[k - 1], or its screen coverage. A level is dropped with
+	//         ASSET_LOD_INVALID (subject "nodes[<level node>]" for an authored level, "meshes[<i>].lods[<k>]" or
+	//         "mesh:merged.lods[<k>]" for a generated one), the import still succeeding, when its submesh count or a
+	//         submesh's material differs from level 0's; it is a fifth level or later, or the settings give no switch size
+	//         for it; it leaves a gap in the _LOD<n> names; its level node, or its level 0 node, has no mesh; it is an
+	//         authored level of a skinned or morphed mesh, or of a mesh an earlier group already gave levels; it is
+	//         generated and keeps more than 90 % of the triangles of the level before it, or none; or FromGltf meets
+	//         MergeMeshes (the merged mesh has no authored level). ASSET_LOD_INVALID also reports, the import still
+	//         succeeding, an MSFT_lod extension that is not an object with an "ids" array of node indices (subject
+	//         "nodes[<i>].extensions.MSFT_lod", the group ignored), an id out of range, naming its own node or a node of
+	//         another group ("nodes[<i>].extensions.MSFT_lod.ids[<k>]", the id skipped), and an MSFT_screencoverage that
+	//         is not such a list ("nodes[<i>].extras.MSFT_screencoverage", LodScreenSizes used). Without levels and _WIND,
+	//         every mesh's level 0 is version 3's import byte for byte, and sub-asset keys are unchanged.
 	//   Names in keys are the glTF names with every character outside [A-Za-z0-9_-] replaced by '_' (empty: no name part).
 	//
 	// Buffers and images may be embedded (.glb binary chunk, bufferView images), data URIs, or relative external files. The
@@ -168,7 +220,8 @@ namespace Engine {
 	// Warnings (ImportResult::Diagnostics, so they persist in the cache manifest): ASSET_UNSUPPORTED_UV_SET for a texture
 	// bound to TEXCOORD_2 or a later set (ignored: meshes have two UV sets), ASSET_TANGENTS_APPROXIMATED, and
 	// ASSET_CONTENT_SKIPPED with the skipped item as Subject ("meshes[1].primitives[0]", "skins[0]", "animations[0]",
-	// "animations[0].channels[1]", "nodes[2].skin", "cameras[0]", "KHR_lights_punctual.lights[0]"). Version 2 no longer
+	// "animations[0].channels[1]", "nodes[2].skin", "cameras[0]", "KHR_lights_punctual.lights[0]"), and (version 4)
+	// ASSET_LOD_INVALID for each dropped level (above). Version 2 no longer
 	// produces ASSET_VERTEX_COLORS_IGNORED: COLOR_0 is imported (the code stays, never reused;
 	// ProjectValidator::GetRetiredCodes).
 	class GltfImporter final : public IAssetImporter
@@ -176,8 +229,10 @@ namespace Engine {
 	public:
 		static constexpr std::string_view Id = "Gltf";
 		// M23: version 2 imports TEXCOORD_1 and COLOR_0 (MeshData version 2) and each map's UV set (Material version 2);
-		// version 3 (C23.3, ADR 0028's phase-2 ledger) skins, animations and morph targets, and the AnimationEvents setting.
-		static constexpr uint32_t Version = 3;
+		// version 3 (C23.3, ADR 0028's phase-2 ledger) skins, animations and morph targets, and the AnimationEvents setting;
+		// version 4 (M46) levels of detail, _WIND and the Lods, LodScreenSizes, LodTriangleRatios, LodMaxError and Wind
+		// settings (MeshData and Material version 3).
+		static constexpr uint32_t Version = 4;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }
@@ -197,7 +252,8 @@ namespace Engine {
 		// URI, naming it as written.
 		[[nodiscard]] static Result<std::vector<std::string>> ListExternalUris(std::span<const std::byte> source);
 
-		// Registers GltfAnimationEvent and GltfImportSettings.
+		// Registers GltfAnimationEvent, GltfLodSource and GltfImportSettings (with a Validate rule for the level settings), and
+		// MaterialWind when the registry has no such struct yet (RegisterMaterialWindType).
 		static void RegisterTypes(TypeRegistry& registry);
 	};
 

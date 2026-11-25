@@ -242,6 +242,9 @@ namespace Engine {
 			SkyLightInvalidCode,
 			SkyEnvironmentIgnoredCode,
 			ProbeNotRelightableCode,
+			// M46 (Asset/AssetDiagnostic.h, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I), appended in
+			// train order after M45's codes (ADR 0060's phase-8 ledger), an import diagnostic beside the other ASSET_* codes.
+			AssetLodInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -255,7 +258,7 @@ namespace Engine {
 				"Several cameras of one scene are Primary, but a scene renders through exactly one.",
 				"Clear Primary on all but one camera; the fix keeps the first Primary camera in scene order." },
 			ValidationCodeInfo{ SceneDuplicateUniqueComponentCode, "Error", false,
-				"A scene file holds more than one component that is unique per scene (Environment, PostProcess, Sky).",
+				"A scene file holds more than one component that is unique per scene (Environment, PostProcess, Sky, Fog, Navigation, Wind).",
 				"Open the scene with scene.open {repair: true}, which keeps the first in canonical order, then scene.save." },
 			ValidationCodeInfo{ SceneNonCanonicalOrderCode, "Warning", false,
 				"A scene file lists a child entity before its parent, which is not the canonical order.",
@@ -550,6 +553,17 @@ namespace Engine {
 				"relightable IrradianceVolume: the sky does not relight it, so it keeps its bake's light as the sun turns.",
 				"Bake the scene's lighting under its Sky with lighting.bake (the editor's Bake Lighting), with an IrradianceVolume around each "
 				"ReflectionProbe, then save the scene." },
+			ValidationCodeInfo{ AssetLodInvalidCode, "Warning", false,
+				"The glTF importer dropped a level of detail, the import still succeeding: an authored level whose submesh count or materials differ "
+				"from level 0's, a fifth level or later (or one the LodScreenSizes setting gives no switch size), a gap in the <name>_LOD<n> names, a "
+				"level node or level 0 node without a mesh, an authored level of a skinned or morphed mesh or of a mesh an earlier group already gave "
+				"levels, a generated level that keeps more than 90 % of the triangles before it or none, or authored levels under MergeMeshes. An "
+				"MSFT_lod extension that is not an object with an \"ids\" array of node indices, an id out of range or naming its own node or a node of "
+				"another group, and an MSFT_screencoverage that is not decreasing screen sizes are reported under it too, the rest of the file still "
+				"importing. The subject names the level node, the generated level, or the extension or id.",
+				"Author each level with level 0's primitives and materials, number <name>_LOD0, _LOD1, ... without gaps, at most four after level 0; "
+				"author a skinned mesh's or a leaf card tree's far levels instead of generating them (or Generate with a larger LodMaxError), then "
+				"reimport." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -578,6 +592,8 @@ namespace Engine {
 			AssetUnsupportedUvSetCode,
 			AssetVertexColorsIgnoredCode,
 			AssetContentSkippedCode,
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I).
+			AssetLodInvalidCode,
 		};
 
 		constexpr std::string_view FixLabel = "Fix Validation Issues";

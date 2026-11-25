@@ -26,25 +26,29 @@
 // screen) and a double-sided material CullNone. The forward variants exist once per debug view, specialized with the
 // view's value (SceneDebugViewConstantId); a debug view shares its Lit variant's layout description.
 //
+// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): every variant also binds vertex binding 3
+// (MeshWindStreamSlot), WIND (R8G8B8A8_UNORM, the mesh's MeshVertexWind stream or the cache's shared zero stream) after the
+// attribute stream's locations (6 in VSMain and VSPrepass; the overdraw variants bind NORMAL and WIND at 4 and 5).
 // M26 (C26.1, R-TAA-VEL; Docs/Decisions/0037-m26-contract.md decisions 11 and 14; stream X-C): the 12 prepass and picking
 // prepass variants also bind vertex binding 2 (PreviousPositionSlot): PREVIOUSPOSITION (RGB32_FLOAT at offset 0, stride 16,
-// location 6), a deformed item's previous positions (SkinningPass::GetPreviousPositionsDesc's float4 elements), which the
+// location 7 since M46's WIND took 6), a deformed item's previous positions (SkinningPass::GetPreviousPositionsDesc's float4 elements), which the
 // motion vectors read for an instance with DrawFlagPreviousPositions; any other draw binds its own vertex buffer there,
 // which the shaders never read as positions (the flag is clear) and whose every fetch stays inside it (a MeshVertex is 48
 // bytes, the binding's stride 16).
 //
 // Binding layouts (§8.4), shared through PipelineFactory::CreateBindingLayouts so one binding set serves every variant:
-//   - prepass set 0: b0 ViewConstants, t5 BRDFLut, t10 Instances, t16 the dissolve noise (M31), s0 LinearClamp, s2 AnisoWrap
-//     and the DrawConstants push constants (M26: the DFG LUT and its sampler for SceneRoughness's specular inputs);
+//   - prepass set 0: b0 ViewConstants, t5 BRDFLut, t10 Instances, t16 the dissolve noise (M31), b8 WindConstants (M46), s0
+//     LinearClamp, s2 AnisoWrap and the DrawConstants push constants (M26: the DFG LUT and its sampler for SceneRoughness's
+//     specular inputs);
 //   - overdraw set 0 (the Overdraw data view's pipelines, M26: the prepass's before M26): b0 ViewConstants, t10 Instances,
-//     s2 AnisoWrap and the push constants;
+//     b8 WindConstants (M46), s2 AnisoWrap and the push constants;
 //   - forward set 0: b0 ViewConstants, b1 ShadowConstants, b2 EnvironmentConstants, b3 LightClusterConstants, b4
 //     ProbeConstants (M26), b5 FogConstants (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 5), t0 Lights, t1 ShadowCascades, t2 ShadowAtlas, t3 EnvSpecular, t5 BRDFLut, t6 AmbientOcclusion,
 //     t8 ViewDepth, t9 SceneNormals, t10 Instances, t11 the light cluster masks (M23, Renderer/LightClusterPass.h), t12
 //     PointShadowMaps, t13 the irradiance volumes' coefficients and t14 the reflection probes' cubes (M26), t15
 //     PointShadowMapsHalf (M29), t16 the dissolve noise (M31), b7 PlanarReflectionConstants and t17 to t20 the planar
-//     reflections' images (M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3), s0 LinearClamp, s1 ShadowCompare,
-//     s2 AnisoWrap and the push constants;
+//     reflections' images (M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3), b8 WindConstants (M46), s0
+//     LinearClamp, s1 ShadowCompare, s2 AnisoWrap and the push constants;
 //   - set 1 (every variant): b0 MaterialConstants and t0..t4 the base colour, metallic-roughness, normal, occlusion and
 //     emissive maps.
 
@@ -111,6 +115,11 @@ namespace Engine {
 		// program's, after their earlier items; the Terrain program declares them unread, since it shares the forward set.
 		inline constexpr uint32_t StaticInstancesRegister = 21;
 		inline constexpr uint32_t InstanceIndicesRegister = 22;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's WindConstants
+		// (Shared/WindConstants.h) at b8 of set 0 in the prepass, overdraw and forward layouts, as in the Shadow and
+		// SelectionMask programs' (Renderer/ShadowPass.h, Renderer/SelectionPass.h), so Common/Wind.slang declares one register.
+		// The Terrain program declares it unread, since it shares the forward set.
+		inline constexpr uint32_t WindConstantsRegister = 8;
 		inline constexpr uint32_t LinearClampRegister = 0;
 		inline constexpr uint32_t ShadowCompareRegister = 1;
 		inline constexpr uint32_t AnisoWrapRegister = 2;
@@ -141,6 +150,14 @@ namespace Engine {
 		// M26 (stream X-C): vertex binding 2 of the prepass and picking prepass variants (see the file comment).
 		inline constexpr uint32_t PreviousPositionSlot = 2;
 		inline constexpr uint32_t PreviousPositionStride = 16;
+		// M46 (decision 3G): vertex binding 3 of every mesh-drawing pipeline (the Scene program's 24, the debug views', the
+		// six shadow casters and the six selection masks), the mesh's wind stream (GpuMesh::WindBuffer, 4-byte
+		// MeshVertexWind): WIND (R8G8B8A8_UNORM, offset 0), after every other attribute of binding 0 and 1 a pipeline reads.
+		inline constexpr uint32_t MeshWindStreamSlot = 3;
+		[[nodiscard]] nvrhi::VertexAttributeDesc MakeMeshWindStreamAttribute();
+		// M46 (decision 3G): MeshVertex's NORMAL (RGB32_FLOAT) from binding 0, which the wind's displacement reads in the
+		// pipelines that bind no other normal (the overdraw variants, the shadow casters and the selection masks).
+		[[nodiscard]] nvrhi::VertexAttributeDesc MakeMeshNormalAttribute();
 
 		// The cull mode of a draw: CullNone for a double-sided material, else CullFront for a mirroring world, else CullBack.
 		[[nodiscard]] MeshCullMode SelectCullMode(bool mirrored, bool doubleSided);

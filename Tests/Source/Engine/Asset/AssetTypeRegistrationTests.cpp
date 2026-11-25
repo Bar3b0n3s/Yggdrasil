@@ -34,10 +34,10 @@ namespace Engine {
 			registry.Freeze();
 			const StructInfo* material = registry.FindStruct<MaterialData>();
 			REQUIRE(material != nullptr);
-			// M23 (Material version 2): each map's UV set follows its map.
+			// M23 (Material version 2): each map's UV set follows its map. M46 (version 3): the Wind block follows UVOffset.
 			const std::vector<std::string> expected = { "BaseColor", "BaseColorMap", "BaseColorUVSet", "Metallic", "Roughness", "MetallicRoughnessMap",
 				"MetallicRoughnessUVSet", "NormalMap", "NormalUVSet", "NormalScale", "OcclusionMap", "OcclusionUVSet", "OcclusionStrength", "Emissive",
-				"EmissiveStrength", "EmissiveMap", "EmissiveUVSet", "AlphaMode", "AlphaCutoff", "DoubleSided", "UVScale", "UVOffset" };
+				"EmissiveStrength", "EmissiveMap", "EmissiveUVSet", "AlphaMode", "AlphaCutoff", "DoubleSided", "UVScale", "UVOffset", "Wind" };
 			std::vector<std::string> names;
 			for (const Scope<FieldInfo>& field : material->GetFields())
 				names.push_back(field->GetName());

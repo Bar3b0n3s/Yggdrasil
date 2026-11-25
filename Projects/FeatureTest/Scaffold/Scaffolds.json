@@ -637,6 +637,41 @@
 			]
 		},
 		{
+			"File": "MeshLods.jsonl",
+			"IdSeed": 4301,
+			"Renderer": "none"
+		},
+		{
+			"File": "Wind.jsonl",
+			"IdSeed": 4302,
+			"Renderer": "none"
+		},
+		{
+			"File": "WindReplay.jsonl",
+			"IdSeed": 4303,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenMeshLods.jsonl",
+			"IdSeed": 4304,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenMeshLods",
+				"Assets/Models/GoldenMeshLods",
+				"Assets/Scenes/GoldenMeshLods"
+			]
+		},
+		{
+			"File": "GoldenWind.jsonl",
+			"IdSeed": 4305,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenWind",
+				"Assets/Models/GoldenWind",
+				"Assets/Scenes/GoldenWind"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

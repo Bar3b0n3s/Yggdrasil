@@ -94,6 +94,12 @@ namespace Engine {
 		// rows): RenderStats::SkyUpdates and RelitIrradianceVolumes.
 		uint32_t SkyUpdates = 0;
 		uint32_t RelitIrradianceVolumes = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; ADR 0060's phase-8 ledger: appended after
+		// M43's and M45's fields): RenderStats::MeshLodDraws (one count per level, 0 to MaxMeshLods - 1), LodCrossFades and
+		// DistanceCulledMeshes.
+		std::vector<uint32_t> MeshLodDraws{};
+		uint32_t LodCrossFades = 0;
+		uint32_t DistanceCulledMeshes = 0;
 	};
 
 	struct StatsGetResult

@@ -90,6 +90,7 @@ group "Dependencies"
 	include "Vendor/tinyexr"
 	include "Vendor/Recast"
 	include "Vendor/Detour"
+	include "Vendor/meshoptimizer"
 
 group "Engine"
 	include "Engine"

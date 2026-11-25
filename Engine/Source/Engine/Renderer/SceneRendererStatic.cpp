@@ -1,9 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/MeshLod.h"
+#include "Engine/Renderer/MeshWind.h"
 #include "Engine/Renderer/PlanarReflections.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/SceneRendererState.h"
@@ -11,11 +14,15 @@
 #include "Engine/Renderer/RenderStaticDraws.h"
 #include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/ShadowPass.h"
+#include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"
 
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -37,6 +44,12 @@
 // InstanceIndices; each shadow face does the same with the casters (PrepareStaticShadows, ShadowPass::PrepareStaticFaces).
 // The tests are the dynamic path's own, so a scene renders the same pixels with its scenery static and without; only the
 // order of exactly coplanar instances of one key can differ, since static instances follow cell order, then item order.
+// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E and its W46.4 record): a prepared cell holds
+// each draw's keys at every level of its mesh (unfaded and fading), so a view chooses each visible item's levels as
+// PrepareViewDraws does (SelectViewMeshLod) and writes its signed fade into the item's InstanceIndices entries
+// (InstanceIndex::Reserved); a cell beyond every item's CullDistance is culled by distance before its items; a key carries
+// its material's wind, which its draws push (DrawConstantsWind) in a render with a Wind, so the static records hold nothing
+// from a material; and the casters choose their levels per face (ShadowPass::PrepareStaticFaces).
 
 namespace Engine {
 
@@ -53,6 +66,36 @@ namespace Engine {
 		{
 			const ShadowBox box = ComputeShadowCasterBox(bounds, world);
 			return Aabb{ .Min = box.Centre - box.HalfExtent, .Max = box.Centre + box.HalfExtent };
+		}
+
+		// M46 (W46.4): whether every drawable item of `cell` lies at or beyond its CullDistance from `position` (the view's level
+		// camera's), so SelectViewMeshLod culls each by distance: the distance from `position` to the box of their level spheres'
+		// centres, in double, clears the cell's largest CullDistance by a margin above the per-item test's single-precision
+		// rounding (a ten-thousandth of it and a millimetre). A cell this does not settle is measured item by item.
+		[[nodiscard]] static bool IsStaticCellBeyondCullDistance(const Detail::SceneRendererStaticCell& cell, const glm::vec3& position)
+		{
+			if (cell.DrawableItems == 0 || !std::isfinite(cell.MaxCullDistance) || cell.Centres.IsEmpty())
+				return false;
+			double squared = 0.0;
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				const double value = position[axis];
+				const double below = static_cast<double>(cell.Centres.Min[axis]) - value;
+				const double above = value - static_cast<double>(cell.Centres.Max[axis]);
+				const double gap = std::max({ below, above, 0.0 });
+				squared += gap * gap;
+			}
+			const double reach = static_cast<double>(cell.MaxCullDistance) * 1.0001 + 0.001;
+			return squared >= reach * reach;
+		}
+
+		// M46 (the W46.4 review, finding 3): the levels `camera` draws of static item `item`: SelectViewMeshLod's, or, unmeasured,
+		// level 0 unfaded for an item without levels or CullDistance, which is what SelectViewMeshLod gives such an item.
+		[[nodiscard]] static MeshLodSelection SelectStaticItemLod(const Detail::SceneRendererStaticItem& item, const CameraData& camera)
+		{
+			if (item.LodCount == 0 && !(item.Distance.CullDistance > 0.0f))
+				return MeshLodSelection{ .DrawCount = 1 };
+			return SelectViewMeshLod(std::span<const float>(item.LodScreenSizes.data(), item.LodCount), item.MeshBounds, item.World, item.Distance, camera);
 		}
 
 		// Whether the mesh of mirror `mesh` deforms an item that sets no morph weight: it has morph targets with a default weight
@@ -166,8 +209,7 @@ namespace Engine {
 		prepared.Cell = cell;
 		std::set<AssetHandle> meshesSeen;
 		std::set<AssetHandle> materialsSeen;
-		std::vector<ShadowCasterDraw> casterDraws;
-		std::vector<RenderStaticDrawKey> casterKeys;
+		std::vector<StaticCasterDraw> casterDraws;
 		// A key interned holds the current mirrors' objects, which every cell of the key then shares, and counts one more use.
 		const auto internKey = [this](const Detail::SceneRendererStaticKey& key)
 		{
@@ -221,7 +263,7 @@ namespace Engine {
 			const GpuMesh& mirror = Cache->GetMesh(item.Mesh);
 			if (meshesSeen.insert(item.Mesh).second)
 				prepared.Meshes.push_back({ .Handle = item.Mesh, .Version = mirror.Version, .Vertices = mirror.VertexBuffer });
-			if (mirror.VertexBuffer == nullptr || mirror.AttributeBuffer == nullptr || mirror.IndexBuffer == nullptr)
+			if (mirror.VertexBuffer == nullptr || mirror.AttributeBuffer == nullptr || mirror.IndexBuffer == nullptr || mirror.WindBuffer == nullptr)
 			{
 				prepared.Items.push_back(entry); // not even the placeholder could be created (reported by the cache)
 				continue;
@@ -229,8 +271,24 @@ namespace Engine {
 			const nvrhi::BufferHandle vertices = mirror.VertexBuffer;
 			const nvrhi::BufferHandle attributes = mirror.AttributeBuffer;
 			const nvrhi::BufferHandle indices = mirror.IndexBuffer;
+			const nvrhi::BufferHandle wind = mirror.WindBuffer;
 			const std::vector<GpuSubmesh> submeshes = mirror.Submeshes;
 			const std::vector<AssetHandle> defaults = mirror.DefaultMaterials;
+			// M46 (W46.4): what chooses the item's levels in a view, and its level sphere's centre for the cell's distance cull.
+			entry.Drawable = true;
+			entry.LodCount = static_cast<uint32_t>(std::min<size_t>(mirror.LodScreenSizes.size(), entry.LodScreenSizes.size()));
+			std::copy_n(mirror.LodScreenSizes.begin(), entry.LodCount, entry.LodScreenSizes.begin());
+			entry.MeshBounds = mirror.Bounds;
+			entry.Distance = item.Distance;
+			++prepared.DrawableItems;
+			prepared.Centres.Extend(ComputeMeshLodSphere(entry.MeshBounds, item.World).Center);
+			if (item.Distance.CullDistance > 0.0f)
+			{
+				++prepared.DistanceItems;
+				prepared.MaxCullDistance = std::max(prepared.MaxCullDistance, item.Distance.CullDistance);
+			}
+			else
+				prepared.MaxCullDistance = std::numeric_limits<float>::infinity();
 			// Decision 1's limit (the W43.2 record): the static path does not deform, and whether an item morphs depends on its
 			// mesh, which extraction never reads, so an item of a mesh that morphs by its default weights draws undeformed.
 			if (Utils::MorphsByDefault(mirror) && StaticMorphLogged.insert(item.Entity).second)
@@ -253,19 +311,41 @@ namespace Engine {
 					prepared.MaterialGenerations.push_back({ .Handle = materialHandle, .Version = material.Generation });
 				}
 				// PrepareViewDraws' variants: M31's Mask variants for a dissolving or fading Opaque material, the cull mode of the
-				// world matrix's mirroring and the material's sides.
-				const AlphaMode mode = SelectMeshAlphaMode(material.AlphaMode, item.Parameters, false);
+				// world matrix's mirroring and the material's sides. M46 (W46.4): one key per level (its index range) and per
+				// fade state (a fading level of an Opaque material draws with the Mask variants), and the material's wind.
 				const Utils::MeshCullMode cullMode = Utils::SelectCullMode(mirrored, material.DoubleSided);
-				const bool blend = mode == AlphaMode::Blend;
-				const Detail::SceneRendererStaticKey key{ .Key = { .Pipeline = Utils::GetForwardVariant(mode, cullMode), .Material = materialHandle, .Mesh = item.Mesh, .Submesh = submeshIndex },
-					.VertexBuffer = vertices,
-					.AttributeBuffer = attributes,
-					.IndexBuffer = indices,
-					.IndexOffset = submesh.IndexOffset,
-					.IndexCount = submesh.IndexCount,
-					.PrepassVariant = blend ? 0U : Utils::GetPrepassVariant(mode, cullMode),
-					.Blend = blend };
-				prepared.Draws.push_back({ .Key = internKey(key), .Submesh = submeshIndex, .Bounds = submesh.Bounds });
+				const bool windy = material.Wind.Enabled;
+				const uint32_t windResponse = windy ? PackWindResponse(material.Wind) : 0U;
+				Detail::SceneRendererStaticDraw draw{ .Levels = 1 + entry.LodCount, .Submesh = submeshIndex, .Bounds = submesh.Bounds };
+				draw.Keys.fill(Detail::NoStaticDrawKey);
+				draw.FadeKeys.fill(Detail::NoStaticDrawKey);
+				for (uint32_t level = 0; level < draw.Levels; ++level)
+				{
+					const uint32_t indexOffset = level == 0 ? submesh.IndexOffset : submesh.Lods[level - 1].IndexOffset;
+					const uint32_t indexCount = level == 0 ? submesh.IndexCount : submesh.Lods[level - 1].IndexCount;
+					if (indexCount == 0)
+						continue;
+					for (const bool fading : { false, true })
+					{
+						const AlphaMode mode = SelectMeshAlphaMode(material.AlphaMode, item.Parameters, false, fading ? 1.0f : 0.0f);
+						const bool blend = mode == AlphaMode::Blend;
+						const Detail::SceneRendererStaticKey key{
+							.Key = { .Pipeline = Utils::GetForwardVariant(mode, cullMode), .Material = materialHandle, .Mesh = item.Mesh, .Submesh = submeshIndex, .Lod = level },
+							.VertexBuffer = vertices,
+							.AttributeBuffer = attributes,
+							.IndexBuffer = indices,
+							.IndexOffset = indexOffset,
+							.IndexCount = indexCount,
+							.PrepassVariant = blend ? 0U : Utils::GetPrepassVariant(mode, cullMode),
+							.Blend = blend,
+							.WindBuffer = wind,
+							.Wind = windy,
+							.WindResponse = windResponse
+						};
+						(fading ? draw.FadeKeys : draw.Keys)[level] = internKey(key);
+					}
+				}
+				prepared.Draws.push_back(draw);
 				++prepared.SubmeshCount;
 				if (submesh.Bounds.IsEmpty())
 					prepared.Unbounded = true;
@@ -275,34 +355,62 @@ namespace Engine {
 			entry.DrawCount = static_cast<uint32_t>(prepared.Draws.size()) - entry.FirstDraw;
 			prepared.Items.push_back(entry);
 
-			// The item's shadow casters, by PrepareCasters' rule (their keys and M29 signatures fixed for the cell's version).
-			casterDraws.clear();
-			casterKeys.clear();
-			ShadowPass::AppendStaticItemCasters(*Cache, item, casterDraws, casterKeys);
-			for (size_t caster = 0; caster < casterDraws.size(); ++caster)
+			// The item's shadow casters, by PrepareCasters' rule (their keys and M29 signatures fixed for the cell's version). M46
+			// (W46.4): level 0's draws make the casters, each further level's draws give their submesh's caster its key and
+			// signature there; a face chooses the level (ShadowPass::PrepareStaticFaces).
+			const size_t firstCaster = prepared.Casters.size();
+			for (uint32_t level = 0; level <= entry.LodCount; ++level)
 			{
-				const ShadowCasterDraw& draw = casterDraws[caster];
-				const StaticShadowKey key{ .Key = casterKeys[caster],
-					.Vertices = draw.Vertices,
-					.Attributes = draw.Attributes,
-					.Indices = draw.Indices,
-					.IndexOffset = draw.IndexOffset,
-					.IndexCount = draw.IndexCount,
-					.Variant = draw.Variant,
-					.ReflectedVariant = draw.ReflectedVariant,
-					.MaterialConstants = draw.MaterialConstants,
-					.BaseColorMap = draw.BaseColorMap };
-				const ShadowBox casterShadowBox = ComputeShadowCasterBox(draw.Bounds, draw.World);
-				prepared.Casters.push_back({ .Key = internCasterKey(key),
-					.Item = itemIndex,
-					.Bounds = draw.Bounds,
-					.World = draw.World,
-					.Box = casterShadowBox,
-					.Signature = draw.Signature });
-				if (draw.Bounds.IsEmpty())
-					prepared.CastersUnbounded = true;
-				else
-					casterBox.Extend(Aabb{ .Min = casterShadowBox.Centre - casterShadowBox.HalfExtent, .Max = casterShadowBox.Centre + casterShadowBox.HalfExtent });
+				casterDraws.clear();
+				ShadowPass::AppendStaticItemCasters(*Cache, item, level, casterDraws);
+				for (const StaticCasterDraw& caster : casterDraws)
+				{
+					const ShadowCasterDraw& draw = caster.Draw;
+					const StaticShadowKey key{ .Key = caster.Key,
+						.Vertices = draw.Vertices,
+						.Attributes = draw.Attributes,
+						.Indices = draw.Indices,
+						.IndexOffset = draw.IndexOffset,
+						.IndexCount = draw.IndexCount,
+						.Variant = draw.Variant,
+						.ReflectedVariant = draw.ReflectedVariant,
+						.MaterialConstants = draw.MaterialConstants,
+						.BaseColorMap = draw.BaseColorMap,
+						.Wind = draw.Wind,
+						.WindCaster = caster.Wind,
+						.WindResponse = caster.WindResponse };
+					if (level != 0)
+					{
+						// The submesh's caster from level 0: a submesh casts at every level or none (its material decides), and has
+						// a level-0 caster wherever it has indices there.
+						const auto owner = std::find_if(prepared.Casters.begin() + static_cast<std::ptrdiff_t>(firstCaster), prepared.Casters.end(),
+							[this, &caster](const StaticShadowCaster& candidate)
+						{
+							return StaticCasterKeys[candidate.Key].Key.Submesh == caster.Key.Submesh;
+						});
+						ENGINE_CORE_ASSERT(owner != prepared.Casters.end(), "a static caster's further level must have its level 0");
+						if (owner != prepared.Casters.end())
+							owner->Levels[level - 1] = { .Key = internCasterKey(key), .Signature = draw.Signature };
+						continue;
+					}
+					const ShadowBox casterShadowBox = ComputeShadowCasterBox(draw.Bounds, draw.World);
+					StaticShadowCaster made{ .Key = internCasterKey(key),
+						.Item = itemIndex,
+						.Bounds = draw.Bounds,
+						.World = draw.World,
+						.Box = casterShadowBox,
+						.Signature = draw.Signature,
+						.LodScreenSizes = entry.LodScreenSizes,
+						.LodCount = entry.LodCount,
+						.MeshBounds = entry.MeshBounds,
+						.Distance = entry.Distance,
+						.Wind = caster.Wind };
+					prepared.Casters.push_back(made);
+					if (draw.Bounds.IsEmpty())
+						prepared.CastersUnbounded = true;
+					else
+						casterBox.Extend(Aabb{ .Min = casterShadowBox.Centre - casterShadowBox.HalfExtent, .Max = casterShadowBox.Centre + casterShadowBox.HalfExtent });
+				}
 			}
 		}
 		prepared.Box = box;
@@ -313,19 +421,34 @@ namespace Engine {
 
 	void SceneRenderer::State::ReleaseStaticCellKeys(const Detail::SceneRendererStaticCell& cell)
 	{
+		const auto release = [this](uint32_t key)
+		{
+			if (key == Detail::NoStaticDrawKey || --StaticKeyUses[key] != 0)
+				return;
+			--StaticKeysInUse;
+			StaticKeys[key] = { .Key = StaticKeys[key].Key };
+		};
+		const auto releaseCaster = [this](uint32_t key)
+		{
+			if (key == NoStaticShadowKey || --StaticCasterKeyUses[key] != 0)
+				return;
+			--StaticKeysInUse;
+			StaticCasterKeys[key] = { .Key = StaticCasterKeys[key].Key };
+		};
 		for (const Detail::SceneRendererStaticDraw& draw : cell.Draws)
 		{
-			if (--StaticKeyUses[draw.Key] != 0)
-				continue;
-			--StaticKeysInUse;
-			StaticKeys[draw.Key] = { .Key = StaticKeys[draw.Key].Key };
+			// M46 (W46.4): every level's keys, unfaded and fading.
+			for (uint32_t level = 0; level < draw.Levels; ++level)
+			{
+				release(draw.Keys[level]);
+				release(draw.FadeKeys[level]);
+			}
 		}
 		for (const StaticShadowCaster& caster : cell.Casters)
 		{
-			if (--StaticCasterKeyUses[caster.Key] != 0)
-				continue;
-			--StaticKeysInUse;
-			StaticCasterKeys[caster.Key] = { .Key = StaticCasterKeys[caster.Key].Key };
+			releaseCaster(caster.Key);
+			for (const StaticShadowLevel& level : caster.Levels)
+				releaseCaster(level.Key);
 		}
 	}
 
@@ -373,7 +496,7 @@ namespace Engine {
 			if (!materials.contains(handle) && Materials.Contains(handle) && culledMaterials.insert(handle).second)
 				Materials.Keep(handle, Cache->GetMaterial(handle).Generation);
 		};
-		const auto makeDraw = [this](uint32_t key, nvrhi::IBindingSet* set)
+		const auto makeDraw = [this, &frame](uint32_t key, nvrhi::IBindingSet* set)
 		{
 			const Detail::SceneRendererStaticKey& data = StaticKeys[key];
 			Detail::SceneRendererDraw draw;
@@ -382,6 +505,12 @@ namespace Engine {
 			draw.IndexBuffer = data.IndexBuffer.Get();
 			draw.IndexOffset = data.IndexOffset;
 			draw.IndexCount = data.IndexCount;
+			// M46 (W46.4): the wind stream at vertex binding 3, the key's level, and its material's wind in a render with a Wind
+			// (the draw pushes it, DrawConstantsWind: a static record holds none).
+			draw.WindBuffer = data.WindBuffer.Get();
+			draw.Lod = data.Key.Lod;
+			draw.Wind = frame.HasWind && data.Wind;
+			draw.WindResponse = draw.Wind ? data.WindResponse : 0U;
 			draw.Material = set;
 			draw.ForwardVariant = data.Key.Pipeline;
 			draw.PrepassVariant = data.PrepassVariant;
@@ -391,6 +520,9 @@ namespace Engine {
 			return draw;
 		};
 
+		// M46 (decision 3D): a view chooses levels by its own camera (a mirror view's, never its cull camera's, whose projection
+		// is cropped to the glass), as PrepareViewDraws does.
+		const CameraData& lodCamera = mirror != nullptr && mirror->View != nullptr ? *mirror->View : camera;
 		for (const Detail::SceneRendererStaticCellRef& reference : frame.StaticCells)
 		{
 			const Detail::SceneRendererStaticCell& cell = *reference.Prepared;
@@ -398,6 +530,14 @@ namespace Engine {
 			{
 				status = MakeError(ErrorCode::InvalidArgument, "the world matrix of entity {} in the render snapshot's static set is not finite; its draw is skipped",
 					*cell.NonFinite);
+			}
+			// M46 (W46.4): a cell whose every drawable item lies beyond its CullDistance is culled by distance whole, each item
+			// counted as the dynamic path counts it, before its frustum test.
+			if (Utils::IsStaticCellBeyondCullDistance(cell, lodCamera.Position))
+			{
+				if (main)
+					Stats.DistanceCulledMeshes += cell.DrawableItems;
+				continue;
 			}
 			// The cell against the view's frustum and FarClip and, in a mirror view, its glass's plane: its box inflated for the
 			// view (InflateStaticCellBox), so the answer holds for each of its draws' own tests below.
@@ -416,7 +556,27 @@ namespace Engine {
 			if (visibility == StaticCellVisibility::Outside)
 			{
 				if (main)
-					Stats.CulledSubmeshes += cell.SubmeshCount;
+				{
+					// As the dynamic path counts them: an item beyond its CullDistance is culled by distance before its submeshes
+					// meet the frustum (M46), the others' submeshes are culled.
+					if (cell.DistanceItems == 0)
+						Stats.CulledSubmeshes += cell.SubmeshCount;
+					else
+					{
+						for (const Detail::SceneRendererStaticItem& item : cell.Items)
+						{
+							if (!item.Finite || !item.Drawable)
+								continue;
+							if (item.Distance.CullDistance > 0.0f
+								&& SelectViewMeshLod(std::span<const float>(item.LodScreenSizes.data(), item.LodCount), item.MeshBounds, item.World, item.Distance, lodCamera)
+										.DrawCount
+									== 0)
+								++Stats.DistanceCulledMeshes;
+							else
+								Stats.CulledSubmeshes += item.DrawCount;
+						}
+					}
+				}
 				for (const AssetHandle handle : cell.Materials)
 					keep(handle);
 				continue;
@@ -426,8 +586,16 @@ namespace Engine {
 			for (uint32_t itemIndex = 0; itemIndex < cell.Items.size(); ++itemIndex)
 			{
 				const Detail::SceneRendererStaticItem& item = cell.Items[itemIndex];
-				if (!item.Finite)
+				if (!item.Finite || !item.Drawable)
 					continue;
+				// M46 (decision 3D): the item's levels in this view; an item at or beyond its CullDistance draws nothing.
+				const MeshLodSelection lods = Utils::SelectStaticItemLod(item, lodCamera);
+				if (lods.DrawCount == 0)
+				{
+					if (main)
+						++Stats.DistanceCulledMeshes;
+					continue;
+				}
 				const uint32_t record = reference.FirstRecord + itemIndex;
 				bool drawn = false;
 				for (uint32_t index = item.FirstDraw; index < item.FirstDraw + item.DrawCount; ++index)
@@ -439,53 +607,68 @@ namespace Engine {
 					{
 						if (main)
 							++Stats.CulledSubmeshes;
-						keep(StaticKeys[draw.Key].Key.Material);
+						keep(StaticKeys[draw.Keys[0]].Key.Material);
 						continue;
 					}
-					nvrhi::IBindingSet* set = resolveKey(draw.Key);
-					if (set == nullptr)
-						continue; // its GPU objects are missing (reported)
-					drawn = true;
-					if (StaticKeys[draw.Key].Blend)
+					// M46 (decision 3E): one draw per level the view draws, its key that level's (the fading one while it fades),
+					// its fade in its InstanceIndices entry.
+					for (uint32_t lodIndex = 0; lodIndex < lods.DrawCount; ++lodIndex)
 					{
-						// PrepareViewDraws' view depth, from the same products, so the back-to-front order is the dynamic path's.
-						Detail::SceneRendererDraw transparentDraw = makeDraw(draw.Key, set);
-						const glm::mat4 worldView = camera.View * item.World;
-						const glm::vec3 centre = draw.Bounds.IsEmpty() ? glm::vec3(0.0f) : (draw.Bounds.Min + draw.Bounds.Max) * 0.5f;
-						transparentDraw.ViewDepth = -(worldView * glm::vec4(centre, 1.0f)).z;
-						transparentDraw.Entity = cell.Cell->Items[itemIndex].Entity;
-						transparentDraw.Bounds = draw.Bounds;
-						transparentDraw.Instance = record; // its InstanceIndices entry once PrepareViewDraws has sorted the view's draws
-						transparentDraw.StaticInstances = 1;
-						transparent.push_back(transparentDraw);
-						continue;
+						const MeshLodDraw& lod = lods.Draws[lodIndex];
+						const uint32_t key = lod.Fade != 0.0f ? draw.FadeKeys[lod.Level] : draw.Keys[lod.Level];
+						if (key == Detail::NoStaticDrawKey)
+							continue;
+						nvrhi::IBindingSet* set = resolveKey(key);
+						if (set == nullptr)
+							break; // its GPU objects are missing (reported); every level shares the material
+						drawn = true;
+						if (main)
+							++Stats.MeshLodDraws[std::min<uint32_t>(lod.Level, static_cast<uint32_t>(Stats.MeshLodDraws.size()) - 1U)];
+						if (StaticKeys[key].Blend)
+						{
+							// PrepareViewDraws' view depth, from the same products, so the back-to-front order is the dynamic path's.
+							Detail::SceneRendererDraw transparentDraw = makeDraw(key, set);
+							const glm::mat4 worldView = camera.View * item.World;
+							const glm::vec3 centre = draw.Bounds.IsEmpty() ? glm::vec3(0.0f) : (draw.Bounds.Min + draw.Bounds.Max) * 0.5f;
+							transparentDraw.ViewDepth = -(worldView * glm::vec4(centre, 1.0f)).z;
+							transparentDraw.Entity = cell.Cell->Items[itemIndex].Entity;
+							transparentDraw.Bounds = draw.Bounds;
+							transparentDraw.Instance = record; // its InstanceIndices entry once PrepareViewDraws has sorted the view's draws
+							transparentDraw.LodFade = lod.Fade;
+							transparentDraw.StaticInstances = 1;
+							transparent.push_back(transparentDraw);
+							continue;
+						}
+						std::vector<InstanceIndex>& bucket = StaticBuckets[key];
+						if (bucket.empty())
+							StaticTouched.push_back(key);
+						bucket.push_back({ .Record = record, .Reserved = std::bit_cast<uint32_t>(lod.Fade) });
 					}
-					std::vector<uint32_t>& bucket = StaticBuckets[draw.Key];
-					if (bucket.empty())
-						StaticTouched.push_back(draw.Key);
-					bucket.push_back(record);
 				}
 				if (drawn && main)
+				{
 					++frame.StaticVisibleItems;
+					if (lods.CrossFade)
+						++Stats.LodCrossFades;
+				}
 			}
 		}
 
 		// One opaque draw per key the view sees, its instances in cell order then item order.
 		for (const uint32_t key : StaticTouched)
 		{
-			std::vector<uint32_t>& bucket = StaticBuckets[key];
+			std::vector<InstanceIndex>& bucket = StaticBuckets[key];
 			Detail::SceneRendererDraw draw = makeDraw(key, *keySets[key]);
 			draw.Instance = static_cast<uint32_t>(InstanceIndices.size());
 			draw.StaticInstances = static_cast<uint32_t>(bucket.size());
-			for (const uint32_t record : bucket)
-				InstanceIndices.push_back({ .Record = record });
+			InstanceIndices.insert(InstanceIndices.end(), bucket.begin(), bucket.end());
 			opaque.push_back(draw);
 			bucket.clear();
 		}
 		StaticTouched.clear();
 	}
 
-	void SceneRenderer::State::PrepareStaticShadows(Detail::SceneRendererFrame& frame)
+	void SceneRenderer::State::PrepareStaticShadows(Detail::SceneRendererFrame& frame, const ShadowCasterView& view)
 	{
 		frame.StaticShadowCells.clear();
 		for (const Detail::SceneRendererStaticCellRef& reference : frame.StaticCells)
@@ -499,7 +682,7 @@ namespace Engine {
 			return;
 		frame.StaticShadows = ShadowPass::PrepareStaticFaces(frame.StaticShadowCells, StaticCasterKeys.size(), frame.Cascades.Count != 0 ? &frame.Cascades : nullptr,
 			!frame.Spots.Tiles.empty() ? &frame.Spots : nullptr, !frame.Points.Lights.empty() ? &frame.Points : nullptr, Device->GetInfo().DepthClamp,
-			StaticFaceBuckets, InstanceIndices);
+			StaticFaceBuckets, InstanceIndices, view);
 	}
 
 	std::vector<MeshDrawItem> SceneRenderer::State::CollectSelectedStaticItems(const Detail::SceneRendererFrame& frame) const

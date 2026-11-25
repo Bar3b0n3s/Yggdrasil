@@ -34,7 +34,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> PerformanceStats`
 
-Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; and SkyUpdates, 1 when it regenerated its Sky's image-based light, else 0), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.
+Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; SkyUpdates, 1 when it regenerated its Sky's image-based light, else 0; and LodCrossFades, the mesh items it drew cross-fading two levels of detail, DistanceCulledMeshes those beyond their RenderDistance's CullDistance), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2962,7 +2962,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "Static") -> Static?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "Sky") -> Sky?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "MassProperties") -> MassProperties?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?) & ((self: Entity, name: "WheeledVehicle") -> WheeledVehicle?) & ((self: Entity, name: "VehicleWheel") -> VehicleWheel?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "Static") -> Static?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "Sky") -> Sky?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "MassProperties") -> MassProperties?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?) & ((self: Entity, name: "WheeledVehicle") -> WheeledVehicle?) & ((self: Entity, name: "VehicleWheel") -> VehicleWheel?) & ((self: Entity, name: "RenderDistance") -> RenderDistance?) & ((self: Entity, name: "Wind") -> Wind?)`
 
 Get a component proxy, or nil when absent.
 
@@ -3199,6 +3199,14 @@ All modes; Runtime|Test; mutates.
 Remove a tag if present.
 
 All modes; Runtime|Test; mutates.
+
+### Entity.RenderDistance
+
+`RenderDistance?`
+
+The entity's RenderDistance component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
 
 ### Entity.RigidBody
 
@@ -3445,6 +3453,14 @@ All modes; Runtime|Test; pure/read.
 `WheeledVehicle?`
 
 The entity's WheeledVehicle component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.Wind
+
+`Wind?`
+
+The entity's Wind component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -5001,6 +5017,42 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `vector`
 
 The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## RenderDistance
+
+How far and in which level of detail the MeshRenderer on this entity draws: a cull distance, a bias on its mesh's level switches, the shadow's coarser level and the width of the cross-fades. A MeshRenderer without one takes the defaults.
+
+### RenderDistance.CullDistance
+
+`number`
+
+Beyond this distance from a view's camera, in metres, the mesh draws and casts nothing in that view, fading out across the last FadeWidth of it; 0 leaves only the camera's FarClip.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RenderDistance.FadeWidth
+
+`number`
+
+The band around each level switch, and before CullDistance, as a share of the switch size or the distance, across which two levels cross-fade by dither (or the last fades out); 0 switches sharply.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RenderDistance.LodBias
+
+`number`
+
+Multiplies the mesh's screen size before its levels' switch sizes compare it: 2 keeps each finer level until half its switch size, 0.5 switches to coarser levels twice as early.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RenderDistance.ShadowLodOffset
+
+`number`
+
+How many levels coarser than its view's level the mesh's shadow draws, clamped to its last level; 0 casts from the drawn level.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -7572,6 +7624,58 @@ How the wheels find the ground under them.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## Wind
+
+The scene's wind (one per scene): it bends, sways and flutters the meshes whose material has wind enabled, and scripts read it with Wind:Sample.
+
+### Wind.Direction
+
+`vector`
+
+Where the wind blows, in world axes; only its horizontal part (X and Z) counts, normalized, and it must not be zero.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Wind.GustFrequency
+
+`number`
+
+How many gusts pass a point each second; they travel with the wind, so their wavelength is Strength / GustFrequency. 0 holds the gusts still.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Wind.GustStrength
+
+`number`
+
+The speed gusts add to Strength at their peak, in metres per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Wind.Sample
+
+`(self: Wind, position: vector, time: number?) -> vector`
+
+Read the wind's velocity, in metres per second, at the world point position and the world time in seconds (the world's clock, Time.GetTime, when time is nil): the steady Strength along the horizontal Direction plus the gusts, which travel with the wind, and Turbulence's sideways part. The same bits in every configuration, so gameplay may use it.
+
+All modes; Runtime|Test; pure/read.
+
+### Wind.Strength
+
+`number`
+
+The steady wind speed, in metres per second; a gale is about 20.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Wind.Turbulence
+
+`number`
+
+How much the gusts vary across positions and turn the wind sideways: 0 blows straight and in step everywhere, 1 is most unsteady.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## AlphaMode
 
 How a material's base colour alpha is used (the glTF 2.0 alpha modes).
@@ -7965,6 +8069,16 @@ Gamepad button positions.
 - `DPadDown`: The DPadDown input value.
 
 - `DPadLeft`: The DPadLeft input value.
+
+## GltfLodSource
+
+Where an imported glTF mesh's further levels of detail come from.
+
+- `None`: No further level: every mesh draws its full detail at every distance.
+
+- `FromGltf`: The levels the file authors: a node's MSFT_lod extension, else sibling nodes named <name>_LOD0, <name>_LOD1, ... (as Blender exports them).
+
+- `Generate`: Levels simplified from each mesh at import (meshoptimizer) at LodTriangleRatios, sharing its vertices; leaf cards simplify poorly, so author a tree's far levels instead.
 
 ## GraphNodeCategory
 
@@ -9014,7 +9128,7 @@ A walk along the navigation surface: Clear when nothing blocks it, Point where i
 
 ## PerformanceStats
 
-`{RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number, SkyUpdates: number}`
+`{RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number, SkyUpdates: number, LodCrossFades: number, DistanceCulledMeshes: number}`
 
 The performance readout of Application.GetStats: frame-paced observations, never simulation state.
 

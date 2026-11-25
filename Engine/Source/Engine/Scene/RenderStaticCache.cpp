@@ -6,6 +6,7 @@
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PlanarReflectionComponent.h"
+#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -39,6 +40,7 @@ namespace Engine {
 
 		// The padding-free layout the bitwise comparison of MeshMaterialParameters relies on.
 		static_assert(sizeof(MeshMaterialParameters) == 15 * sizeof(float), "MeshMaterialParameters is compared bit for bit");
+		static_assert(sizeof(MeshDrawDistance) == 4 * sizeof(float), "MeshDrawDistance is compared bit for bit"); // M46
 
 		// Whether `entity` (a live entity) gives a static item (RenderStaticCache.h's membership).
 		static bool IsStaticItem(const entt::registry& registry, entt::entity entity)
@@ -85,6 +87,12 @@ namespace Engine {
 			item.Entity = registry.get<IDComponent>(entity).ID;
 			if (const MaterialParametersComponent* parameters = registry.try_get<MaterialParametersComponent>(entity))
 				item.Parameters = ResolveMaterialParameters(*parameters, 0.0);
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E, W46.4): its RenderDistance, as render
+			// extraction gives a dynamic item its.
+			if (const RenderDistanceComponent* distance = registry.try_get<RenderDistanceComponent>(entity))
+			{
+				item.Distance = MeshDrawDistance{ .CullDistance = distance->CullDistance, .LodBias = distance->LodBias, .ShadowLodOffset = distance->ShadowLodOffset, .FadeWidth = distance->FadeWidth };
+			}
 			return made;
 		}
 
@@ -147,6 +155,8 @@ namespace Engine {
 				return "MorphWeights";
 			if (!SameBits(first.Parameters, second.Parameters))
 				return "Parameters";
+			if (!SameBits(first.Distance, second.Distance))
+				return "Distance"; // M46
 			return {};
 		}
 
@@ -180,6 +190,7 @@ namespace Engine {
 		connect(std::type_identity<MaterialParametersComponent>{});
 		connect(std::type_identity<SkinnedMeshComponent>{});
 		connect(std::type_identity<PlanarReflectionComponent>{});
+		connect(std::type_identity<RenderDistanceComponent>{}); // M46
 		connect(std::type_identity<HierarchyStaticTag>{});
 		connect(std::type_identity<HierarchyDisabledTag>{});
 		registry.on_construct<PendingDestroyTag>().connect<&RenderStaticCache::OnChanged>(*this);
@@ -200,6 +211,7 @@ namespace Engine {
 		disconnect(std::type_identity<MaterialParametersComponent>{});
 		disconnect(std::type_identity<SkinnedMeshComponent>{});
 		disconnect(std::type_identity<PlanarReflectionComponent>{});
+		disconnect(std::type_identity<RenderDistanceComponent>{}); // M46
 		disconnect(std::type_identity<HierarchyStaticTag>{});
 		disconnect(std::type_identity<HierarchyDisabledTag>{});
 		registry.on_construct<PendingDestroyTag>().disconnect(this);

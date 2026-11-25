@@ -94,3 +94,4 @@ project "Tests"
 	UseTinyExr()
 	UseRecast()
 	UseDetour()
+	UseMeshOptimizer()

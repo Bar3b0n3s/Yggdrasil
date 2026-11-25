@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include "Engine/Asset/MeshData.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/AsyncPicker.h"
@@ -15,6 +16,7 @@
 #include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/LightClusters.h"
 #include "Engine/Renderer/Lights2DPass.h"
+#include "Engine/Renderer/MeshWind.h"
 #include "Engine/Renderer/ParticlePass.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/PlanarReflectionPass.h"
@@ -51,6 +53,7 @@
 #include "Shared/ShaderLight.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Shared/WindConstants.h"
 
 #include <array>
 #include <cstddef>
@@ -101,6 +104,15 @@ namespace Engine {
 			// the prepass variants bind as vertex binding 2 (Utils::PreviousPositionSlot); null for every other draw, which
 			// binds VertexBuffer there instead (ForwardPipelines.h).
 			nvrhi::IBuffer* PreviousPositions = nullptr;
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): the mesh's wind stream
+			// (GpuMesh::WindBuffer, held by the cache for the render), vertex binding 3 of every mesh pipeline; the draw's level
+			// (its index range is that level's) and signed fade (InstanceRecord::LodFade); and, for a draw whose material has wind
+			// in a scene with a Wind, its record's WindResponse (Renderer/MeshWind.h) with DrawFlagWind.
+			nvrhi::IBuffer* WindBuffer = nullptr;
+			uint32_t Lod = 0;
+			float LodFade = 0.0f;
+			bool Wind = false;
+			uint32_t WindResponse = 0;
 			// Sort keys (§8.3 pass 1).
 			AssetHandle MaterialHandle{};
 			AssetHandle Mesh{};
@@ -140,24 +152,47 @@ namespace Engine {
 			uint32_t IndexCount = 0;
 			uint32_t PrepassVariant = 0;
 			bool Blend = false;
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E and its W46.4 record): the mesh's wind
+			// stream (GpuMesh::WindBuffer, vertex binding 3), and whether the key's material has wind, with its WindResponse: a
+			// static record serves every submesh of its item, so the key's draws carry the response (DrawConstantsWind) in a
+			// render whose snapshot has a Wind.
+			nvrhi::BufferHandle WindBuffer{};
+			bool Wind = false;
+			uint32_t WindResponse = 0;
 		};
 
-		// M43: one submesh draw of a prepared static cell's item: its key (into StaticKeys) and its submesh's local bounds.
+		// M46 (W46.4): a SceneRendererStaticDraw's key at a level where its submesh has no indices (it draws nothing there).
+		inline constexpr uint32_t NoStaticDrawKey = std::numeric_limits<uint32_t>::max();
+
+		// M43: one submesh draw of a prepared static cell's item: its keys (into StaticKeys) and its submesh's local bounds
+		// (GpuSubmesh::Bounds, which cover every level). M46 (W46.4): its key at each level of its mesh, Levels of them (Keys[0]
+		// level 0's), unfaded and while the level fades (FadeKeys: SelectMeshAlphaMode's variants for a fading draw, the Mask
+		// variants for an Opaque material), NoStaticDrawKey where the submesh has no indices at the level.
 		struct SceneRendererStaticDraw
 		{
-			uint32_t Key = 0;
+			std::array<uint32_t, MaxMeshLods> Keys{};
+			std::array<uint32_t, MaxMeshLods> FadeKeys{};
+			uint32_t Levels = 1;
 			uint32_t Submesh = 0;
 			Aabb Bounds{};
 		};
 
 		// M43: one item of a prepared static cell: its world matrix, whether it is finite (a non-finite one draws nothing and
-		// is the render's error, as a dynamic item's), and its draws (Draws[FirstDraw, FirstDraw + DrawCount)).
+		// is the render's error, as a dynamic item's), and its draws (Draws[FirstDraw, FirstDraw + DrawCount)). M46 (W46.4):
+		// whether its mesh's buffers exist (Drawable: what the dynamic path measures, culls by distance and counts), and what
+		// chooses its levels in a view (SelectViewMeshLod: its mesh's switch sizes, LodCount of them, its mesh's level 0 bounds
+		// and its RenderDistance).
 		struct SceneRendererStaticItem
 		{
 			glm::mat4 World = glm::mat4(1.0f);
 			uint32_t FirstDraw = 0;
 			uint32_t DrawCount = 0;
 			bool Finite = true;
+			bool Drawable = false;
+			std::array<float, MaxMeshLods - 1> LodScreenSizes{};
+			uint32_t LodCount = 0;
+			Aabb MeshBounds{};
+			MeshDrawDistance Distance{};
 		};
 
 		// M43: a mirror a prepared cell depends on: a mesh's GpuMesh at its Version with its vertex buffer (held, so the
@@ -181,6 +216,14 @@ namespace Engine {
 		{
 			Ref<const RenderStaticCell> Cell{};
 			std::vector<SceneRendererStaticItem> Items{};
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E, W46.4): its drawable items, those of
+			// them with a CullDistance, the largest CullDistance of its drawable items (infinite when one has none) and the box of
+			// their level spheres' centres (MeshLod.h's ComputeMeshLodSphere), so a view whose camera is beyond that distance from
+			// every centre culls the cell's items by distance before it looks at them.
+			uint32_t DrawableItems = 0;
+			uint32_t DistanceItems = 0;
+			float MaxCullDistance = 0.0f;
+			Aabb Centres{};
 			std::vector<SceneRendererStaticDraw> Draws{};
 			std::vector<StaticShadowCaster> Casters{};
 			Aabb Box{};
@@ -209,6 +252,7 @@ namespace Engine {
 			nvrhi::IBindingSet* Set = nullptr;
 			Engine::AlphaMode Mode = Engine::AlphaMode::Opaque; // the type is spelled Engine:: (GCC's "changes meaning")
 			bool DoubleSided = false;
+			MaterialWind Wind{}; // M46 (decision 3G): the material's wind block (GpuMaterial::Wind)
 		};
 
 		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27; stream C): one deformed item's GPU
@@ -393,6 +437,10 @@ namespace Engine {
 		{
 			UUID Excluded{};
 			glm::vec4 ClipPlane = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3D): the mirror view's own camera, whose
+			// projection chooses its items' levels of detail; the cull camera's projection is cropped to the glass's rectangle,
+			// which would inflate every screen size. Borrowed for the PrepareViewDraws call; null chooses by the cull camera.
+			const CameraData* View = nullptr;
 		};
 
 		// M42: the prepass targets of the mirror views of one size (the declaration's PlanarReflectionDepth, Normals, Velocity
@@ -519,6 +567,11 @@ namespace Engine {
 			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Renderer/Fog.h), Enabled only in a Lit view
 			// with a camera outside the wireframe whose snapshot holds fog.
 			FogConstants Fog{};
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's wind (b8 of every mesh
+			// layout, written with the per-view constants) and whether the snapshot has a Wind, which sets DrawFlagWind on the
+			// draws of the materials with wind.
+			WindConstants Wind{};
+			bool HasWind = false;
 			ShadowConstants Shadow{};
 			ShadowCascadeSet Cascades{};
 			SpotShadowAtlas Spots{};
@@ -854,6 +907,12 @@ namespace Engine {
 		// (once per renderer).
 		nvrhi::BufferHandle PlanarReflectionConstantsBuffer{};
 		std::array<Detail::SceneRendererReflectionSlot, MaxPlanarReflectionsPerView> ReflectionSlots{};
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3G and 3L): the renderer's WindConstants
+		// (b8 of every mesh layout, created with the other per-view buffers and written by every Render), and the last render's
+		// wind (Renderer/MeshWind.h), the next render's previous wind unless its camera starts a new history.
+		nvrhi::BufferHandle WindConstantsBuffer{};
+		WindFrame PreviousWind{};
+		bool HasPreviousWind = false;
 		std::vector<Detail::SceneRendererReflectionScratch> ReflectionScratch{};
 		PassBindingCache ReflectionBindings{};
 		bool PlanarReflectionLimitLogged = false;
@@ -959,7 +1018,7 @@ namespace Engine {
 		std::map<RenderStaticDrawKey, uint32_t> StaticCasterKeyIndex{};
 		std::vector<uint32_t> StaticCasterKeyUses{};
 		size_t StaticKeysInUse = 0;
-		std::vector<std::vector<uint32_t>> StaticBuckets{};
+		std::vector<std::vector<InstanceIndex>> StaticBuckets{}; // M46: each entry with its view's fade (InstanceIndex::Reserved)
 		std::vector<uint32_t> StaticTouched{};
 		StaticShadowBuckets StaticFaceBuckets{};
 		std::vector<InstanceIndex> InstanceIndices{};
@@ -1049,13 +1108,16 @@ namespace Engine {
 		// (ClassifyStaticCell, the mirror's clip plane), a culled one adding its submesh draws to CulledSubmeshes (main view)
 		// and keeping its materials' sets (R-MATSET), the draws of a partial cell tested one by one with IsOutsideView (and
 		// the clip plane), as the dynamic path tests them. `materials` and `culledMaterials` are PrepareViewDraws'; `status`
-		// takes the first error (a non-finite item, a material set's creation).
+		// takes the first error (a non-finite item, a material set's creation). M46 (W46.4): each visible item's levels are the
+		// view's (SelectViewMeshLod by its camera, a mirror view's own), one draw per level and its fade in the item's entries;
+		// a cell beyond every item's CullDistance is culled by distance whole; the counters follow the dynamic path's.
 		void AppendStaticViewDraws(Detail::SceneRendererFrame& frame, const CameraData& camera, const Detail::SceneRendererMirrorCull* mirror,
 			std::vector<Detail::SceneRendererDraw>& opaque, std::vector<Detail::SceneRendererDraw>& transparent,
 			std::map<AssetHandle, Detail::SceneRendererMaterial>& materials, std::set<AssetHandle>& culledMaterials, Status& status);
 		// M43: the static casters' draws of every shadow face the frame plans (ShadowPass::PrepareStaticFaces), their indices
-		// appended to InstanceIndices, into frame.StaticShadows.
-		void PrepareStaticShadows(Detail::SceneRendererFrame& frame);
+		// appended to InstanceIndices, into frame.StaticShadows. M46 (W46.4): `view`, the dynamic casters' (its camera chooses
+		// the casters' levels, its wind the faces' wind).
+		void PrepareStaticShadows(Detail::SceneRendererFrame& frame, const ShadowCasterView& view);
 		// M43: copies of the static set's items whose entity the snapshot selects, in cell order then item order (the
 		// selection mask's static items, SelectionPass::PrepareDraws).
 		[[nodiscard]] std::vector<MeshDrawItem> CollectSelectedStaticItems(const Detail::SceneRendererFrame& frame) const;

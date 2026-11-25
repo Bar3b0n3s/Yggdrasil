@@ -58,6 +58,9 @@ namespace Engine {
 			// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the WheeledVehicle and VehicleWheel proxies' methods,
 			// after M37's RegisterJoints (ADR 0060's phase 8 ledger: the first of the phase's three lines).
 			ENGINE_TRY(ScriptBindings::RegisterVehicles(api));
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): the Wind proxy's method, after M44's
+			// RegisterVehicles (ADR 0060's phase-8 ledger; M47's RegisterWater follows).
+			ENGINE_TRY(ScriptBindings::RegisterWind(api));
 			return {};
 		}
 

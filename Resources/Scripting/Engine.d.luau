@@ -71,6 +71,9 @@ export type GamepadAxis = "LeftX" | "LeftY" | "RightX" | "RightY" | "LeftTrigger
 -- Gamepad button positions.
 export type GamepadButton = "South" | "East" | "West" | "North" | "LeftBumper" | "RightBumper" | "Back" | "Start" | "Guide" | "LeftThumb" | "RightThumb" | "DPadUp" | "DPadRight" | "DPadDown" | "DPadLeft"
 
+-- Where an imported glTF mesh's further levels of detail come from.
+export type GltfLodSource = "None" | "FromGltf" | "Generate"
+
 -- Where the graph editor's node menu lists a node kind.
 export type GraphNodeCategory = "Event" | "Flow" | "Member" | "Operator" | "Call" | "Property" | "Constant"
 
@@ -309,7 +312,7 @@ export type MusicState = {Clip: AssetRef, Intro: AssetRef?, Volume: number, Loop
 export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
 
 -- The performance readout of Application.GetStats: frame-paced observations, never simulation state.
-export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number, SkyUpdates: number}
+export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number, SkyUpdates: number, LodCrossFades: number, DistanceCulledMeshes: number}
 
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
@@ -781,6 +784,8 @@ declare extern type Entity with
 	function GetComponent(self, name: "FixedJoint"): FixedJoint?
 	function GetComponent(self, name: "WheeledVehicle"): WheeledVehicle?
 	function GetComponent(self, name: "VehicleWheel"): VehicleWheel?
+	function GetComponent(self, name: "RenderDistance"): RenderDistance?
+	function GetComponent(self, name: "Wind"): Wind?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -839,6 +844,8 @@ declare extern type Entity with
 	RemoveComponent: (self: Entity, name: string) -> ()
 	-- Remove a tag if present. [All modes; Runtime|Test; mutates]
 	RemoveTag: (self: Entity, tag: string) -> ()
+	-- The entity's RenderDistance component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	RenderDistance: RenderDistance?
 	-- The entity's RigidBody component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	RigidBody: RigidBody?
 	-- The entity's RigidBody2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -901,6 +908,8 @@ declare extern type Entity with
 	VehicleWheel: VehicleWheel?
 	-- The entity's WheeledVehicle component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	WheeledVehicle: WheeledVehicle?
+	-- The entity's Wind component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Wind: Wind?
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
 	__eq: (self: Entity, other: Entity) -> boolean
 end
@@ -1359,6 +1368,18 @@ declare extern type ReflectionProbe with
 	Resolution: number
 	-- The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes. [All modes; Runtime|Test; pure/read; setter mutates]
 	Size: vector
+end
+
+-- How far and in which level of detail the MeshRenderer on this entity draws: a cull distance, a bias on its mesh's level switches, the shadow's coarser level and the width of the cross-fades. A MeshRenderer without one takes the defaults.
+declare extern type RenderDistance with
+	-- Beyond this distance from a view's camera, in metres, the mesh draws and casts nothing in that view, fading out across the last FadeWidth of it; 0 leaves only the camera's FarClip. [All modes; Runtime|Test; pure/read; setter mutates]
+	CullDistance: number
+	-- The band around each level switch, and before CullDistance, as a share of the switch size or the distance, across which two levels cross-fade by dither (or the last fades out); 0 switches sharply. [All modes; Runtime|Test; pure/read; setter mutates]
+	FadeWidth: number
+	-- Multiplies the mesh's screen size before its levels' switch sizes compare it: 2 keeps each finer level until half its switch size, 0.5 switches to coarser levels twice as early. [All modes; Runtime|Test; pure/read; setter mutates]
+	LodBias: number
+	-- How many levels coarser than its view's level the mesh's shadow draws, clamped to its last level; 0 casts from the drawn level. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShadowLodOffset: number
 end
 
 -- Simulates the entity with Jolt physics.
@@ -2095,6 +2116,22 @@ declare extern type WheeledVehicle with
 	WheelCast: VehicleWheelCast
 end
 
+-- The scene's wind (one per scene): it bends, sways and flutters the meshes whose material has wind enabled, and scripts read it with Wind:Sample.
+declare extern type Wind with
+	-- Where the wind blows, in world axes; only its horizontal part (X and Z) counts, normalized, and it must not be zero. [All modes; Runtime|Test; pure/read; setter mutates]
+	Direction: vector
+	-- How many gusts pass a point each second; they travel with the wind, so their wavelength is Strength / GustFrequency. 0 holds the gusts still. [All modes; Runtime|Test; pure/read; setter mutates]
+	GustFrequency: number
+	-- The speed gusts add to Strength at their peak, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	GustStrength: number
+	-- Read the wind's velocity, in metres per second, at the world point position and the world time in seconds (the world's clock, Time.GetTime, when time is nil): the steady Strength along the horizontal Direction plus the gusts, which travel with the wind, and Turbulence's sideways part. The same bits in every configuration, so gameplay may use it. [All modes; Runtime|Test; pure/read]
+	Sample: (self: Wind, position: vector, time: number?) -> vector
+	-- The steady wind speed, in metres per second; a gale is about 20. [All modes; Runtime|Test; pure/read; setter mutates]
+	Strength: number
+	-- How much the gusts vary across positions and turn the wind sideways: 0 blows straight and in step everywhere, 1 is most unsteady. [All modes; Runtime|Test; pure/read; setter mutates]
+	Turbulence: number
+end
+
 -- Application identity, window state and deferred quit requests.
 declare Application: {
 	-- Returns the video modes of the monitor the game's window is on, sorted by width, height and refresh rate: the resolutions Exclusive mode takes. Empty where display settings do nothing: the editor, headless runs, test runs, replays, recordings and lockstep sessions, and on Linux and macOS. [All modes; Runtime|Test; pure/read]
@@ -2103,7 +2140,7 @@ declare Application: {
 	GetDisplaySettings: () -> DisplaySettings,
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
 	GetPlatform: () -> string,
-	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; and SkyUpdates, 1 when it regenerated its Sky's image-based light, else 0), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
+	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; SkyUpdates, 1 when it regenerated its Sky's image-based light, else 0; and LodCrossFades, the mesh items it drew cross-fading two levels of detail, DistanceCulledMeshes those beyond their RenderDistance's CullDistance), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
 	GetStats: () -> PerformanceStats,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,

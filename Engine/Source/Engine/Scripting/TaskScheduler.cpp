@@ -30,7 +30,7 @@ namespace Engine {
 		// The current tick of a task's clock (the host's session tick, or the world's: Tick - WorldHeldTicks).
 		[[nodiscard]] static uint64_t ClockTick(const ScriptFrameState& frame, bool worldClock)
 		{
-			return worldClock ? frame.Tick - std::min(frame.WorldHeldTicks, frame.Tick) : frame.Tick;
+			return worldClock ? GetWorldTick(frame) : frame.Tick;
 		}
 
 		explicit State(ScriptEngine& engine)

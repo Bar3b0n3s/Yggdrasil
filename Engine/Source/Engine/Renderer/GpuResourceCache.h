@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/MeshDeform.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Aabb.h"
@@ -31,13 +32,17 @@ namespace Engine {
 	class GraphicsDevice;
 	struct RenderStaticSet;
 
-	// One submesh of a GPU mesh (MeshSubmesh without the CPU data).
+	// One submesh of a GPU mesh (MeshSubmesh without the CPU data). M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md
+	// decisions 3E and 3L): Lods holds its range of each further level (MeshData::Lods[k].Submeshes[submesh]) into the one
+	// index buffer, whose level 0 indices come first (so each IndexOffset is MeshData::Indices' size plus the level's
+	// offset into LodIndices), and Bounds covers the submesh's triangles of every level, which the views cull by.
 	struct GpuSubmesh
 	{
 		uint32_t IndexOffset = 0;
 		uint32_t IndexCount = 0;
 		uint32_t MaterialSlot = 0;
 		Aabb Bounds{};
+		std::vector<MeshLodRange> Lods{};
 	};
 
 	// A mesh's GPU mirror: a vertex buffer of MeshVertex (48 bytes each, §6.8), an attribute buffer and a uint32 index
@@ -47,9 +52,18 @@ namespace Engine {
 		nvrhi::BufferHandle VertexBuffer{};
 		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): vertex binding 1, MeshVertexAttributes (24
 		// bytes each), bound at offset 0: the mesh's attribute stream (MeshData::Attributes), or for a mesh without one the
-		// cache's shared default stream (TexCoord1 (0, 0), opaque white), which holds at least VertexCount entries, all equal.
+		// cache's shared default stream (TexCoord1 (0, 0), opaque white), which holds at least as many entries as the vertex
+		// buffer (MeshData::Vertices then LodVertices; VertexCount stays level 0's), all equal.
 		nvrhi::BufferHandle AttributeBuffer{};
 		nvrhi::BufferHandle IndexBuffer{};
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E, 3G and 3L): vertex binding 3,
+		// MeshVertexWind (4 bytes each), bound at offset 0: the mesh's wind stream (MeshData::Wind, then LodWind), or for a mesh
+		// without one the cache's shared default stream of zeros, which holds at least as many entries as the vertex buffer.
+		// The vertex buffer holds MeshData::Vertices then LodVertices, the attribute stream Attributes then LodAttributes, and
+		// the index buffer Indices then LodIndices; the further levels' switch sizes are LodScreenSizes (MeshLod::ScreenSize,
+		// strictly decreasing, empty for a mesh without levels), their ranges each GpuSubmesh's Lods.
+		nvrhi::BufferHandle WindBuffer{};
+		std::vector<float> LodScreenSizes{};
 		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27; stream C): the mesh's skin (a raw
 		// buffer of VertexCount MeshSkinVertex, 24 bytes each) and morph deltas (a raw buffer of MorphTargetCount x VertexCount
 		// MeshMorphDelta, 36 bytes each, target by target), which the Skinning pass reads, null for a mesh without them; their
@@ -106,6 +120,10 @@ namespace Engine {
 		// TextureFormat (BC5Unorm), so when a texture change alone changes a flag (a placeholder replaced by a BC5 texture, a
 		// Compression setting changed), the mirror writes new constants and takes a new Generation, never keeping stale ones.
 		uint32_t Flags = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the material's wind block, which the
+		// renderer writes into a wind draw's instance record (Renderer/MeshWind.h's PackWindResponse); disabled for the Error
+		// material.
+		MaterialWind Wind{};
 		uint64_t Version = 0; // the material asset's version it mirrors
 		// A new value whenever the mirror is built or rebuilt (a new material version, or a new version of one of its
 		// textures), from one counter of the cache that only increases (starting at 1), so no Generation is ever reused

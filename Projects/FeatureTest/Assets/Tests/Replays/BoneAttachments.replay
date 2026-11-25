@@ -231,7 +231,7 @@
 				"Handle": "10c984b59171edd4",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#mesh:0:BodyMesh",
 				"Type": "Mesh",
-				"Hash": "4bbce84a9332a5bb"
+				"Hash": "0b3e550cfd00b0b8"
 			},
 			{
 				"Handle": "59e02d6792ed2ed9",
@@ -243,7 +243,7 @@
 				"Handle": "5a831424c6906c00",
 				"Path": "Assets/Models/Animation/Skinned.gltf#mesh:0:Strip",
 				"Type": "Mesh",
-				"Hash": "f93b6f3e2e93b029"
+				"Hash": "ec006b939151fd15"
 			},
 			{
 				"Handle": "682acfd37297fedb",
@@ -255,55 +255,55 @@
 				"Handle": "6b489bfc90dcec5d",
 				"Path": "Assets/Materials/Animation/Floor.material",
 				"Type": "Material",
-				"Hash": "1fe9451e9f26bae5"
+				"Hash": "4de4994f12b359e3"
 			},
 			{
 				"Handle": "6edf887d5f78a42a",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#skin:1",
 				"Type": "Skeleton",
-				"Hash": "e43d9b514049dafa"
+				"Hash": "22a6b754acd7d096"
 			},
 			{
 				"Handle": "79e581911985caaf",
 				"Path": "Assets/Models/Animation/Skinned.gltf#animation:0:Wave",
 				"Type": "AnimationClip",
-				"Hash": "4eb078fb55869fc8"
+				"Hash": "585b94699016e452"
 			},
 			{
 				"Handle": "aa94bd7ed48f6cb8",
 				"Path": "Assets/Models/Animation/Skinned.gltf#skin:0",
 				"Type": "Skeleton",
-				"Hash": "c2a60019d7f58e51"
+				"Hash": "fd2540810fe13bee"
 			},
 			{
 				"Handle": "ad0bee37d93bd2f2",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#animation:0:Walk",
 				"Type": "AnimationClip",
-				"Hash": "67b63cb737ae7b44"
+				"Hash": "8eb402b44254c6aa"
 			},
 			{
 				"Handle": "cb7763da4e141bc8",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#skin:0",
 				"Type": "Skeleton",
-				"Hash": "2405f5b19fb704ca"
+				"Hash": "b9d2eb33ca3a3d08"
 			},
 			{
 				"Handle": "d47740a9e11d0fd1",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#mesh:1:TailMesh",
 				"Type": "Mesh",
-				"Hash": "5655c74242267e1f"
+				"Hash": "7733203a615b1864"
 			},
 			{
 				"Handle": "e707c63160b28aa4",
 				"Path": "Assets/Models/Animation/Skinned.gltf",
 				"Type": "Prefab",
-				"Hash": "ffc5b9f6a954d240"
+				"Hash": "35040053b719c83b"
 			},
 			{
 				"Handle": "f8760c5951025770",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf",
 				"Type": "Prefab",
-				"Hash": "25f12870b60d901c"
+				"Hash": "0db359efac20e94b"
 			}
 		]
 	},

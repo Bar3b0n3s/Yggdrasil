@@ -32,6 +32,12 @@ namespace Engine {
 	//     (the dissolve noise's repeats per unit of the first texture coordinates) and UVOffset (added to every map's
 	//     texture coordinates after the material's UV transform, the scroll included, in [0, 1)). The neutral values are
 	//     MeshMaterialParameters' defaults (Renderer/RenderSnapshot.h).
+	//   - M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G; in Padding1 and Padding2, the
+	//     size unchanged): LodFade, the draw's signed level fade (Renderer/MeshLod.h's MeshLodDraw::Fade, Common/LodFade.slang),
+	//     0 for none, which the Mask variants of the camera's passes clip by and a Blend material's alpha follows; and
+	//     WindResponse, with DrawFlagWind, its material's wind block as four unorm8 bytes (Renderer/MeshWind.h's
+	//     PackWindResponse: Bend, Branch, Flutter and Stiffness over their ranges, Shared/WindConstants.h), which every vertex
+	//     entry's displacement reads (Common/Wind.slang); 0 and unread without the flag.
 	// The members are ordered so that every Float4x4 and Float3 starts at a 16-byte boundary, every Float2 at an 8-byte one,
 	// and the size is a multiple of 16, which makes the C++ layout equal the std430 layout of a Vulkan structured buffer.
 	struct InstanceRecord
@@ -52,15 +58,17 @@ namespace Engine {
 		// samples; 0 and unread without the flag.
 		uint32_t PlanarReflectionSlot = 0;
 		Float2 UVOffset = Float2(0.0f, 0.0f);
-		uint32_t Padding1 = 0;
-		uint32_t Padding2 = 0;
+		float LodFade = 0.0f;
+		uint32_t WindResponse = 0;
 	};
 
 	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): one entry of a view's InstanceIndices structured buffer (t22
 	// of set 0 of the Scene and Shadow programs): a static draw (DrawConstants::Flags with DrawConstantsStaticInstances)
 	// reads instance i's record at StaticInstances[InstanceIndices[FirstInstance + i].Record], StaticInstances (t21) being the
 	// GPU-resident records of the scene's static set. Reserved is 0 and unread at M43, kept for M46's per-view fade of a
-	// static entry (ADR 0060's ledger), so M46 changes no layout of M43's.
+	// static entry (ADR 0060's ledger), so M46 changes no layout of M43's. M46 (W46.4): Reserved holds the bits of the entry's
+	// signed level fade (InstanceRecord::LodFade's meaning, 0 for none), which Common/Instances.slang's LoadInstanceRecord
+	// returns in the static record, since a static record is shared by every view.
 	struct InstanceIndex
 	{
 		uint32_t Record = 0;
@@ -71,7 +79,8 @@ namespace Engine {
 	static_assert(sizeof(InstanceIndex) == 8 && offsetof(InstanceIndex, Reserved) == 4, "InstanceIndex must match its 8-byte structured-buffer layout");
 	static_assert(sizeof(InstanceRecord) == 208, "InstanceRecord must match its 208-byte structured-buffer layout");
 	static_assert(offsetof(InstanceRecord, PreviousWorld) == 64 && offsetof(InstanceRecord, EntityId) == 128 && offsetof(InstanceRecord, Tint) == 144
-			&& offsetof(InstanceRecord, Emissive) == 160 && offsetof(InstanceRecord, DissolveEdge) == 176 && offsetof(InstanceRecord, UVOffset) == 192,
+			&& offsetof(InstanceRecord, Emissive) == 160 && offsetof(InstanceRecord, DissolveEdge) == 176 && offsetof(InstanceRecord, UVOffset) == 192
+			&& offsetof(InstanceRecord, LodFade) == 200 && offsetof(InstanceRecord, WindResponse) == 204,
 		"InstanceRecord members must sit where the structured-buffer layout puts them");
 
 }

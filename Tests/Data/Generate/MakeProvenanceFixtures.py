@@ -170,13 +170,14 @@ def scene_document() -> dict[str, Any]:
 
 
 def material_document() -> dict[str, Any]:
-    """A canonical Material version 2 document (M23: each map's UV set follows it)."""
-    return {"Format": "Material", "Version": 2, "BaseColor": [0.8, 0.1, 0.1, 1], "BaseColorMap": None,
+    """A canonical Material version 3 document (M23: each map's UV set follows it; M46: the Wind block)."""
+    return {"Format": "Material", "Version": 3, "BaseColor": [0.8, 0.1, 0.1, 1], "BaseColorMap": None,
             "BaseColorUVSet": "UV0", "Metallic": 0, "Roughness": 0.5, "MetallicRoughnessMap": None,
             "MetallicRoughnessUVSet": "UV0", "NormalMap": None, "NormalUVSet": "UV0", "NormalScale": 1,
             "OcclusionMap": None, "OcclusionUVSet": "UV0", "OcclusionStrength": 1, "Emissive": [0, 0, 0],
             "EmissiveStrength": 1, "EmissiveMap": None, "EmissiveUVSet": "UV0", "AlphaMode": "Opaque",
-            "AlphaCutoff": 0.5, "DoubleSided": False, "UVScale": [1, 1], "UVOffset": [0, 0]}
+            "AlphaCutoff": 0.5, "DoubleSided": False, "UVScale": [1, 1], "UVOffset": [0, 0],
+            "Wind": {"Enabled": False, "Bend": 0.1, "Branch": 0.1, "Flutter": 0.02, "Stiffness": 0.5}}
 
 
 def meta_document(handle: str, kind: str) -> dict[str, Any]:

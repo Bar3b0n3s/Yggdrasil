@@ -198,7 +198,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
 **Layers (§3)**
 - A module includes only lower layers and the listed exceptions. Layer 5 is an explicit DAG in `Scripts/ModuleRules.json`. `Lint.py` enforces all of this.
 - `Renderer` never includes `Scene`.
-- Public headers never expose GLFW, Jolt, Luau, miniaudio, cgltf, stb, HarfBuzz, SheenBidi, CMP_Core, tinyexr, Recast or Detour types.
+- Public headers never expose GLFW, Jolt, Luau, miniaudio, cgltf, stb, HarfBuzz, SheenBidi, CMP_Core, tinyexr, Recast, Detour or meshoptimizer types.
 - Platform code lives only in `Platform/Windows/`, `Platform/Posix/` (shared by Linux and macOS; `Platform/Linux/` and `Platform/MacOS/` when a difference grows) and in the Graphics device setup. Helpers that both OS halves of a unit share go in `Platform/Private/`, named after the unit. In Tests, only `Support/PlatformProbes.cpp` has OS headers (ADR 0005 decisions 1 and 25).
 
 **No product name in code.** "Yggdrasil" appears only in the premake workspace name (`WorkspaceName` in `premake5.lua`, which scripts read through `Scripts/Lib/paths.py`), in `ENGINE_PRODUCT_NAME` and in docs. Code, macros, files, shaders, Python and premake scripts say `Engine`/`ENGINE_`; `Lint.py` checks C++, Slang, Python and Lua.

@@ -123,6 +123,8 @@ namespace Engine {
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): b7 of the forward set, written by every Render.
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle planarReflectionConstants,
 			Detail::CreateViewBuffer(device, sizeof(PlanarReflectionConstants), 0, "SceneRenderer.PlanarReflectionConstants"));
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3L): b8 of every mesh layout.
+		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle windConstants, Detail::CreateViewBuffer(device, sizeof(WindConstants), 0, "SceneRenderer.WindConstants"));
 		const RenderOutputMapping mapping = ComputeRenderOutputMapping(state.ViewWidth, state.ViewHeight, state.OutputSettings);
 		ENGINE_TRY_ASSIGN(Detail::SceneRendererTargets targets, state.CreateTargets(mapping.SceneWidth, mapping.SceneHeight));
 		state.ViewConstantsBuffer = std::move(viewConstants);
@@ -132,6 +134,7 @@ namespace Engine {
 		state.ShadowConstantsBuffer = std::move(shadowConstants);
 		state.ShadowCasterConstantsBuffer = std::move(casterConstants);
 		state.PlanarReflectionConstantsBuffer = std::move(planarReflectionConstants);
+		state.WindConstantsBuffer = std::move(windConstants);
 		state.Targets = std::move(targets);
 		state.FinalTarget = 0;
 		state.Lights.reserve(MaxShadedLightsCeiling);

@@ -27,6 +27,8 @@
 #include "Engine/Renderer/Light2DShading.h"
 #include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/Lights2DPass.h"
+#include "Engine/Renderer/MeshLod.h"
+#include "Engine/Renderer/MeshWind.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/PlanarReflectionPass.h"
 #include "Engine/Renderer/PlanarReflections.h"
@@ -65,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -906,7 +909,7 @@ namespace Engine {
 		Result<nvrhi::IBindingSet*> set = Materials.GetOrCreate(*Device, handle, material, *Pipelines->Layouts.Material);
 		if (!set.has_value())
 			return std::unexpected(std::move(set).error().WithContext(std::format("while binding material {}", handle)));
-		return Detail::SceneRendererMaterial{ .Set = *set, .Mode = material.AlphaMode, .DoubleSided = material.DoubleSided };
+		return Detail::SceneRendererMaterial{ .Set = *set, .Mode = material.AlphaMode, .DoubleSided = material.DoubleSided, .Wind = material.Wind };
 	}
 
 	Status SceneRenderer::State::PrepareDraws(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera)
@@ -957,13 +960,28 @@ namespace Engine {
 
 			// The mirror is valid until the next upload (resolving materials uploads textures): what is needed is copied now.
 			const GpuMesh& mesh = Cache->GetMesh(item.Mesh);
-			if (mesh.VertexBuffer == nullptr || mesh.AttributeBuffer == nullptr || mesh.IndexBuffer == nullptr)
+			if (mesh.VertexBuffer == nullptr || mesh.AttributeBuffer == nullptr || mesh.IndexBuffer == nullptr || mesh.WindBuffer == nullptr)
 				continue; // not even the placeholder could be created (reported by the cache)
 			nvrhi::IBuffer* vertexBuffer = mesh.VertexBuffer.Get();
 			nvrhi::IBuffer* attributeBuffer = mesh.AttributeBuffer.Get();
 			nvrhi::IBuffer* indexBuffer = mesh.IndexBuffer.Get();
+			nvrhi::IBuffer* windBuffer = mesh.WindBuffer.Get();
 			submeshes.assign(mesh.Submeshes.begin(), mesh.Submeshes.end());
 			defaults.assign(mesh.DefaultMaterials.begin(), mesh.DefaultMaterials.end());
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3D): the item's levels in this view, by
+			// its bounding sphere's screen size and its distance from this view's camera (a mirror view's own camera, never its
+			// cull camera, whose projection is cropped to the glass); an item at or beyond its CullDistance draws nothing. Only
+			// the main view counts them (RenderStats): an item it culls by distance, an item of which it draws two levels and
+			// each draw per level.
+			const CameraData& lodCamera = mirror != nullptr && mirror->View != nullptr ? *mirror->View : camera;
+			const MeshLodSelection lods = SelectViewMeshLod(mesh.LodScreenSizes, mesh.Bounds, item.World, item.Distance, lodCamera);
+			if (lods.DrawCount == 0)
+			{
+				if (mirror == nullptr)
+					++Stats.DistanceCulledMeshes;
+				continue;
+			}
+			bool drawn = false;
 
 			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0.0f;
 			const glm::mat4 worldView = camera.View * item.World;
@@ -1000,8 +1018,6 @@ namespace Engine {
 				const Detail::SceneRendererMaterial& material = found->second;
 				if (material.Set == nullptr)
 					continue; // its GPU objects are missing (reported)
-				// M31 (decision 5): an Opaque material's draw of a dissolving or fading item takes the Mask variants.
-				const AlphaMode mode = SelectMeshAlphaMode(material.Mode, item.Parameters, false);
 				// M23 (C23.3): a deformed item's draws bind its entry's deformed vertices and key its VertexStream; M26 (stream X-C):
 				// and its previous positions, which the prepass's motion vectors read.
 				nvrhi::IBuffer* drawVertices = vertexBuffer;
@@ -1022,34 +1038,58 @@ namespace Engine {
 				}
 
 				const Utils::MeshCullMode cullMode = Utils::SelectCullMode(mirrored, material.DoubleSided);
-				Detail::SceneRendererDraw draw;
-				draw.VertexBuffer = drawVertices;
-				draw.PreviousPositions = previousPositions;
-				draw.VertexStream = vertexStream;
-				draw.AttributeBuffer = attributeBuffer;
-				draw.IndexBuffer = indexBuffer;
-				draw.IndexOffset = submesh.IndexOffset;
-				draw.IndexCount = submesh.IndexCount;
-				draw.Material = material.Set;
-				draw.ForwardVariant = Utils::GetForwardVariant(mode, cullMode);
-				draw.MaterialHandle = materialHandle;
-				draw.Mesh = item.Mesh;
-				draw.Entity = item.Entity;
-				draw.Submesh = submeshIndex;
-				draw.SnapshotIndex = index;
-				draw.Bounds = bounds;
-				if (mode == AlphaMode::Blend)
+				// M46 (decisions 3E and 3G): one draw per level the view draws, each with its index range and fade; the wind's
+				// response for a material with wind in a scene with a Wind.
+				const bool wind = frame.HasWind && material.Wind.Enabled;
+				for (uint32_t lodIndex = 0; lodIndex < lods.DrawCount; ++lodIndex)
 				{
-					const glm::vec3 centre = bounds.IsEmpty() ? glm::vec3(0.0f) : (bounds.Min + bounds.Max) * 0.5f;
-					draw.ViewDepth = -(worldView * glm::vec4(centre, 1.0f)).z;
-					transparent.push_back(draw);
-				}
-				else
-				{
-					draw.PrepassVariant = Utils::GetPrepassVariant(mode, cullMode);
-					opaque.push_back(draw);
+					const MeshLodDraw& lod = lods.Draws[lodIndex];
+					const uint32_t indexOffset = lod.Level == 0 ? submesh.IndexOffset : submesh.Lods[lod.Level - 1].IndexOffset;
+					const uint32_t indexCount = lod.Level == 0 ? submesh.IndexCount : submesh.Lods[lod.Level - 1].IndexCount;
+					if (indexCount == 0)
+						continue;
+					// M31 (decision 5): an Opaque material's draw of a dissolving or fading item takes the Mask variants; M46: so
+					// does its draw of a level that fades.
+					const AlphaMode mode = SelectMeshAlphaMode(material.Mode, item.Parameters, false, lod.Fade);
+					Detail::SceneRendererDraw draw;
+					draw.VertexBuffer = drawVertices;
+					draw.PreviousPositions = previousPositions;
+					draw.VertexStream = vertexStream;
+					draw.AttributeBuffer = attributeBuffer;
+					draw.IndexBuffer = indexBuffer;
+					draw.WindBuffer = windBuffer;
+					draw.IndexOffset = indexOffset;
+					draw.IndexCount = indexCount;
+					draw.Lod = lod.Level;
+					draw.LodFade = lod.Fade;
+					draw.Wind = wind;
+					draw.WindResponse = wind ? PackWindResponse(material.Wind) : 0U;
+					draw.Material = material.Set;
+					draw.ForwardVariant = Utils::GetForwardVariant(mode, cullMode);
+					draw.MaterialHandle = materialHandle;
+					draw.Mesh = item.Mesh;
+					draw.Entity = item.Entity;
+					draw.Submesh = submeshIndex;
+					draw.SnapshotIndex = index;
+					draw.Bounds = bounds;
+					drawn = true;
+					if (mirror == nullptr)
+						++Stats.MeshLodDraws[std::min<uint32_t>(lod.Level, static_cast<uint32_t>(Stats.MeshLodDraws.size()) - 1U)];
+					if (mode == AlphaMode::Blend)
+					{
+						const glm::vec3 centre = bounds.IsEmpty() ? glm::vec3(0.0f) : (bounds.Min + bounds.Max) * 0.5f;
+						draw.ViewDepth = -(worldView * glm::vec4(centre, 1.0f)).z;
+						transparent.push_back(draw);
+					}
+					else
+					{
+						draw.PrepassVariant = Utils::GetPrepassVariant(mode, cullMode);
+						opaque.push_back(draw);
+					}
 				}
 			}
+			if (mirror == nullptr && lods.CrossFade && drawn)
+				++Stats.LodCrossFades;
 		}
 
 		// §8.3 pass 1: opaque draws by pipeline, then material, then mesh, then submesh (M23: so the draws of one submesh are
@@ -1059,7 +1099,8 @@ namespace Engine {
 		for (uint32_t index = 0; index < opaque.size(); ++index)
 		{
 			const Detail::SceneRendererDraw& draw = opaque[index];
-			opaqueKeys.push_back({ .Pipeline = draw.ForwardVariant, .Material = draw.MaterialHandle, .Mesh = draw.Mesh, .Submesh = draw.Submesh, .DrawIndex = index });
+			opaqueKeys.push_back(
+				{ .Pipeline = draw.ForwardVariant, .Material = draw.MaterialHandle, .Mesh = draw.Mesh, .Submesh = draw.Submesh, .Lod = draw.Lod, .DrawIndex = index });
 		}
 		SortOpaqueDraws(opaqueKeys);
 		std::vector<TransparentSortKey> transparentKeys;
@@ -1096,16 +1137,18 @@ namespace Engine {
 				{
 					if (transparentDraws)
 					{
+						// M46 (W46.4): with its view's fade.
 						const uint32_t record = draw.Instance;
 						draw.Instance = static_cast<uint32_t>(InstanceIndices.size());
-						InstanceIndices.push_back({ .Record = record });
+						InstanceIndices.push_back({ .Record = record, .Reserved = std::bit_cast<uint32_t>(draw.LodFade) });
 					}
 					draw.Batch = 1;
 					keys.push_back({ .Pipeline = draw.ForwardVariant,
 						.Material = draw.MaterialHandle,
 						.Mesh = draw.Mesh,
 						.Submesh = draw.Submesh,
-						.VertexStream = Detail::StaticVertexStream });
+						.VertexStream = Detail::StaticVertexStream,
+						.Lod = draw.Lod });
 					continue;
 				}
 				const MeshDrawItem& item = snapshot.Meshes[draw.SnapshotIndex];
@@ -1114,12 +1157,18 @@ namespace Engine {
 				// M26 (stream X-C): a deformed item that continues its view's history (it has a PreviousWorld) moves from its
 				// previous deformation; otherwise its motion is its world matrix's alone (none after a reset).
 				const uint32_t previousPositions = draw.PreviousPositions != nullptr && item.PreviousWorld.has_value() ? DrawFlagPreviousPositions : 0U;
-				Instances.push_back(MakeMeshInstanceRecord(item, (item.ReceiveShadows ? DrawFlagReceiveShadows : 0U) | previousPositions));
+				InstanceRecord record =
+					MakeMeshInstanceRecord(item, (item.ReceiveShadows ? DrawFlagReceiveShadows : 0U) | previousPositions | (draw.Wind ? DrawFlagWind : 0U));
+				// M46 (decisions 3E and 3G): the draw's level fade and its material's wind response.
+				record.LodFade = draw.LodFade;
+				record.WindResponse = draw.WindResponse;
+				Instances.push_back(record);
 				keys.push_back({ .Pipeline = draw.ForwardVariant,
 					.Material = draw.MaterialHandle,
 					.Mesh = draw.Mesh,
 					.Submesh = draw.Submesh,
-					.VertexStream = draw.VertexStream });
+					.VertexStream = draw.VertexStream,
+					.Lod = draw.Lod });
 			}
 			if (!snapshot.Quality.Instancing)
 				return; // the reference path: one draw per submesh draw
@@ -1178,13 +1227,13 @@ namespace Engine {
 				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.VertexBuffer).setSlot(0).setOffset(0));
 				// The attribute stream (M23, C-MESH2): the mesh's own, or the cache's shared default stream, read from offset 0.
 				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.AttributeBuffer).setSlot(Utils::MeshAttributeStreamSlot).setOffset(0));
+				// M46 (decision 3G): the wind stream: the mesh's own, or the cache's shared zero stream, read from offset 0.
+				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.WindBuffer).setSlot(Utils::MeshWindStreamSlot).setOffset(0));
 				// M26 (stream X-C): the prepass variants' previous positions (Private/ForwardPipelines.h): a deformed draw's, else
-				// its own vertices, which the shaders do not read as positions.
-				if (pass == Detail::SceneRendererMeshPass::Prepass || pass == Detail::SceneRendererMeshPass::Picking)
-				{
-					nvrhi::IBuffer* previous = draw.PreviousPositions != nullptr ? draw.PreviousPositions : draw.VertexBuffer;
-					state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(previous).setSlot(Utils::PreviousPositionSlot).setOffset(0));
-				}
+				// its own vertices, which the shaders do not read as positions. M46: the other passes bind their own vertices there
+				// too, unread, since NVRHI binds the vertex slots as one contiguous range and binding 3 (the wind) follows.
+				nvrhi::IBuffer* previous = prepass && draw.PreviousPositions != nullptr ? draw.PreviousPositions : draw.VertexBuffer;
+				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(previous).setSlot(Utils::PreviousPositionSlot).setOffset(0));
 				state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.IndexBuffer).setFormat(nvrhi::Format::R32_UINT).setOffset(0));
 				commandList.setGraphicsState(state);
 				lastPipeline = pipeline.Pipeline.Get();
@@ -1198,6 +1247,12 @@ namespace Engine {
 			if (draw.StaticInstances != 0)
 			{
 				constants.Flags = DrawConstantsStaticInstances;
+				// M46 (W46.4): a static draw carries its material's wind (a batch's draws share their key).
+				if (draw.Wind)
+				{
+					constants.Flags |= DrawConstantsWind;
+					constants.WindResponse = draw.WindResponse;
+				}
 				instances = 0;
 				for (uint32_t member = 0; member < draw.Batch; ++member)
 					instances += draws[index + member].StaticInstances;
@@ -1531,6 +1586,10 @@ namespace Engine {
 		// M43: the static items the view drew a submesh of, as the dynamic items.
 		stats.VisibleMeshes = static_cast<uint32_t>(visibleMeshes.size()) + frame.StaticVisibleItems;
 		stats.CulledSubmeshes = state.Stats.CulledSubmeshes;
+		static_assert(std::tuple_size_v<decltype(stats.MeshLodDraws)> == MaxMeshLods, "a count per level of detail");
+		stats.MeshLodDraws = state.Stats.MeshLodDraws; // M46 (decision 3K)
+		stats.LodCrossFades = state.Stats.LodCrossFades;
+		stats.DistanceCulledMeshes = state.Stats.DistanceCulledMeshes;
 		stats.ShadowedSpotLights = static_cast<uint32_t>(frame.Spots.Tiles.size());
 		stats.DroppedSpotShadows = frame.Spots.Dropped;
 		stats.ShadowedPointLights = static_cast<uint32_t>(frame.Points.Lights.size());
@@ -1640,6 +1699,7 @@ namespace Engine {
 			commandList.writeBuffer(UnjitteredViewConstantsBuffer, &frame.OverlayConstants, sizeof(frame.OverlayConstants));
 		commandList.writeBuffer(EnvironmentConstantsBuffer, &frame.Environment, sizeof(frame.Environment));
 		commandList.writeBuffer(FogConstantsBuffer, &frame.Fog, sizeof(frame.Fog));
+		commandList.writeBuffer(WindConstantsBuffer, &frame.Wind, sizeof(frame.Wind)); // M46 (decision 3G)
 		commandList.writeBuffer(ShadowConstantsBuffer, &frame.Shadow, sizeof(frame.Shadow));
 		if (!Lights.empty())
 			commandList.writeBuffer(LightBuffer, Lights.data(), Lights.size() * sizeof(ShaderLight));
@@ -1901,6 +1961,14 @@ namespace Engine {
 		// M23 (C23.3): this render's deformations, resolved as the passes look at their items.
 		++DeformRender;
 		ItemDeforms.assign(snapshot.Meshes.size(), Detail::SceneRendererItemDeform{});
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's wind, this render's and
+		// the previous render's for the motion vectors (this render's when the camera starts a new history).
+		const WindFrame wind = MakeWindFrame(snapshot.Wind);
+		const WindFrame previousWind = HasPreviousWind && camera.PreviousViewProjection.has_value() ? PreviousWind : wind;
+		frame.Wind = MakeWindConstants(wind, previousWind);
+		frame.HasWind = snapshot.Wind.Enabled;
+		PreviousWind = wind;
+		HasPreviousWind = true;
 		if (hasCamera)
 			frame.KeepFirstError(PrepareDraws(frame, snapshot, camera));
 		// M23 (R-INST): the shadow casters' and the selection's draws, with their instance records after the camera's. The
@@ -1929,13 +1997,15 @@ namespace Engine {
 			const std::vector<DeformedVertexSource> castingSources = PrepareVertexSources(frame, castingItems);
 			for (size_t position = 0; position < castingItems.size(); ++position)
 				sources[castingPositions[position]] = castingSources[position];
-			Result<ShadowCasterSet> casters = ShadowPass::PrepareCasters(*Cache, finiteCasters, snapshot.Quality.Instancing, Instances, sources);
+			// M46 (decisions 3E and 3G): each caster draws its level for this view's camera, and a wind caster sways.
+			const ShadowCasterView casterView{ .Camera = hasCamera ? &camera : nullptr, .Wind = frame.HasWind ? &wind : nullptr };
+			Result<ShadowCasterSet> casters = ShadowPass::PrepareCasters(*Cache, finiteCasters, snapshot.Quality.Instancing, Instances, sources, casterView);
 			if (casters.has_value())
 				frame.ShadowCasters = std::move(*casters);
 			else
 				frame.KeepFirstError(std::unexpected(std::move(casters).error()));
 			// M43: the static casters, culled and grouped by key per face (one draw per key and face).
-			PrepareStaticShadows(frame);
+			PrepareStaticShadows(frame, casterView);
 		}
 		if (frame.Selection)
 		{
@@ -1953,7 +2023,7 @@ namespace Engine {
 				sources[selected[position]] = selectedSources[position];
 			// M43: a selected static item's record is copied into Instances, so Selection.slang reads it there.
 			const std::vector<MeshDrawItem> staticSelected = CollectSelectedStaticItems(frame);
-			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources, staticSelected);
+			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources, staticSelected, frame.HasWind);
 		}
 		const bool environmentLit = hasCamera && frame.IsLit && !frame.Wireframe;
 		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; SceneRendererSky.cpp): an enabled Sky lights the view in
@@ -2307,6 +2377,7 @@ namespace Engine {
 			.StaticKeys = StaticCasterKeys,
 			.StaticInstances = GetStaticInstancesBinding(frame),
 			.InstanceIndices = InstanceIndexBuffer,
+			.Wind = WindConstantsBuffer,
 		};
 		auto result = Pipelines->Shadows->Record(*frame.CommandList, *frame.Recording, ShadowBindings, inputs);
 		if (!result)
@@ -2337,6 +2408,7 @@ namespace Engine {
 				// M43: the static records and the view's indices into them.
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 			};
 			auto created = ViewBindings.GetOrCreate(*Device, desc, *Pipelines->Layouts.PrepassView);
 			if (created)
@@ -2354,6 +2426,7 @@ namespace Engine {
 					nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
 					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
 					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
+					nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 				};
 				auto overdrawSet = ViewBindings.GetOrCreate(*Device, overdraw, *Pipelines->Layouts.OverdrawView);
 				if (overdrawSet)
@@ -2528,6 +2601,7 @@ namespace Engine {
 		// M43: the static records and the view's indices into them.
 		desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)));
 		desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer));
+		desc.bindings.push_back(nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer)); // M46
 		return desc;
 	}
 

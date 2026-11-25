@@ -5,6 +5,7 @@
 #include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Renderer/RenderStage.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -114,6 +115,14 @@ namespace Engine {
 		// its sky (Renderer/ProbeRelight.h).
 		uint32_t SkyUpdates = 0;
 		uint32_t RelitIrradianceVolumes = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; ADR 0060's phase-8 ledger: appended):
+		// the main view's mesh levels of detail (Renderer/MeshLod.h). MeshLodDraws: the submesh draws of each level (0 to
+		// MaxMeshLods - 1), both draws of a cross-fade counted; LodCrossFades: the items drawn inside a fade band (two
+		// levels); DistanceCulledMeshes: the items at or beyond their RenderDistance's CullDistance from the camera. All
+		// deterministic for a fixed camera.
+		std::array<uint32_t, 5> MeshLodDraws{};
+		uint32_t LodCrossFades = 0;
+		uint32_t DistanceCulledMeshes = 0;
 	};
 
 	// M32 (decision 13): the SSR area of one completed frame, which RenderStatsHistory::PublishSsrArea merges into the

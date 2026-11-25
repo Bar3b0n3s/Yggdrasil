@@ -8,11 +8,13 @@
 #include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/MeshLod.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/ShadowCasterConstants.h"
+#include "Shared/WindConstants.h"
 
 #include <algorithm>
 #include <array>
@@ -22,6 +24,7 @@
 #include <format>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <span>
 #include <tuple>
 
@@ -37,10 +40,11 @@ namespace Engine {
 			view.visibility = nvrhi::ShaderType::All;
 			view.registerSpace = 0;
 			view.registerSpaceIsDescriptorSet = true;
-			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static records and the view's indices after the records.
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static records and the view's indices after the records;
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the wind at b8 after them.
 			view.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(0), nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
 				nvrhi::BindingLayoutItem::StructuredBuffer_SRV(StaticInstancesRegister), nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstanceIndicesRegister),
-				nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)) };
+				nvrhi::BindingLayoutItem::ConstantBuffer(WindConstantsRegister), nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask)
 			{
 				// M31 (decision 6): the dissolve noise and its sampler.
@@ -53,7 +57,8 @@ namespace Engine {
 			result.Entries = { "VSMain", "PSMain" };
 			result.Permutation = { { .Key = "ALPHA_MASK", .Value = mask ? "1" : "0" } };
 			result.BindingLayouts = { view };
-			result.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(ShadowCasterConstants) } };
+			result.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(ShadowCasterConstants) },
+				{ .Set = 0, .Register = WindConstantsRegister, .ByteSize = sizeof(WindConstants) } };
 			if (mask)
 			{
 				nvrhi::BindingLayoutDesc material;
@@ -193,7 +198,10 @@ namespace Engine {
 
 		// M43: the face's draws, one per key, appended to `set` with their indices appended to `indices`, and, when `hashed`
 		// (a face M29's cache holds: a spot tile or a point face), its signature; `buckets` is left empty for the next face.
-		[[nodiscard]] static StaticShadowFace FinishStaticFace(StaticShadowBuckets& buckets, bool hashed, StaticShadowSet& set, std::vector<InstanceIndex>& indices)
+		// M46 (W46.4): a hashed face whose visible casters hold a wind caster also hashes `wind`, the render's wind (none without
+		// one), whose phases move every frame.
+		[[nodiscard]] static StaticShadowFace FinishStaticFace(StaticShadowBuckets& buckets, bool hashed, StaticShadowSet& set, std::vector<InstanceIndex>& indices,
+			const WindFrame* wind)
 		{
 			StaticShadowFace face{ .FirstDraw = static_cast<uint32_t>(set.Draws.size()) };
 			XXH64Hasher signature;
@@ -210,8 +218,11 @@ namespace Engine {
 				bucket.clear();
 			}
 			face.DrawCount = static_cast<uint32_t>(buckets.Touched.size());
+			if (hashed && buckets.Wind && wind != nullptr)
+				HashShadowValue(signature, *wind);
 			face.Signature = hashed && face.DrawCount != 0 ? FinishShadowSignature(signature) : 0;
 			buckets.Touched.clear();
+			buckets.Wind = false;
 			return face;
 		}
 
@@ -234,11 +245,34 @@ namespace Engine {
 			}
 		}
 
+		// M46 (the W46.4 review, finding 3): the first entry in buckets.Levels of cell `index`'s casters' levels for the render,
+		// chosen at the first face that looks at the cell: PrepareCasters' SelectViewShadowLod by `camera` (level 0 without a
+		// camera, and, unmeasured, for a caster without levels or CullDistance, which is what it gives such a caster).
+		[[nodiscard]] static uint32_t ChooseStaticCellLevels(const StaticShadowCell& cell, uint32_t index, const CameraData* camera, StaticShadowBuckets& buckets)
+		{
+			uint32_t& first = buckets.CellLevels[index];
+			if (first != NoStaticCellLevels)
+				return first;
+			first = static_cast<uint32_t>(buckets.Levels.size());
+			for (const StaticShadowCaster& caster : cell.Casters)
+			{
+				std::optional<uint32_t> level = 0U;
+				if (camera != nullptr && (caster.LodCount != 0 || caster.Distance.CullDistance > 0.0f))
+				{
+					level = SelectViewShadowLod(std::span<const float>(caster.LodScreenSizes.data(), caster.LodCount), caster.MeshBounds, caster.World,
+						caster.Distance, *camera);
+				}
+				buckets.Levels.push_back(level.has_value() ? static_cast<uint8_t>(*level) : NoStaticShadowLevel);
+			}
+			return first;
+		}
+
 		// M43: one face's visible static casters into `buckets`: of each candidate cell not outside the face's frustum, each
 		// caster the dynamic path's tests keep (ShadowBoxesOverlap with `light`, then IsOutsideShadow), a test the cell's
-		// classification settles for all its casters skipped.
+		// classification settles for all its casters skipped. M46 (W46.4): each at its level in the render
+		// (ChooseStaticCellLevels), none beyond its CullDistance or at a level where it has no indices.
 		static void CullStaticFace(std::span<const StaticShadowCell> cells, std::span<const StaticFaceCandidate> candidates, const ShadowBox* light,
-			const glm::mat4& viewProjection, bool pancake, StaticShadowBuckets& buckets)
+			const glm::mat4& viewProjection, bool pancake, const CameraData* camera, StaticShadowBuckets& buckets)
 		{
 			// The face's frustum's centre bounds the magnitudes its clip coordinates are computed from (InflateStaticCellBox); a
 			// degenerate face's falls back to the origin, so no margin is ever non-finite.
@@ -252,13 +286,22 @@ namespace Engine {
 																	: ClassifyStaticCellShadow(InflateStaticCellBox(cell.Box, reference), viewProjection, pancake);
 				if (frustum == StaticCellVisibility::Outside)
 					continue;
-				for (const StaticShadowCaster& caster : cell.Casters)
+				const uint32_t levels = ChooseStaticCellLevels(cell, candidate.Cell, camera, buckets);
+				for (uint32_t casterIndex = 0; casterIndex < cell.Casters.size(); ++casterIndex)
 				{
+					const StaticShadowCaster& caster = cell.Casters[casterIndex];
 					if (light != nullptr && candidate.Light != StaticCellVisibility::Inside && !ShadowBoxesOverlap(caster.Box, *light))
 						continue;
 					if (frustum != StaticCellVisibility::Inside && IsOutsideShadow(caster.Bounds, viewProjection * caster.World, pancake))
 						continue;
-					AddStaticFaceCaster(buckets, caster.Key, cell.FirstRecord + caster.Item, caster.Signature);
+					const uint8_t level = buckets.Levels[levels + casterIndex];
+					if (level == NoStaticShadowLevel)
+						continue;
+					const StaticShadowLevel chosen = level == 0 ? StaticShadowLevel{ .Key = caster.Key, .Signature = caster.Signature } : caster.Levels[level - 1U];
+					if (chosen.Key == NoStaticShadowKey)
+						continue;
+					AddStaticFaceCaster(buckets, chosen.Key, cell.FirstRecord + caster.Item, chosen.Signature);
+					buckets.Wind = buckets.Wind || caster.Wind;
 				}
 			}
 		}
@@ -269,23 +312,29 @@ namespace Engine {
 			ShadowCasterDraw Draw{};
 			MeshInstanceKey Key{};
 			InstanceRecord Record{};
+			AssetHandle Material{}; // M46 (the W46.4 review, finding 1): the submesh's material, which a static wind caster keys by
 		};
 
-		// The caster draws of `item` (a caster with a mesh and a finite world matrix) whose vertices `source` gives, one per
-		// submesh that casts, in submesh order, with their keys, records and M29 signatures (PrepareCasters' rule, which M43's
-		// static casters share): appended to `candidates`.
-		static void AppendCasterCandidates(GpuResourceCache& cache, const MeshDrawItem& item, const DeformedVertexSource& source,
-			std::vector<ShadowCasterCandidate>& candidates)
+		// The caster draws of `item` (a caster with a finite world matrix whose mesh `mesh`, the cache's copy, has its vertex,
+		// index, attribute and wind buffers) whose vertices `source` gives, one per submesh that casts, in submesh order, with
+		// their keys, records and M29 signatures (PrepareCasters' rule, which M43's static casters share): appended to
+		// `candidates`. M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): of the mesh's level
+		// `level` (0 to its last), never faded; with `wind`, a draw whose material has wind takes DrawFlagWind and its
+		// WindResponse, and its signature hashes them and `windFrame`, the render's wind, when it is not null (a dynamic
+		// caster's; a static caster's face hashes the frame instead, PrepareStaticFaces).
+		static void AppendCasterCandidates(GpuResourceCache& cache, const GpuMesh& mesh, const MeshDrawItem& item, const DeformedVertexSource& source,
+			uint32_t level, bool wind, const WindFrame* windFrame, std::vector<ShadowCasterCandidate>& candidates)
 		{
-			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
-			const GpuMesh mesh = cache.GetMesh(item.Mesh);
-			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer)
-				return;
+			ENGINE_CORE_ASSERT(level <= mesh.LodScreenSizes.size(), "a caster's level must be one of its mesh's");
 			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0;
 			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
 			{
 				const GpuSubmesh& submesh = mesh.Submeshes[submeshIndex];
 				if (submesh.IndexCount == 0)
+					continue; // as PrepareViewDraws: an empty submesh draws no level
+				const uint32_t indexOffset = level == 0 ? submesh.IndexOffset : submesh.Lods[level - 1].IndexOffset;
+				const uint32_t indexCount = level == 0 ? submesh.IndexCount : submesh.Lods[level - 1].IndexCount;
+				if (indexCount == 0)
 					continue;
 				AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
 				if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot].IsValid())
@@ -301,9 +350,10 @@ namespace Engine {
 				ShadowCasterCandidate candidate;
 				candidate.Draw = { .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
 					.Attributes = mesh.AttributeBuffer,
+					.Wind = mesh.WindBuffer,
 					.Indices = mesh.IndexBuffer,
-					.IndexOffset = submesh.IndexOffset,
-					.IndexCount = submesh.IndexCount,
+					.IndexOffset = indexOffset,
+					.IndexCount = indexCount,
 					.Bounds = source.Vertices != nullptr ? source.Bounds : submesh.Bounds,
 					.World = item.World,
 					.Variant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(mirrored, material.DoubleSided)),
@@ -311,20 +361,26 @@ namespace Engine {
 					.MaterialConstants = mask ? material.Constants : nvrhi::BufferHandle(),
 					.BaseColorMap = mask ? material.BaseColorMap : nvrhi::TextureHandle() };
 				// An Opaque caster binds no material, so the Opaque casters of one mesh batch whatever their materials.
+				candidate.Material = materialHandle;
 				candidate.Key = { .Pipeline = candidate.Draw.Variant,
 					.Material = mask ? materialHandle : AssetHandle(),
 					.Mesh = item.Mesh,
 					.Submesh = submeshIndex,
-					.VertexStream = source.VertexStream };
-				candidate.Record = MakeMeshInstanceRecord(item);
+					.VertexStream = source.VertexStream,
+					.Lod = level };
+				// M46 (decision 3G): a caster whose material has wind sways in a scene with a Wind.
+				const bool swaying = wind && material.Wind.Enabled;
+				candidate.Record = MakeMeshInstanceRecord(item, swaying ? DrawFlagWind : 0U);
+				candidate.Record.WindResponse = swaying ? PackWindResponse(material.Wind) : 0U;
 				// M29 (decision 4): what this draw puts into a depth map. An Opaque caster binds no material, so its material does
 				// not count; a deformed caster's vertices are its entity's, posed by its palette and weights.
 				XXH64Hasher signature;
 				Utils::HashShadowValue(signature, item.World);
 				signature.UpdateU64(item.Mesh.GetValue());
 				signature.UpdateU64(mesh.Version);
-				signature.UpdateU64(submesh.IndexOffset);
-				signature.UpdateU64(submesh.IndexCount);
+				signature.UpdateU64(indexOffset);
+				signature.UpdateU64(indexCount);
+				signature.UpdateU64(level);
 				signature.UpdateU64(candidate.Draw.Variant);
 				signature.UpdateU64(candidate.Draw.ReflectedVariant);
 				signature.UpdateU64(mask ? materialHandle.GetValue() : 0U);
@@ -345,6 +401,14 @@ namespace Engine {
 						Utils::HashShadowValue(signature, candidate.Record.DissolveNoiseScale);
 					if (material.AlphaMode == AlphaMode::Mask)
 						Utils::HashShadowValue(signature, candidate.Record.UVOffset);
+				}
+				// M46 (decision 3E): a wind caster's response and the render's wind, which change its depth every frame.
+				signature.UpdateU64(swaying ? 1U : 0U);
+				if (swaying)
+				{
+					signature.UpdateU64(candidate.Record.WindResponse);
+					if (windFrame != nullptr)
+						Utils::HashShadowValue(signature, *windFrame);
 				}
 				signature.UpdateU64(source.Vertices != nullptr ? 1U : 0U);
 				if (source.Vertices != nullptr)
@@ -379,6 +443,8 @@ namespace Engine {
 		nvrhi::SamplerHandle AnisoWrap{};
 		// M31 (decision 6): the 1 x 1 white R8 texture the Mask casters' set binds without ShadowRenderInputs::DissolveNoise.
 		nvrhi::TextureHandle NeutralNoise{};
+		// M46 (decision 3G): the calm WindConstants both variants' set binds without ShadowRenderInputs::Wind.
+		nvrhi::BufferHandle CalmWind{};
 
 		// The Mask casters' material sets (null for Opaque casters), one per draw of `casters`, from the caller's cache.
 		[[nodiscard]] Result<std::vector<nvrhi::IBindingSet*>> ResolveMaterialSets(PassBindingCache& bindings, const ShadowCasterSet& casters);
@@ -457,9 +523,12 @@ namespace Engine {
 					.setOffset(offsetof(MeshVertex, TexCoord))
 					.setElementStride(Stride),
 			};
-			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask caster's alpha test reads.
+			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask caster's alpha test reads; M46: MeshVertex's
+			// normal and the wind stream at 4 and 5, which the wind's displacement reads.
 			const std::array<nvrhi::VertexAttributeDesc, 2> stream = Utils::MakeMeshAttributeStreamAttributes();
 			specification.VertexAttributes.insert(specification.VertexAttributes.end(), stream.begin(), stream.end());
+			specification.VertexAttributes.push_back(Utils::MakeMeshNormalAttribute());
+			specification.VertexAttributes.push_back(Utils::MakeMeshWindStreamAttribute());
 			specification.Framebuffer.setDepthFormat(ShadowDepthFormat);
 			constexpr std::array<nvrhi::RasterCullMode, 3> Modes{ nvrhi::RasterCullMode::Back, nvrhi::RasterCullMode::Front,
 				nvrhi::RasterCullMode::None };
@@ -482,9 +551,18 @@ namespace Engine {
 		noise.keepInitialState = true;
 		noise.debugName = "ShadowPass.NeutralNoise";
 		ENGINE_TRY_ASSIGN(state.NeutralNoise, device.CreateTexture(noise));
+		nvrhi::BufferDesc calm;
+		calm.byteSize = sizeof(WindConstants);
+		calm.isConstantBuffer = true;
+		calm.initialState = nvrhi::ResourceStates::ConstantBuffer;
+		calm.keepInitialState = true;
+		calm.debugName = "ShadowPass.CalmWind";
+		ENGINE_TRY_ASSIGN(state.CalmWind, device.CreateBuffer(calm));
 		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle list, device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 		CommandListRecording recording(device, *list);
 		list->clearTextureFloat(state.NeutralNoise, nvrhi::AllSubresources, nvrhi::Color(1.0f));
+		const WindConstants calmConstants{};
+		list->writeBuffer(state.CalmWind, &calmConstants, sizeof(calmConstants));
 		recording.Execute();
 		return pass;
 	}
@@ -561,7 +639,7 @@ namespace Engine {
 	}
 
 	Result<ShadowCasterSet> ShadowPass::PrepareCasters(GpuResourceCache& cache, std::span<const MeshDrawItem> casters, bool instancing,
-		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources)
+		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources, const ShadowCasterView& view)
 	{
 		ENGINE_CORE_ASSERT(sources.empty() || sources.size() == casters.size(), "the casters' vertex sources are none or one per caster");
 		// The draws in caster order with their keys and records, sorted below.
@@ -575,7 +653,16 @@ namespace Engine {
 				continue;
 			if (!Utils::IsFiniteShadowWorld(item.World))
 				return MakeError(ErrorCode::InvalidArgument, "Shadow caster {} has a non-finite world transform", item.Entity);
-			Utils::AppendCasterCandidates(cache, item, source, candidates);
+			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
+			const GpuMesh mesh = cache.GetMesh(item.Mesh);
+			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer || !mesh.WindBuffer)
+				continue;
+			// M46 (decision 3E): the caster's level for the view's camera, never faded; beyond its CullDistance it casts nothing.
+			const std::optional<uint32_t> level =
+				view.Camera != nullptr ? SelectViewShadowLod(mesh.LodScreenSizes, mesh.Bounds, item.World, item.Distance, *view.Camera) : std::optional<uint32_t>(0U);
+			if (!level.has_value())
+				continue;
+			Utils::AppendCasterCandidates(cache, mesh, item, source, *level, view.Wind != nullptr, view.Wind, candidates);
 		}
 
 		// Equal draws adjacent, ties in caster order (the candidates' index).
@@ -585,7 +672,8 @@ namespace Engine {
 		{
 			const MeshInstanceKey& a = candidates[left].Key;
 			const MeshInstanceKey& b = candidates[right].Key;
-			return std::tie(a.Pipeline, a.Material, a.Mesh, a.Submesh, a.VertexStream, left) < std::tie(b.Pipeline, b.Material, b.Mesh, b.Submesh, b.VertexStream, right);
+			return std::tie(a.Pipeline, a.Material, a.Mesh, a.Submesh, a.Lod, a.VertexStream, left)
+				< std::tie(b.Pipeline, b.Material, b.Mesh, b.Submesh, b.Lod, b.VertexStream, right);
 		});
 		ShadowCasterSet set;
 		set.Draws.reserve(candidates.size());
@@ -611,30 +699,47 @@ namespace Engine {
 		return set;
 	}
 
-	void ShadowPass::AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, std::vector<ShadowCasterDraw>& draws,
-		std::vector<RenderStaticDrawKey>& keys)
+	void ShadowPass::AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, uint32_t level, std::vector<StaticCasterDraw>& draws)
 	{
 		ENGINE_CORE_ASSERT(Utils::IsFiniteShadowWorld(item.World), "a static caster's world matrix must be finite");
 		if (!item.CastShadows || !item.Mesh.IsValid())
 			return;
+		// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
+		const GpuMesh mesh = cache.GetMesh(item.Mesh);
+		if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer || !mesh.WindBuffer || level > mesh.LodScreenSizes.size())
+			return;
+		// M46 (W46.4): with its material's wind whatever the render's (the draws carry it, StaticShadowSet::Wind), and no
+		// render's wind in its signature (its face's hashes it).
 		std::vector<Utils::ShadowCasterCandidate> candidates;
-		Utils::AppendCasterCandidates(cache, item, DeformedVertexSource{}, candidates);
+		Utils::AppendCasterCandidates(cache, mesh, item, DeformedVertexSource{}, level, true, nullptr, candidates);
 		for (Utils::ShadowCasterCandidate& candidate : candidates)
 		{
-			keys.push_back({ .Pipeline = candidate.Key.Pipeline, .Material = candidate.Key.Material, .Mesh = candidate.Key.Mesh, .Submesh = candidate.Key.Submesh });
-			draws.push_back(std::move(candidate.Draw));
+			// A wind caster keys by its material (the W46.4 review, finding 1): its key's draws push that material's response, so
+			// wind casters of different materials never share a draw; an Opaque caster without wind keeps no material and
+			// batches across materials.
+			const bool wind = (candidate.Record.Flags & DrawFlagWind) != 0;
+			const AssetHandle keyMaterial = wind ? candidate.Material : candidate.Key.Material;
+			draws.push_back({ .Draw = std::move(candidate.Draw),
+				.Key = { .Pipeline = candidate.Key.Pipeline, .Material = keyMaterial, .Mesh = candidate.Key.Mesh, .Submesh = candidate.Key.Submesh, .Lod = level },
+				.Wind = wind,
+				.WindResponse = candidate.Record.WindResponse });
 		}
 	}
 
 	StaticShadowSet ShadowPass::PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
-		const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices)
+		const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices,
+		const ShadowCasterView& view)
 	{
 		StaticShadowSet set;
+		set.Wind = view.Wind != nullptr;
 		if (cells.empty())
 			return set;
 		ENGINE_CORE_ASSERT(buckets.Touched.empty(), "the static shadow buckets must be empty between faces");
 		if (buckets.Keys.size() < keyCount)
 			buckets.Keys.resize(keyCount);
+		// M46 (finding 3): the casters' levels, chosen once per render.
+		buckets.CellLevels.assign(cells.size(), NoStaticCellLevels);
+		buckets.Levels.clear();
 		std::vector<Utils::StaticFaceCandidate> candidates;
 		// A cascade's candidates are every cell, as its dynamic candidates are every caster draw.
 		if (cascades != nullptr)
@@ -643,8 +748,8 @@ namespace Engine {
 			Utils::SelectStaticFaceCandidates(cells, nullptr, candidates);
 			for (uint32_t index = 0; index < cascades->Count; ++index)
 			{
-				Utils::CullStaticFace(cells, candidates, nullptr, cascades->Cascades[index].ViewProjection, depthClamp, buckets);
-				set.Cascades[index] = Utils::FinishStaticFace(buckets, false, set, indices); // cascades are drawn every frame
+				Utils::CullStaticFace(cells, candidates, nullptr, cascades->Cascades[index].ViewProjection, depthClamp, view.Camera, buckets);
+				set.Cascades[index] = Utils::FinishStaticFace(buckets, false, set, indices, view.Wind); // cascades are drawn every frame
 			}
 		}
 		if (spots != nullptr)
@@ -654,8 +759,8 @@ namespace Engine {
 			{
 				const ShadowBox light = Utils::GetShadowFrustumBox(spots->Tiles[index].ViewProjection);
 				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
-				Utils::CullStaticFace(cells, candidates, &light, spots->Tiles[index].ViewProjection, false, buckets);
-				set.Spots[index] = Utils::FinishStaticFace(buckets, true, set, indices);
+				Utils::CullStaticFace(cells, candidates, &light, spots->Tiles[index].ViewProjection, false, view.Camera, buckets);
+				set.Spots[index] = Utils::FinishStaticFace(buckets, true, set, indices, view.Wind);
 			}
 		}
 		if (points != nullptr)
@@ -669,8 +774,8 @@ namespace Engine {
 				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
 				for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
 				{
-					Utils::CullStaticFace(cells, candidates, &light, planned.FaceViewProjections[face], false, buckets);
-					set.Points[index][face] = Utils::FinishStaticFace(buckets, true, set, indices);
+					Utils::CullStaticFace(cells, candidates, &light, planned.FaceViewProjections[face], false, view.Camera, buckets);
+					set.Points[index][face] = Utils::FinishStaticFace(buckets, true, set, indices, view.Wind);
 				}
 			}
 		}
@@ -717,6 +822,8 @@ namespace Engine {
 		const nvrhi::BufferRange range(static_cast<uint64_t>(slot) * ShadowCasterSlotStride, ShadowCasterSlotStride);
 		nvrhi::IBuffer* staticInstances = inputs.StaticInstances != nullptr ? inputs.StaticInstances : inputs.Instances;
 		nvrhi::IBuffer* instanceIndices = inputs.InstanceIndices != nullptr ? inputs.InstanceIndices : inputs.Instances;
+		// M46 (decision 3G): the renderer's wind, or the pass's calm constants without it.
+		nvrhi::IBuffer* wind = inputs.Wind != nullptr ? inputs.Wind : CalmWind.Get();
 		std::array<nvrhi::IBindingSet*, 2> viewSets{};
 		for (uint32_t mask = 0; mask < 2; ++mask)
 		{
@@ -731,6 +838,7 @@ namespace Engine {
 			}
 			desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, staticInstances));
 			desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, instanceIndices));
+			desc.bindings.push_back(nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, wind)); // M46 (decision 3G)
 			ENGINE_TRY_ASSIGN(viewSets[mask], bindings.GetOrCreate(*Device, desc, *Pipelines[mask * 3].BindingLayouts[0]));
 		}
 		return viewSets;
@@ -755,6 +863,9 @@ namespace Engine {
 				state.bindings.push_back(materialSets[first]);
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(0));
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
+			// M46: slot 2 (no attribute reads it) holds the vertices again, since NVRHI binds the slots as one contiguous range.
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(Utils::PreviousPositionSlot));
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Wind).setSlot(Utils::MeshWindStreamSlot));
 			state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.Indices).setFormat(nvrhi::Format::R32_UINT));
 			commandList.setGraphicsState(state);
 			DrawConstants push{};
@@ -804,11 +915,20 @@ namespace Engine {
 				state.bindings.push_back(materialSets[draw.Key]);
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Vertices).setSlot(0));
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
+			// M46 (W46.4): slot 2 holds the vertices again, unread, as RecordView's draws bind it, and slot 3 the wind stream.
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Vertices).setSlot(Utils::PreviousPositionSlot));
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Wind).setSlot(Utils::MeshWindStreamSlot));
 			state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(key.Indices).setFormat(nvrhi::Format::R32_UINT));
 			commandList.setGraphicsState(state);
 			DrawConstants push{};
 			push.FirstInstance = draw.First;
 			push.Flags = DrawConstantsStaticInstances;
+			// M46 (W46.4): a wind caster's key carries its material's response in a render with a Wind.
+			if (key.WindCaster && inputs.StaticDraws->Wind)
+			{
+				push.Flags |= DrawConstantsWind;
+				push.WindResponse = key.WindResponse;
+			}
 			commandList.setPushConstants(&push, sizeof(push));
 			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(key.IndexCount).setInstanceCount(draw.Count).setStartIndexLocation(key.IndexOffset));
 			++counters.DrawCalls;

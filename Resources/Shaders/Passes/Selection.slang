@@ -3,15 +3,18 @@
 // Instances[MaskDraw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it. Vertices are
 // MeshVertex's position and texture coordinates (binding 0, locations 0 and 1) and the attribute stream (M23, C-MESH2:
 // binding 1, locations 2 and 3), which a Mask material's alpha test reads: the base colour map's UV set and the vertex
-// colour's alpha. The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment
-// shader, which does not read it, leaves it out of its interface, which the validation layer reports
-// (WARNING-Shader-OutputNotConsumed). M31 (Docs/Decisions/0046-m31-material-parameters.md decision 7): the mask reads only
-// the record's World, so an instance's material parameters change nothing of its outline: a faded or dissolving mesh is
-// outlined whole.
+// colour's alpha; and (M46) MeshVertex's normal (binding 0, location 4) and the wind stream (binding 3, location 5), which
+// a wind draw's displacement reads (Common/Wind.slang). The vertex colour reaches the fragment shader whole: as a scalar
+// alpha, the Opaque variants' fragment shader, which does not read it, leaves it out of its interface, which the
+// validation layer reports (WARNING-Shader-OutputNotConsumed). M31 (Docs/Decisions/0046-m31-material-parameters.md decision
+// 7): the mask reads the record's World, Flags and WindResponse, never its material parameters or its LodFade, so an
+// instance's material parameters change nothing of its outline: a faded or dissolving mesh is outlined whole, and (M46) a
+// wind-swept one where the prepass drew it.
 
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
+#include "Common/Wind.slang"
 
 #if !defined(ALPHA_MASK)
 	#define ALPHA_MASK 0
@@ -30,6 +33,10 @@ struct SelectionVertexInput
 	float2 TexCoord : TEXCOORD0;
 	float2 TexCoord1 : TEXCOORD1;
 	float4 Color : COLOR;
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): MeshVertex's normal and the wind stream
+	// (vertex binding 3), so a wind-swept selected item's mask covers the prepass's surface exactly.
+	float3 Normal : NORMAL;
+	float4 Wind : WIND;
 };
 
 struct SelectionVertexOutput
@@ -55,8 +62,15 @@ float4 SelectionMultiplyExact(float4x4 matrix, float4 vector)
 SelectionVertexOutput VSMain(SelectionVertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	SelectionVertexOutput result;
-	const float4x4 world = Instances[MaskDraw.FirstInstance + instance].World;
-	result.Position = SelectionMultiplyExact(MaskDraw.ViewProjection, SelectionMultiplyExact(world, float4(input.Position, 1.0)));
+	const InstanceRecord record = Instances[MaskDraw.FirstInstance + instance];
+	float4 world = SelectionMultiplyExact(record.World, float4(input.Position, 1.0));
+	if (HasWind(record.Flags))
+	{
+		world = float4(ApplyWind(GetWindFrame(false), world.xyz, WindTransform(record.World, float4(0.0, 0.0, 0.0, 1.0)).xyz,
+						   WindTransform(record.World, float4(input.Normal, 0.0)).xyz, input.Wind, record.WindResponse),
+			1.0);
+	}
+	result.Position = SelectionMultiplyExact(MaskDraw.ViewProjection, world);
 	result.TexCoord = input.TexCoord;
 	result.TexCoord1 = input.TexCoord1;
 	result.Color = input.Color;

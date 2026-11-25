@@ -1,9 +1,11 @@
 #pragma once
 
+#include "Engine/Asset/MeshData.h"
 #include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/PipelineFactory.h"
+#include "Engine/Renderer/MeshWind.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/RenderPrepare.h"
@@ -20,6 +22,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <utility>
 #include <vector>
@@ -44,8 +47,9 @@ namespace Engine {
 	{
 		nvrhi::BufferHandle Vertices{};
 		nvrhi::BufferHandle Attributes{}; // M23 (C-MESH2): vertex binding 1, the mesh's attribute stream (GpuMesh::AttributeBuffer)
+		nvrhi::BufferHandle Wind{};       // M46: vertex binding 3, the mesh's wind stream (GpuMesh::WindBuffer)
 		nvrhi::BufferHandle Indices{};
-		uint32_t IndexOffset = 0;
+		uint32_t IndexOffset = 0; // M46: of the caster's level (ShadowCasterView)
 		uint32_t IndexCount = 0;
 		Aabb Bounds{};                     // the submesh's local bounds
 		glm::mat4 World = glm::mat4(1.0f); // the caster's world matrix, also in its instance record
@@ -59,8 +63,20 @@ namespace Engine {
 		uint32_t Instance = 0; // its instance record's index in the view's Instances buffer
 		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): XXH64 of everything the draw puts into a depth map: its
 		// world matrix, mesh handle and GpuMesh::Version, submesh range, variants, a Mask caster's material handle and
-		// GpuMaterial::Generation, and a deformed caster's entity, joint palette and morph weights (PrepareCasters).
+		// GpuMaterial::Generation, and a deformed caster's entity, joint palette and morph weights (PrepareCasters). M46: and its
+		// level, and for a wind caster its wind response and the render's wind (so a map holding one re-renders every frame).
 		uint64_t Signature = 0;
+	};
+
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): the view whose shadows the casters
+	// draw. Camera: the view's camera, by whose distance each caster draws its level (SelectViewShadowLod: the view's level
+	// plus its ShadowLodOffset, never faded) and beyond whose CullDistance it casts nothing; null draws level 0 of every
+	// caster. Wind: the render's wind (Renderer/MeshWind.h), null without a Wind in the snapshot: a caster whose material has
+	// wind enabled then gets DrawFlagWind and its WindResponse, and the wind enters its signature.
+	struct ShadowCasterView
+	{
+		const CameraData* Camera = nullptr; // borrowed for PrepareCasters only
+		const WindFrame* Wind = nullptr;    // borrowed for PrepareCasters only
 	};
 
 	// The view's shadow casters (ShadowPass::PrepareCasters).
@@ -92,7 +108,7 @@ namespace Engine {
 	[[nodiscard]] bool ShadowBoxesOverlap(const ShadowBox& caster, const ShadowBox& light);
 
 	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): what the static casters of one key draw with (RenderStaticDrawKey:
-	// the caster variant, a Mask caster's material or null, the mesh and the submesh): ShadowCasterDraw's members a key
+	// the caster variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh): ShadowCasterDraw's members a key
 	// determines, resolved when a static cell is prepared and shared by the cells of the renderer that hold the key.
 	struct StaticShadowKey
 	{
@@ -106,6 +122,22 @@ namespace Engine {
 		uint32_t ReflectedVariant = 0;
 		nvrhi::BufferHandle MaterialConstants{};
 		nvrhi::TextureHandle BaseColorMap{};
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E and its W46.4 record): the mesh's wind
+		// stream (vertex binding 3), and whether the key's material has wind, with its WindResponse (Renderer/MeshWind.h): a
+		// static record serves every submesh of its item, so the key's draws carry the response (DrawConstantsWind) in a
+		// render whose snapshot has a Wind (StaticShadowSet::Wind).
+		nvrhi::BufferHandle Wind{};
+		bool WindCaster = false;
+		uint32_t WindResponse = 0;
+	};
+
+	// M46 (W46.4): a StaticShadowCaster's key and M29 signature at one of its further levels; Key is NoStaticShadowKey where the
+	// submesh has no indices at that level (it casts nothing there).
+	inline constexpr uint32_t NoStaticShadowKey = std::numeric_limits<uint32_t>::max();
+	struct StaticShadowLevel
+	{
+		uint32_t Key = NoStaticShadowKey;
+		uint64_t Signature = 0;
 	};
 
 	// M43: one static caster of a prepared cell: its key (an index into the renderer's StaticShadowKey table), its item's index
@@ -119,6 +151,16 @@ namespace Engine {
 		glm::mat4 World = glm::mat4(1.0f);
 		ShadowBox Box{};
 		uint64_t Signature = 0;
+		// M46 (W46.4): what chooses the caster's level in a view (SelectViewShadowLod with the view's camera, as a dynamic caster's:
+		// its mesh's switch sizes, LodCount of them, its mesh's level 0 bounds and its item's RenderDistance), its key and
+		// signature at each further level (Levels[level - 1]; Key and Signature above are level 0's), and whether it is a wind
+		// caster, whose face hashes the render's wind.
+		std::array<float, MaxMeshLods - 1> LodScreenSizes{};
+		uint32_t LodCount = 0;
+		Aabb MeshBounds{};
+		MeshDrawDistance Distance{};
+		std::array<StaticShadowLevel, MaxMeshLods - 1> Levels{};
+		bool Wind = false;
 	};
 
 	// M43: one static cell as the shadow faces cull it: the box of its casters' boxes (which each face inflates by
@@ -157,18 +199,39 @@ namespace Engine {
 	struct StaticShadowSet
 	{
 		std::vector<StaticShadowDraw> Draws{};
+		// M46 (W46.4): whether the render has a Wind, so the draws of a wind caster's key carry its WindResponse.
+		bool Wind = false;
 		std::array<StaticShadowFace, MaxShadowCascades> Cascades{};
 		std::array<StaticShadowFace, MaxSpotShadowLights> Spots{};
 		std::array<std::array<StaticShadowFace, PointShadowFaceCount>, MaxPointShadowLights> Points{};
 	};
 
 	// M43: ShadowPass::PrepareStaticFaces' working buckets: for each StaticShadowKey, the records and M29 signatures of the
-	// face's visible casters of that key, and the keys the face touched, in the order they first appear. Empty between calls;
-	// the renderer keeps them from render to render, so an unchanged frame's faces reuse their storage.
+	// face's visible casters of that key, and the keys the face touched, in the order they first appear. Keys and Touched are
+	// empty between calls; the renderer keeps them from render to render, so an unchanged frame's faces reuse their storage.
 	struct StaticShadowBuckets
 	{
 		std::vector<std::vector<std::pair<uint32_t, uint64_t>>> Keys{}; // per key: (record, signature)
 		std::vector<uint32_t> Touched{};
+		bool Wind = false; // M46: the face's visible static casters hold a wind caster
+		// M46 (the W46.4 review, finding 3): each caster's level in the render, chosen once for a cell a face looks at
+		// (PrepareStaticFaces' view camera is every face's): CellLevels[cell] is the cell's first entry in Levels
+		// (NoStaticCellLevels until then), Levels[i] its i-th caster's level or NoStaticShadowLevel beyond its CullDistance.
+		// Reset by each PrepareStaticFaces.
+		std::vector<uint32_t> CellLevels{};
+		std::vector<uint8_t> Levels{};
+	};
+	inline constexpr uint32_t NoStaticCellLevels = std::numeric_limits<uint32_t>::max();
+	inline constexpr uint8_t NoStaticShadowLevel = std::numeric_limits<uint8_t>::max();
+
+	// M43: one static caster draw of an item at one level (ShadowPass::AppendStaticItemCasters): its draw, by PrepareCasters'
+	// rule (Instance unset), and its key; M46 (W46.4): whether its material has wind, and its WindResponse.
+	struct StaticCasterDraw
+	{
+		ShadowCasterDraw Draw{};
+		RenderStaticDrawKey Key{};
+		bool Wind = false;
+		uint32_t WindResponse = 0;
 	};
 
 	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): the static shadow cache, per-view renderer state that
@@ -230,6 +293,10 @@ namespace Engine {
 		std::span<const StaticShadowKey> StaticKeys{};
 		nvrhi::IBuffer* StaticInstances = nullptr;
 		nvrhi::IBuffer* InstanceIndices = nullptr;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's WindConstants, bound at
+		// b8 of both variants' set 0 for the wind casters' displacement; null binds the pass's own calm constants, under which
+		// nothing moves.
+		nvrhi::IBuffer* Wind = nullptr;
 	};
 
 	struct ShadowRenderResult
@@ -291,16 +358,19 @@ namespace Engine {
 		// M23 (C23.3, decision 27): `sources`, empty or one per caster, are the vertices each caster's draws bind
 		// (SkinningPass.h): a deformed caster's draws bind its deformed vertices, are culled by its deformed bounds and key
 		// its VertexStream, so they batch with no other caster's; a Skipped caster casts nothing.
+		// M46 (decisions 3E and 3G): `view` chooses each caster's level and its wind (ShadowCasterView); the draws' keys gain
+		// the level, so two levels of one submesh never batch together.
 		[[nodiscard]] static Result<ShadowCasterSet> PrepareCasters(GpuResourceCache& cache, std::span<const MeshDrawItem> casters, bool instancing,
-			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {});
+			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {}, const ShadowCasterView& view = {});
 
 		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the caster draws of static item `item` (a finite world
-		// matrix), by PrepareCasters' rule and in its submesh order, appended to `draws` with their keys to `keys`
-		// (RenderStaticDrawKey: the variant, a Mask caster's material or null, the mesh and the submesh) and their M29
-		// signatures, Instance unset: a static cell's casters, prepared once per cell version. Nothing for an item that does not
-		// cast. Main thread (the cache's mirrors).
-		static void AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, std::vector<ShadowCasterDraw>& draws,
-			std::vector<RenderStaticDrawKey>& keys);
+		// matrix), by PrepareCasters' rule and in its submesh order, appended to `draws` with their keys (RenderStaticDrawKey: the
+		// variant, a Mask caster's or (M46) a wind caster's material or null, the mesh and the submesh; M46: and `level`) and their M29 signatures,
+		// Instance unset: a static cell's casters, prepared once per cell version and level. Nothing for an item that does not
+		// cast, or at a level beyond its mesh's last. M46 (W46.4): the draws of `level` (0 to the mesh's last), each with its
+		// material's wind (a static record holds none), whose signature hashes the response but not the render's wind (its
+		// face's does, PrepareStaticFaces). Main thread (the cache's mirrors).
+		static void AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, uint32_t level, std::vector<StaticCasterDraw>& draws);
 
 		// M43: the static casters' draws of every face of the plan (`cascades`, `spots`, `points`; null for none), `keyCount` the
 		// size of the renderer's StaticShadowKey table. Each face selects the cells, then their casters, exactly as Record
@@ -311,8 +381,14 @@ namespace Engine {
 		// order, then item order) and, within a key, in cell order then item order: one StaticShadowDraw per key and face. Only
 		// a spot tile's and a point face's signatures are hashed (M29's cache holds no cascade). `buckets` is the caller's
 		// working storage, grown to `keyCount` keys and left empty. Pure but for `buckets` and `indices`.
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E and its W46.4 record): `view` chooses each
+		// visible caster's level as PrepareCasters does (its camera: the view's level plus the caster's ShadowLodOffset, nothing
+		// beyond its CullDistance; null draws level 0), once per render for the cells the faces look at (a caster without
+		// levels or CullDistance takes level 0 unmeasured), its draws keyed and signed by that level; and a face whose visible
+		// casters hold a wind caster hashes `view`'s wind (its phases change every frame), which also sets the set's Wind.
 		[[nodiscard]] static StaticShadowSet PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
-			const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices);
+			const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices,
+			const ShadowCasterView& view = {});
 
 		// Culls the prepared casters per face and records shadow passes only (M43: each face's dynamic draws as before, then its
 		// static draws, one indexed draw each of DrawConstantsStaticInstances). All inputs borrowed for this call;

@@ -9,16 +9,18 @@
 
 #include <nlohmann/json.hpp>
 
+#include <format>
 #include <limits>
 
 namespace Engine {
 
 	namespace {
 
-		// The §6.5 example with every field present (canonical order and spelling; Material version 2, M23).
+		// The §6.5 example with every field present (canonical order and spelling; Material version 2, M23, and version 3's
+		// Wind block, M46).
 		constexpr std::string_view RedMaterial = R"({
 	"Format": "Material",
-	"Version": 2,
+	"Version": 3,
 	"BaseColor": [0.9, 0.15, 0.15, 1],
 	"BaseColorMap": null,
 	"BaseColorUVSet": "UV0",
@@ -40,7 +42,14 @@ namespace Engine {
 	"AlphaCutoff": 0.5,
 	"DoubleSided": false,
 	"UVScale": [1, 1],
-	"UVOffset": [0, 0]
+	"UVOffset": [0, 0],
+	"Wind": {
+		"Enabled": true,
+		"Bend": 0.25,
+		"Branch": 0.1,
+		"Flutter": 0.02,
+		"Stiffness": 0.5
+	}
 }
 )";
 
@@ -54,7 +63,7 @@ namespace Engine {
 			MaterialLoadReport report;
 			Result<MaterialData> material = MaterialFromText(RedMaterial, *registry, report);
 			REQUIRE_MESSAGE(material.has_value(), material.error().ToString());
-			CHECK(report.FileVersion == 2);
+			CHECK(report.FileVersion == 3);
 			CHECK(report.Diagnostics.empty());
 			CHECK(material->BaseColor == glm::vec4(0.9f, 0.15f, 0.15f, 1.0f));
 			CHECK(material->Roughness == 0.45f);
@@ -73,12 +82,15 @@ namespace Engine {
 
 		TEST_CASE("MaterialData: 1,000 seeded mutations of a material file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			// The seed corpus: the material fixtures of Tests/Data/Assets/Materials and this file's own. The text goes through
-			// MaterialFromText, the cooked form (the payload hash sealed again) through LoadCookedMaterial; a material either
-			// accepts writes back as text.
+			// The seed corpus: the material fixtures of Tests/Data/Assets/Materials, this file's own and (M46) the format fixtures
+			// of Tests/Data/Formats/Material, versions 1 to 3, the Wind block among them. The text goes through MaterialFromText,
+			// the cooked form (the payload hash sealed again) through LoadCookedMaterial; a material either accepts writes back
+			// as text.
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			std::vector<std::string> seeds = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Tests" / "Data" / "Assets" / "Materials", ".material");
 			seeds.emplace_back(RedMaterial);
+			for (std::string& seed : Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Tests" / "Data" / "Formats" / "Material", ".material"))
+				seeds.push_back(std::move(seed));
 			const Test::FuzzRun run = Test::RunFuzzCase(0x3A7E, 1000, [&registry, &seeds](Random& random, uint64_t /*index*/)
 			{
 				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
@@ -126,7 +138,7 @@ namespace Engine {
 			CHECK(unknownReport.Diagnostics.size() == 1);
 			CHECK_FALSE(MaterialFromText(R"({"Format": "Material", "Version": 1, "Shininess": 3})", *registry, unknownReport, true).has_value());
 
-			Result<MaterialData> newer = MaterialFromText(R"({"Format": "Material", "Version": 3})", *registry, report);
+			Result<MaterialData> newer = MaterialFromText(R"({"Format": "Material", "Version": 4})", *registry, report);
 			REQUIRE_FALSE(newer.has_value());
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
@@ -138,8 +150,8 @@ namespace Engine {
 			REQUIRE(document.has_value());
 			REQUIRE(document->is_object());
 			CHECK(document->begin().key() == "Format");
-			CHECK((*document)["Version"] == Json(2));
-			CHECK(document->size() == 2 + 22);
+			CHECK((*document)["Version"] == Json(3));
+			CHECK(document->size() == 2 + 23);
 			CHECK((*document)["NormalUVSet"] == Json("UV0"));
 			CHECK((*document)["BaseColorMap"].is_null());
 			CHECK((*document)["AlphaMode"] == Json("Opaque"));
@@ -222,17 +234,17 @@ namespace Engine {
 		}
 
 		// M23 (C23.1, Material version 2; Docs/Decisions/0034-m23-contract.md decision 10, stream M): a version 1 file loads
-		// with every map's texture coordinate set UV0 and saves as version 2, each map's UV set after it: the Formats/Material
-		// fixture and its upgraded counterpart.
-		TEST_CASE("MaterialData: MaterialV1 fixture loads with UV0 sets and saves as version 2")
+		// with every map's texture coordinate set UV0 and saves as the current version, each map's UV set after it: the
+		// Formats/Material fixture and its upgraded counterpart (version 3 since M46, with the Wind block disabled).
+		TEST_CASE("MaterialData: MaterialV1 fixture loads with UV0 sets and saves as the current version")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Material/MaterialV1.material");
 			const Result<std::string> golden = Test::ReadTestDataText("Formats/Material/MaterialV1.upgraded.material");
 			REQUIRE(legacy.has_value());
 			REQUIRE(golden.has_value());
-			CHECK(MaterialData::CurrentVersion == 2);
-			CHECK(MaterialData::FormatVersion == 2);
+			CHECK(MaterialData::CurrentVersion == 3);
+			CHECK(MaterialData::FormatVersion == 3);
 
 			MaterialLoadReport report;
 			const Result<MaterialData> material = MaterialFromText(*legacy, *registry, report, true);
@@ -251,6 +263,49 @@ namespace Engine {
 			REQUIRE_MESSAGE(uv1.has_value(), uv1.error().ToString());
 			CHECK(uv1->OcclusionUVSet == TextureCoordinateSet::UV1);
 			CHECK(uv1->BaseColorUVSet == TextureCoordinateSet::UV0);
+		}
+
+		// M46 (Material version 3; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3H): a version 2 file,
+		// which has no Wind block, loads with wind disabled and saves as version 3 with the block after UVOffset; a version 3
+		// file reads its block, every field within its bounds.
+		TEST_CASE("MaterialData: a version 2 material loads without wind and saves as version 3")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const Result<std::string> version2 = Test::ReadTestDataText("Formats/Material/MaterialV2.material");
+			const Result<std::string> golden = Test::ReadTestDataText("Formats/Material/MaterialV2.upgraded.material");
+			REQUIRE(version2.has_value());
+			REQUIRE(golden.has_value());
+
+			MaterialLoadReport report;
+			const Result<MaterialData> material = MaterialFromText(*version2, *registry, report, true);
+			REQUIRE_MESSAGE(material.has_value(), material.error().ToString());
+			CHECK(report.FileVersion == 2);
+			CHECK(material->Wind == MaterialWind());
+			CHECK_FALSE(material->Wind.Enabled);
+			CHECK(material->OcclusionUVSet == TextureCoordinateSet::UV1);
+			const Result<std::string> saved = MaterialToText(*material, *registry);
+			REQUIRE(saved.has_value());
+			CHECK(*saved == *golden);
+
+			// A version 3 file's block, and the block's bounds on every read.
+			MaterialLoadReport windReport;
+			const Result<MaterialData> windy = MaterialFromText(
+				R"({"Format": "Material", "Version": 3, "Wind": {"Enabled": true, "Bend": 0.4, "Branch": 0.2, "Flutter": 0.05, "Stiffness": 0.1}})",
+				*registry, windReport, true);
+			REQUIRE_MESSAGE(windy.has_value(), windy.error().ToString());
+			CHECK(windy->Wind == MaterialWind{ .Enabled = true, .Bend = 0.4f, .Branch = 0.2f, .Flutter = 0.05f, .Stiffness = 0.1f });
+			for (const std::string_view field : { R"("Bend": 1.5)", R"("Branch": -0.1)", R"("Flutter": 0.3)", R"("Stiffness": 2)" })
+			{
+				CAPTURE(std::string(field));
+				MaterialLoadReport refused;
+				CHECK_FALSE(MaterialFromText(std::format(R"({{"Format": "Material", "Version": 3, "Wind": {{{}}}}})", field), *registry, refused, true)
+						.has_value());
+			}
+			// A newer file than version 3 is refused.
+			MaterialLoadReport newer;
+			const Result<MaterialData> future = MaterialFromText(R"({"Format": "Material", "Version": 4})", *registry, newer, true);
+			REQUIRE_FALSE(future.has_value());
+			CHECK(future.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 	}
 

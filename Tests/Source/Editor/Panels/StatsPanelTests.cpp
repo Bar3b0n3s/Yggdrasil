@@ -123,6 +123,33 @@ namespace Engine {
 			CHECK(text.contains("1 updates / 2 relit volumes"));
 		}
 
+		TEST_CASE("StatsPanel: a displayed view shows its draws per level of detail, its cross-fades and its distance-culled items")
+		{
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): the "Mesh LODs" row lists the view's
+			// meshLodDraws, then lodCrossFades and distanceCulledMeshes; a summary without per-level counts (a view built by hand,
+			// as the case above's) shows 0 draws rather than reading past them.
+			Test::UtilityPanelFixture fixture;
+			fixture.SetHostViews({ StatsViewSummary{ .Name = "scene", .Available = true, .Frame = "12", .Width = 640, .Height = 360, .MeshLodDraws = { 7, 3, 2, 0, 1 }, .LodCrossFades = 2, .DistanceCulledMeshes = 5 } });
+			fixture.OpenProject();
+			StatsPanel panel;
+			fixture.Draw(panel);
+			fixture.Pump();
+			const std::string text = fixture.Draw(panel);
+			INFO(text);
+			CHECK(text.contains("Mesh LODs"));
+			CHECK(text.contains("7 / 3 / 2 / 0 / 1 draws / 2 cross-fades / 5 distance-culled"));
+
+			Test::UtilityPanelFixture bare;
+			bare.SetHostViews({ StatsViewSummary{ .Name = "scene", .Available = true, .Frame = "12", .Width = 640, .Height = 360 } });
+			bare.OpenProject();
+			StatsPanel empty;
+			bare.Draw(empty);
+			bare.Pump();
+			const std::string none = bare.Draw(empty);
+			INFO(none);
+			CHECK(none.contains("0 draws / 0 cross-fades / 0 distance-culled"));
+		}
+
 		TEST_CASE("StatsPanel: a project change discards the pending statistics action")
 		{
 			Test::UtilityPanelFixture fixture;

@@ -1983,6 +1983,202 @@ namespace Engine {
 			}
 			device.RunGarbageCollection();
 		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3L; the W46.2 review, finding 7): a mesh
+		// without the wind stream binds the cache's one shared stream of MeshVertexWind zeros (4 bytes a vertex), grown to the
+		// largest such mesh as M23's default attribute stream is; a mesh with the stream uploads its own. A collection and a
+		// trim keep the shared stream while a mesh binds it, so a new mesh shares it, and release it with the last such mesh.
+		TEST_CASE("GpuResourceCache: meshes without the wind stream share one default stream of zeros, grown to the largest of them"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			// A strip of `quads` unit quads along X, with the wind stream when `swept`.
+			const auto makeStrip = [](uint32_t quads, bool swept)
+			{
+				auto mesh = CreateRef<MeshData>();
+				for (uint32_t quad = 0; quad < quads; ++quad)
+				{
+					const auto base = static_cast<uint32_t>(mesh->Vertices.size());
+					const float left = static_cast<float>(quad);
+					for (const glm::vec2 corner : { glm::vec2(0, 0), glm::vec2(1, 0), glm::vec2(1, 1), glm::vec2(0, 1) })
+					{
+						const glm::vec3 position(left + corner.x, corner.y, 0.0f);
+						mesh->Vertices.push_back({ .Position = position, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = corner });
+						mesh->Bounds.Extend(position);
+						if (swept)
+						{
+							const auto vertex = static_cast<uint8_t>(mesh->Wind.size());
+							mesh->Wind.push_back({ .Branch = static_cast<uint8_t>(10 + vertex), .Phase = static_cast<uint8_t>(20 + vertex), .Flutter = 30, .BendMask = 40 });
+						}
+					}
+					mesh->Indices.insert(mesh->Indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
+				}
+				mesh->Submeshes = { { .IndexCount = static_cast<uint32_t>(mesh->Indices.size()), .Bounds = mesh->Bounds } };
+				mesh->Slots = { {} };
+				REQUIRE_MESSAGE(ValidateMeshData(*mesh).has_value(), ValidateMeshData(*mesh).error().ToString());
+				return mesh;
+			};
+			const AssetHandle small(0x5A7E000000000041ULL);
+			const AssetHandle large(0x5A7E000000000042ULL);
+			const AssetHandle smallAgain(0x5A7E000000000043ULL);
+			const AssetHandle swept(0x5A7E000000000044ULL);
+			const Ref<MeshData> sweptMesh = makeStrip(1, true);
+			assets.Publish(small, makeStrip(1, false));
+			assets.Publish(large, makeStrip(2, false));
+			assets.Publish(smallAgain, makeStrip(1, false));
+			assets.Publish(swept, sweptMesh);
+			constexpr uint64_t Entry = sizeof(MeshVertexWind);
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				const nvrhi::BufferHandle first = cache.GetMesh(small).WindBuffer;
+				REQUIRE(first != nullptr);
+				CHECK(first->getDesc().byteSize == 4 * Entry);
+				CHECK(first->getDesc().isVertexBuffer);
+				const Result<std::vector<std::byte>> zeros = Test::ReadBufferBytes(gpu.GetDevice(), *first, 4 * Entry);
+				REQUIRE_MESSAGE(zeros.has_value(), zeros.error().ToString());
+				CHECK(std::ranges::all_of(*zeros, [](std::byte value)
+				{
+					return value == std::byte{ 0 };
+				}));
+				// A larger mesh grows the shared stream; the smaller mesh keeps the one it took, and later meshes share the new one.
+				const nvrhi::BufferHandle grown = cache.GetMesh(large).WindBuffer;
+				REQUIRE(grown != nullptr);
+				CHECK(grown != first);
+				CHECK(grown->getDesc().byteSize == 8 * Entry);
+				CHECK(cache.GetMesh(small).WindBuffer == first);
+				CHECK(cache.GetMesh(smallAgain).WindBuffer == grown);
+				// A mesh with the stream has its own buffer of its weights, one entry per vertex.
+				const nvrhi::BufferHandle own = cache.GetMesh(swept).WindBuffer;
+				REQUIRE(own != nullptr);
+				CHECK(own != grown);
+				CHECK(own->getDesc().byteSize == 4 * Entry);
+				const Result<std::vector<std::byte>> weights = Test::ReadBufferBytes(gpu.GetDevice(), *own, 4 * Entry);
+				REQUIRE_MESSAGE(weights.has_value(), weights.error().ToString());
+				CHECK(std::memcmp(weights->data(), sweptMesh->Wind.data(), weights->size()) == 0);
+
+				// A collection keeps the shared stream while a mesh binds it, and drops it with the last such mesh. After Clear the
+				// two meshes start it again; the second collection releases the small mesh (unused since the first), not the
+				// stream the large one binds, which a new small mesh then shares.
+				cache.Clear();
+				CHECK(cache.GetMesh(small).WindBuffer->getDesc().byteSize == 4 * Entry);
+				const nvrhi::BufferHandle kept = cache.GetMesh(large).WindBuffer;
+				REQUIRE(kept->getDesc().byteSize == 8 * Entry);
+				cache.CollectStale(true);
+				static_cast<void>(cache.GetMesh(large));
+				cache.CollectStale(true);
+				CHECK(cache.GetStats().MeshCount == 1);
+				CHECK(cache.GetMesh(smallAgain).WindBuffer == kept);
+				cache.CollectStale(true);
+				cache.CollectStale(true);
+				CHECK(cache.GetStats().MeshCount == 0);
+				// Released: the next mesh starts a stream of its own size, not the 8-entry one the collection would otherwise keep.
+				CHECK(cache.GetMesh(small).WindBuffer->getDesc().byteSize == 4 * Entry);
+
+				// TrimUnused (an out-of-memory trim) keeps the shared stream while a remaining mesh binds it and releases it with
+				// the last one. It keeps the mirrors of loaded assets, so the meshes' assets are unloaded first.
+				cache.Clear();
+				CHECK(cache.GetMesh(smallAgain).WindBuffer->getDesc().byteSize == 4 * Entry);
+				const nvrhi::BufferHandle current = cache.GetMesh(large).WindBuffer;
+				REQUIRE(current->getDesc().byteSize == 8 * Entry);
+				assets.Remove(smallAgain);
+				cache.TrimUnused();
+				CHECK(cache.GetStats().MeshCount == 1);
+				CHECK(cache.GetMesh(small).WindBuffer == current);
+				assets.Remove(small);
+				assets.Remove(large);
+				cache.TrimUnused();
+				CHECK(cache.GetStats().MeshCount == 0);
+				assets.Publish(small, makeStrip(1, false));
+				CHECK(cache.GetMesh(small).WindBuffer->getDesc().byteSize == 4 * Entry);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3L; the W46.2 review, finding 7): a
+		// further level with vertices of its own uploads them after level 0's in the vertex buffer, and its indices (which
+		// address Vertices.size() + i already) after level 0's in the index buffer; a mesh without the attribute and the wind
+		// streams binds the shared default streams, created with an entry for every vertex of every level. The submesh's range
+		// of the level starts past level 0's indices, and its bounds hold the level's vertices, here a card wider than level 0,
+		// while the mesh's bounds stay level 0's, by which the views measure the item.
+		TEST_CASE("GpuResourceCache: a level's own vertices and indices follow level 0's, the default streams cover them and its submesh's bounds hold them"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			// Level 0: a 1 m quad at z = 0. Level 1, below the screen size 0.4: a card of its own, 4 m wide, 0.5 m tall and
+			// 0.5 m in front of it.
+			auto mesh = CreateRef<MeshData>();
+			for (const glm::vec2 corner : { glm::vec2(-0.5f, -0.5f), glm::vec2(0.5f, -0.5f), glm::vec2(0.5f, 0.5f), glm::vec2(-0.5f, 0.5f) })
+				mesh->Vertices.push_back({ .Position = { corner.x, corner.y, 0.0f }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = corner + 0.5f });
+			for (const glm::vec2 corner : { glm::vec2(-2.0f, -0.25f), glm::vec2(2.0f, -0.25f), glm::vec2(2.0f, 0.25f), glm::vec2(-2.0f, 0.25f) })
+				mesh->LodVertices.push_back({ .Position = { corner.x, corner.y, 0.5f }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = corner });
+			mesh->Indices = { 0, 1, 2, 0, 2, 3 };
+			mesh->LodIndices = { 4, 5, 6, 4, 6, 7 };
+			mesh->Bounds = { { -0.5f, -0.5f, 0.0f }, { 0.5f, 0.5f, 0.0f } };
+			mesh->Submeshes = { { .IndexCount = 6, .Bounds = mesh->Bounds } };
+			mesh->Slots = { {} };
+			mesh->Lods = { { .ScreenSize = 0.4f, .Submeshes = { { .IndexOffset = 0, .IndexCount = 6 } } } };
+			REQUIRE_MESSAGE(ValidateMeshData(*mesh).has_value(), ValidateMeshData(*mesh).error().ToString());
+			const AssetHandle handle(0x5A7E000000000031ULL);
+			assets.Publish(handle, mesh);
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				const GpuMesh mirror = cache.GetMesh(handle);
+				REQUIRE_FALSE(mirror.IsPlaceholder);
+				REQUIRE(mirror.VertexBuffer != nullptr);
+				REQUIRE(mirror.IndexBuffer != nullptr);
+				REQUIRE(mirror.AttributeBuffer != nullptr);
+				REQUIRE(mirror.WindBuffer != nullptr);
+				// The four buffers hold both levels: 8 vertices, 12 indices, and the default streams' 8 entries each.
+				CHECK(mirror.VertexBuffer->getDesc().byteSize == 8 * sizeof(MeshVertex));
+				CHECK(mirror.IndexBuffer->getDesc().byteSize == 12 * sizeof(uint32_t));
+				CHECK(mirror.AttributeBuffer->getDesc().byteSize == 8 * sizeof(MeshVertexAttributes));
+				CHECK(mirror.WindBuffer->getDesc().byteSize == 8 * sizeof(MeshVertexWind));
+				// The counts stay level 0's (the Skinning pass's); the level's range starts past level 0's 6 indices.
+				CHECK(mirror.VertexCount == 4);
+				CHECK(mirror.IndexCount == 6);
+				REQUIRE(mirror.Submeshes.size() == 1);
+				CHECK(mirror.Submeshes[0].IndexOffset == 0);
+				CHECK(mirror.Submeshes[0].IndexCount == 6);
+				CHECK(mirror.Submeshes[0].Lods == std::vector<MeshLodRange>{ { .IndexOffset = 6, .IndexCount = 6 } });
+				CHECK(mirror.Submeshes[0].Bounds == Aabb{ .Min = glm::vec3(-2.0f, -0.5f, 0.0f), .Max = glm::vec3(2.0f, 0.5f, 0.5f) });
+				CHECK(mirror.Bounds == mesh->Bounds);
+				CHECK(mirror.LodScreenSizes == std::vector<float>{ 0.4f });
+
+				// The bytes: level 0's vertices then the level's, level 0's indices then the level's, and the default streams'
+				// entries (TexCoord1 (0, 0) and opaque white; zeros) for all 8 vertices.
+				const Result<std::vector<std::byte>> vertexBytes = Test::ReadBufferBytes(gpu.GetDevice(), *mirror.VertexBuffer, 8 * sizeof(MeshVertex));
+				REQUIRE_MESSAGE(vertexBytes.has_value(), vertexBytes.error().ToString());
+				std::vector<MeshVertex> vertices(8);
+				std::memcpy(vertices.data(), vertexBytes->data(), vertexBytes->size());
+				CHECK(std::equal(mesh->Vertices.begin(), mesh->Vertices.end(), vertices.begin()));
+				CHECK(std::equal(mesh->LodVertices.begin(), mesh->LodVertices.end(), vertices.begin() + 4));
+				const Result<std::vector<std::byte>> indexBytes = Test::ReadBufferBytes(gpu.GetDevice(), *mirror.IndexBuffer, 12 * sizeof(uint32_t));
+				REQUIRE_MESSAGE(indexBytes.has_value(), indexBytes.error().ToString());
+				std::vector<uint32_t> indices(12);
+				std::memcpy(indices.data(), indexBytes->data(), indexBytes->size());
+				CHECK(indices == std::vector<uint32_t>{ 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 });
+				const Result<std::vector<std::byte>> attributeBytes =
+					Test::ReadBufferBytes(gpu.GetDevice(), *mirror.AttributeBuffer, 8 * sizeof(MeshVertexAttributes));
+				REQUIRE_MESSAGE(attributeBytes.has_value(), attributeBytes.error().ToString());
+				std::vector<MeshVertexAttributes> attributes(8);
+				std::memcpy(attributes.data(), attributeBytes->data(), attributeBytes->size());
+				CHECK(std::ranges::all_of(attributes, [](const MeshVertexAttributes& attribute)
+				{
+					return attribute == MeshVertexAttributes{};
+				}));
+				const Result<std::vector<std::byte>> windBytes = Test::ReadBufferBytes(gpu.GetDevice(), *mirror.WindBuffer, 8 * sizeof(MeshVertexWind));
+				REQUIRE_MESSAGE(windBytes.has_value(), windBytes.error().ToString());
+				CHECK(std::ranges::all_of(*windBytes, [](std::byte value)
+				{
+					return value == std::byte{ 0 };
+				}));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
 	}
 
 }

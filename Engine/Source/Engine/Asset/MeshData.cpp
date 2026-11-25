@@ -23,8 +23,11 @@ namespace Engine {
 		static constexpr size_t MinimumSlotRecordSize = sizeof(uint32_t) + sizeof(uint64_t);
 
 		// The Streams bits this payload version defines a section for (MeshData version 2: the attribute stream, and C23.3's
-		// skin and morph sections).
-		static constexpr MeshStreams KnownStreams = MeshStreams::Attributes | MeshStreams::Skin | MeshStreams::Morph;
+		// skin and morph sections; version 3, M46: the wind stream).
+		static constexpr MeshStreams KnownStreams = MeshStreams::Attributes | MeshStreams::Skin | MeshStreams::Morph | MeshStreams::Wind;
+
+		// The fixed size of one level's range record (M46): IndexOffset and IndexCount.
+		static constexpr size_t LodRangeRecordSize = 2 * sizeof(uint32_t);
 
 		// How far a skinned vertex's weights may sum from 1 (MeshSkinVertex).
 		static constexpr double SkinWeightSumTolerance = 1e-3;
@@ -53,6 +56,115 @@ namespace Engine {
 			const double z = direction.z;
 			const double length = std::sqrt(x * x + y * y + z * z);
 			return std::fabs(length - 1.0) <= UnitLengthTolerance;
+		}
+
+		// The checks of one vertex of level 0 or of an authored level (M46): `what` names it ("vertex 3", "level vertex 0").
+		static Status ValidateVertex(const MeshVertex& vertex, std::string_view what, size_t index)
+		{
+			if (!IsFinite(vertex.Position) || !IsFinite(vertex.Normal) || !IsFinite(vertex.Tangent) || !IsFinite(vertex.TexCoord))
+				return MakeError(ErrorCode::Validation, "{} {} has a non-finite value", what, index);
+			if (!IsUnitLength(vertex.Normal))
+				return MakeError(ErrorCode::Validation, "the normal of {} {} is not unit length", what, index);
+			if (!IsUnitLength(glm::vec3(vertex.Tangent)))
+				return MakeError(ErrorCode::Validation, "the tangent of {} {} is not unit length", what, index);
+			if (vertex.Tangent.w != 1.0f && vertex.Tangent.w != -1.0f)
+				return MakeError(ErrorCode::Validation, "the tangent sign of {} {} is {}, not +1 or -1", what, index, vertex.Tangent.w);
+			return {};
+		}
+
+		// The checks of one attribute vertex of level 0 or of an authored level (M46): `what` names its vertex.
+		static Status ValidateAttributes(const MeshVertexAttributes& attributes, std::string_view what, size_t index)
+		{
+			if (!IsFinite(attributes.TexCoord1) || !IsFinite(attributes.Color))
+				return MakeError(ErrorCode::Validation, "the attributes of {} {} have a non-finite value", what, index);
+			if (glm::any(glm::lessThan(attributes.Color, glm::vec4(0.0f))) || glm::any(glm::greaterThan(attributes.Color, glm::vec4(1.0f))))
+				return MakeError(ErrorCode::Validation, "the colour of {} {} has a channel outside [0, 1]", what, index);
+			return {};
+		}
+
+		// M46 (MeshData version 3): the checks ValidateMeshData makes of the wind stream and the further levels (MeshData.h).
+		static Status ValidateLods(const MeshData& mesh)
+		{
+			if (!mesh.Wind.empty() && mesh.Wind.size() != mesh.Vertices.size())
+			{
+				return MakeError(ErrorCode::Validation, "the mesh has {} wind vertices for its {} vertices; the wind stream has one per vertex",
+					mesh.Wind.size(), mesh.Vertices.size());
+			}
+			if (mesh.Lods.size() > MaxMeshLods - 1)
+				return MakeError(ErrorCode::Validation, "the mesh has {} further levels, more than the {} a mesh may have", mesh.Lods.size(), MaxMeshLods - 1);
+			if (mesh.Lods.empty() && (!mesh.LodVertices.empty() || !mesh.LodIndices.empty()))
+				return MakeError(ErrorCode::Validation, "the mesh has level vertices or indices but no further level");
+			if (!mesh.LodVertices.empty() && (!mesh.Skin.empty() || !mesh.MorphTargets.empty()))
+			{
+				return MakeError(ErrorCode::Validation,
+					"the skinned or morphed mesh has {} level vertices; its levels index level 0's vertices only", mesh.LodVertices.size());
+			}
+			constexpr uint64_t MaxCount = std::numeric_limits<uint32_t>::max();
+			const uint64_t vertexCount = static_cast<uint64_t>(mesh.Vertices.size()) + mesh.LodVertices.size();
+			if (vertexCount > MaxCount || mesh.LodIndices.size() > MaxCount)
+				return MakeError(ErrorCode::Validation, "the mesh's levels have more than {} vertices or indices", MaxCount);
+
+			const size_t expectedAttributes = mesh.Attributes.empty() ? 0 : mesh.LodVertices.size();
+			if (mesh.LodAttributes.size() != expectedAttributes)
+			{
+				return MakeError(ErrorCode::Validation,
+					"the mesh has {} level attribute vertices for its {} level vertices; with the attribute stream it has one per level vertex, "
+					"else none",
+					mesh.LodAttributes.size(), mesh.LodVertices.size());
+			}
+			const size_t expectedWind = mesh.Wind.empty() ? 0 : mesh.LodVertices.size();
+			if (mesh.LodWind.size() != expectedWind)
+			{
+				return MakeError(ErrorCode::Validation,
+					"the mesh has {} level wind vertices for its {} level vertices; with the wind stream it has one per level vertex, else none",
+					mesh.LodWind.size(), mesh.LodVertices.size());
+			}
+			for (size_t index = 0; index < mesh.LodVertices.size(); ++index)
+				ENGINE_TRY(ValidateVertex(mesh.LodVertices[index], "level vertex", index));
+			for (size_t index = 0; index < mesh.LodAttributes.size(); ++index)
+				ENGINE_TRY(ValidateAttributes(mesh.LodAttributes[index], "level vertex", index));
+			for (size_t index = 0; index < mesh.LodIndices.size(); ++index)
+			{
+				if (mesh.LodIndices[index] >= vertexCount)
+				{
+					return MakeError(ErrorCode::Validation, "level index {} is {}, beyond the {} vertices of level 0 and the levels", index,
+						mesh.LodIndices[index], vertexCount);
+				}
+			}
+
+			for (size_t level = 0; level < mesh.Lods.size(); ++level)
+			{
+				const MeshLod& lod = mesh.Lods[level];
+				const bool first = level == 0;
+				const float previous = first ? 1.0f : mesh.Lods[level - 1].ScreenSize;
+				const bool ordered = first ? lod.ScreenSize <= previous : lod.ScreenSize < previous;
+				if (!std::isfinite(lod.ScreenSize) || !(lod.ScreenSize > 0.0f) || !ordered)
+				{
+					return MakeError(ErrorCode::Validation, "level {} switches at the screen size {}, which is not in (0, 1]{}", level + 1, lod.ScreenSize,
+						first ? "" : " and below the previous level's");
+				}
+				if (lod.Submeshes.size() != mesh.Submeshes.size())
+				{
+					return MakeError(ErrorCode::Validation, "level {} has {} submesh ranges for the mesh's {} submeshes", level + 1, lod.Submeshes.size(),
+						mesh.Submeshes.size());
+				}
+				for (size_t submesh = 0; submesh < lod.Submeshes.size(); ++submesh)
+				{
+					const MeshLodRange& range = lod.Submeshes[submesh];
+					if (range.IndexOffset % 3 != 0 || range.IndexCount % 3 != 0)
+					{
+						return MakeError(ErrorCode::Validation, "submesh {} of level {} starts at level index {} with {} indices; both must be multiples of 3",
+							submesh, level + 1, range.IndexOffset, range.IndexCount);
+					}
+					const uint64_t end = static_cast<uint64_t>(range.IndexOffset) + range.IndexCount;
+					if (end > mesh.LodIndices.size())
+					{
+						return MakeError(ErrorCode::Validation, "submesh {} of level {} uses level indices {} to {}, beyond the {} level indices", submesh,
+							level + 1, range.IndexOffset, end, mesh.LodIndices.size());
+					}
+				}
+			}
+			return {};
 		}
 
 		static void WriteVector(BinaryWriter& writer, const glm::vec3& value)
@@ -98,15 +210,15 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const uint32_t submeshCount, reader.ReadU32());
 			ENGINE_TRY_ASSIGN(const uint32_t slotCount, reader.ReadU32());
 			ENGINE_TRY_ASSIGN(const uint32_t streamBits, reader.ReadU32());
-			ENGINE_TRY_ASSIGN(const uint32_t reserved, reader.ReadU32());
+			ENGINE_TRY_ASSIGN(const uint32_t lodCount, reader.ReadU32());
 			const MeshStreams streams = static_cast<MeshStreams>(streamBits);
 			if ((streams & ~KnownStreams) != MeshStreams::None)
 			{
 				return MakeError(ErrorCode::Parse, "mesh payload sets the stream bits {:#x}, which mesh format version {} does not define",
 					streamBits & ~std::to_underlying(KnownStreams), MeshData::FormatVersion);
 			}
-			if (reserved != 0)
-				return MakeError(ErrorCode::Parse, "mesh payload has the reserved word {:#x}, not 0", reserved);
+			if (lodCount > MaxMeshLods - 1)
+				return MakeError(ErrorCode::Parse, "mesh payload declares {} further levels, more than the {} a mesh may have", lodCount, MaxMeshLods - 1);
 
 			MeshData mesh;
 			ENGINE_TRY_ASSIGN(mesh.Bounds, ReadBounds(reader));
@@ -168,6 +280,42 @@ namespace Engine {
 					mesh.MorphTargets.push_back(std::move(target));
 				}
 			}
+			if ((streams & MeshStreams::Wind) != MeshStreams::None)
+			{
+				ENGINE_TRY_ASSIGN(mesh.Wind, reader.ReadArray<MeshVertexWind>(vertexCount));
+			}
+			if (lodCount > 0)
+			{
+				ENGINE_TRY_ASSIGN(const uint32_t lodVertexCount, reader.ReadU32());
+				ENGINE_TRY_ASSIGN(const uint32_t lodIndexCount, reader.ReadU32());
+				const size_t lodRecordSize = sizeof(float) + static_cast<size_t>(submeshCount) * LodRangeRecordSize;
+				ENGINE_TRY(CheckRecordCount(reader, lodCount, lodRecordSize, "further levels"));
+				mesh.Lods.reserve(lodCount);
+				for (uint32_t level = 0; level < lodCount; ++level)
+				{
+					MeshLod lod;
+					ENGINE_TRY_ASSIGN(lod.ScreenSize, reader.ReadF32());
+					lod.Submeshes.reserve(submeshCount);
+					for (uint32_t submesh = 0; submesh < submeshCount; ++submesh)
+					{
+						MeshLodRange range;
+						ENGINE_TRY_ASSIGN(range.IndexOffset, reader.ReadU32());
+						ENGINE_TRY_ASSIGN(range.IndexCount, reader.ReadU32());
+						lod.Submeshes.push_back(range);
+					}
+					mesh.Lods.push_back(std::move(lod));
+				}
+				ENGINE_TRY_ASSIGN(mesh.LodVertices, reader.ReadArray<MeshVertex>(lodVertexCount));
+				if ((streams & MeshStreams::Attributes) != MeshStreams::None)
+				{
+					ENGINE_TRY_ASSIGN(mesh.LodAttributes, reader.ReadArray<MeshVertexAttributes>(lodVertexCount));
+				}
+				if ((streams & MeshStreams::Wind) != MeshStreams::None)
+				{
+					ENGINE_TRY_ASSIGN(mesh.LodWind, reader.ReadArray<MeshVertexWind>(lodVertexCount));
+				}
+				ENGINE_TRY_ASSIGN(mesh.LodIndices, reader.ReadArray<uint32_t>(lodIndexCount));
+			}
 			if (!reader.IsAtEnd())
 				return MakeError(ErrorCode::Parse, "mesh payload has {} trailing bytes after offset {}", reader.GetRemaining(), reader.GetPosition());
 			return mesh;
@@ -191,14 +339,7 @@ namespace Engine {
 		for (size_t index = 0; index < mesh.Vertices.size(); ++index)
 		{
 			const MeshVertex& vertex = mesh.Vertices[index];
-			if (!Utils::IsFinite(vertex.Position) || !Utils::IsFinite(vertex.Normal) || !Utils::IsFinite(vertex.Tangent) || !Utils::IsFinite(vertex.TexCoord))
-				return MakeError(ErrorCode::Validation, "vertex {} has a non-finite value", index);
-			if (!Utils::IsUnitLength(vertex.Normal))
-				return MakeError(ErrorCode::Validation, "the normal of vertex {} is not unit length", index);
-			if (!Utils::IsUnitLength(glm::vec3(vertex.Tangent)))
-				return MakeError(ErrorCode::Validation, "the tangent of vertex {} is not unit length", index);
-			if (vertex.Tangent.w != 1.0f && vertex.Tangent.w != -1.0f)
-				return MakeError(ErrorCode::Validation, "the tangent sign of vertex {} is {}, not +1 or -1", index, vertex.Tangent.w);
+			ENGINE_TRY(Utils::ValidateVertex(vertex, "vertex", index));
 			bounds.Extend(vertex.Position);
 		}
 
@@ -253,13 +394,7 @@ namespace Engine {
 				mesh.Attributes.size(), mesh.Vertices.size());
 		}
 		for (size_t index = 0; index < mesh.Attributes.size(); ++index)
-		{
-			const MeshVertexAttributes& attributes = mesh.Attributes[index];
-			if (!Utils::IsFinite(attributes.TexCoord1) || !Utils::IsFinite(attributes.Color))
-				return MakeError(ErrorCode::Validation, "the attributes of vertex {} have a non-finite value", index);
-			if (glm::any(glm::lessThan(attributes.Color, glm::vec4(0.0f))) || glm::any(glm::greaterThan(attributes.Color, glm::vec4(1.0f))))
-				return MakeError(ErrorCode::Validation, "the colour of vertex {} has a channel outside [0, 1]", index);
-		}
+			ENGINE_TRY(Utils::ValidateAttributes(mesh.Attributes[index], "vertex", index));
 
 		// M23 (C23.3): the skin and the morph targets (MeshData.h).
 		if (mesh.Skin.empty())
@@ -336,7 +471,9 @@ namespace Engine {
 					return MakeError(ErrorCode::Validation, "morph target {} '{}' has a non-finite delta at vertex {}", index, target.Name, vertex);
 			}
 		}
-		return {};
+
+		// M46 (version 3): the wind stream and the further levels.
+		return Utils::ValidateLods(mesh);
 	}
 
 	MeshStreams GetMeshStreams(const MeshData& mesh)
@@ -348,6 +485,8 @@ namespace Engine {
 			streams = streams | MeshStreams::Skin;
 		if (!mesh.MorphTargets.empty())
 			streams = streams | MeshStreams::Morph;
+		if (!mesh.Wind.empty())
+			streams = streams | MeshStreams::Wind;
 		return streams;
 	}
 
@@ -361,7 +500,7 @@ namespace Engine {
 		writer.WriteU32(static_cast<uint32_t>(mesh.Submeshes.size()));
 		writer.WriteU32(static_cast<uint32_t>(mesh.Slots.size()));
 		writer.WriteU32(std::to_underlying(GetMeshStreams(mesh)));
-		writer.WriteU32(0); // Reserved (kept 0 by C23.3)
+		writer.WriteU32(static_cast<uint32_t>(mesh.Lods.size())); // LodCount (version 2's Reserved word)
 		Utils::WriteVector(writer, mesh.Bounds.Min);
 		Utils::WriteVector(writer, mesh.Bounds.Max);
 		for (const MeshSubmesh& submesh : mesh.Submeshes)
@@ -394,6 +533,25 @@ namespace Engine {
 				writer.WriteF32(target.DefaultWeight);
 				writer.WriteArray(std::span<const MeshMorphDelta>(target.Deltas));
 			}
+		}
+		writer.WriteArray(std::span<const MeshVertexWind>(mesh.Wind));
+		if (!mesh.Lods.empty())
+		{
+			writer.WriteU32(static_cast<uint32_t>(mesh.LodVertices.size()));
+			writer.WriteU32(static_cast<uint32_t>(mesh.LodIndices.size()));
+			for (const MeshLod& lod : mesh.Lods)
+			{
+				writer.WriteF32(lod.ScreenSize);
+				for (const MeshLodRange& range : lod.Submeshes)
+				{
+					writer.WriteU32(range.IndexOffset);
+					writer.WriteU32(range.IndexCount);
+				}
+			}
+			writer.WriteArray(std::span<const MeshVertex>(mesh.LodVertices));
+			writer.WriteArray(std::span<const MeshVertexAttributes>(mesh.LodAttributes));
+			writer.WriteArray(std::span<const MeshVertexWind>(mesh.LodWind));
+			writer.WriteArray(std::span<const uint32_t>(mesh.LodIndices));
 		}
 		return writer.TakeBuffer();
 	}

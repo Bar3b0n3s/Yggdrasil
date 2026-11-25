@@ -24,6 +24,7 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
+#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -31,6 +32,7 @@
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
+#include "Engine/Scene/Components/WindComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/PixelPerfectCamera.h"
@@ -43,6 +45,7 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiExtraction.h"
 #include "Engine/Scene/UiLayout.h"
+#include "Engine/Scene/Wind.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -837,6 +840,11 @@ namespace Engine {
 					Utils::ExtractSkinnedItem(entity, *skinned, request.Alpha, item);
 				if (const MaterialParametersComponent* parameters = entity.TryGetComponent<MaterialParametersComponent>())
 					item.Parameters = ResolveMaterialParameters(*parameters, request.SimulationTime);
+				// M46 (decision 3C): the entity's RenderDistance, or its defaults.
+				if (const RenderDistanceComponent* distance = entity.TryGetComponent<RenderDistanceComponent>())
+				{
+					item.Distance = MeshDrawDistance{ .CullDistance = distance->CullDistance, .LodBias = distance->LodBias, .ShadowLodOffset = distance->ShadowLodOffset, .FadeWidth = distance->FadeWidth };
+				}
 				snapshot.PickTable.push_back(id);
 				item.PickId = static_cast<uint32_t>(snapshot.PickTable.size());
 				snapshot.Meshes.push_back(std::move(item));
@@ -1008,6 +1016,11 @@ namespace Engine {
 		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the scene's Sky, its roles resolved against the lights
 		// above and driven (Scene/SkyExtraction.h).
 		ExtractRenderSky(scene, request, snapshot);
+		// M46 (decision 3G; ADR 0060's ledger: after M45's sky): the scene's effectively enabled Wind at the request's time.
+		if (const WindComponent* wind = FindSceneWind(scene); wind != nullptr)
+		{
+			snapshot.Wind = RenderWind{ .Enabled = true, .Direction = wind->Direction, .Strength = wind->Strength, .GustStrength = wind->GustStrength, .GustFrequency = wind->GustFrequency, .Turbulence = wind->Turbulence, .Time = request.SimulationTime };
+		}
 		Utils::SortSpritesForDrawing(snapshot.Sprites);
 		Utils::PlaceTilemapsForDrawing(snapshot.Tilemaps, tilemapPositions, std::move(spriteKeys));
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI, laid out at the scene resolution of the

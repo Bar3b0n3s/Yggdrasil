@@ -35,7 +35,13 @@ ground of props in a relightable 8 x 4 x 8 IrradianceVolume baked by lighting.ba
 showing the horizon): sky/Static/gpuMs, the SkyLuts, SkyIbl and Sky rows while the sun stands still (budget 0.3 ms),
 captured only when the view's sky light was not regenerated; and sky/Turning/gpuMs, the same rows and ProbeRelight with
 the sun turned every tick by the scene's script (Assets/Perf/SkySunTurner.luau; Skerries' brief S03's time-lapse, budget
-0.6 ms), captured only when the view regenerated the sky's light and relit the volume; then (M43,
+0.6 ms), captured only when the view regenerated the sky's light and relit the volume; and (M46,
+Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K) the levels of detail of a generated forest
+(Assets/Perf/Forest.scene: 2,000 of LodTree.gltf's trees, its authored levels and _WIND, and 4,000 rocks,
+LodSphere.gltf's ball with its generated levels, both as MeshLods.jsonl imports them, over a 1 km plane under a gale
+and a sun with cascades, seen across the forest by a perspective camera; lod/Forest/gpuMs: the sum of the DepthNormal
+row, the Shadows pass's rows and the ForwardOpaque row; budget 3.0 ms, the Skerries brief S04's trees and rocks),
+captured only when the view drew a coarser level; then (M43,
 Docs/Decisions/0061-m43-static-scenery.md decision 3 and its W43.3 record; the "staticScenery" part) another
 --headless-game-view editor at 1920 x 1080, with the copy's
 Simulation.MaxEntities raised to 32,768, measures on a generated Assets/Perf/StaticScenery.scene (10,000 pairs of a root
@@ -168,6 +174,19 @@ SKY_TURNING_METRIC = "sky/Turning/gpuMs"
 SKY_STATIC_PASSES = ("SkyLuts", "SkyIbl", "Sky")
 SKY_TURNING_PASSES = ("SkyLuts", "SkyIbl", "ProbeRelight", "Sky")
 SKY_PROBE_COUNTS = (8, 4, 8)
+# M46: the forest (module docstring), its meshes as MeshLods.jsonl imports them, and the rows its metric sums: the
+# DepthNormal row, the Shadows pass's rows (RenderPassDeclaration.h's ShadowRows) and the ForwardOpaque row.
+FOREST_SCENE = "Assets/Perf/Forest.scene"
+FOREST_METRIC = "lod/Forest/gpuMs"
+FOREST_TREE_MESH = "Assets/Models/MeshLods/LodTree.gltf#mesh:0:Tree"
+FOREST_ROCK_MESH = "Assets/Models/MeshLods/LodSphere.gltf#mesh:0:Sphere"
+FOREST_TREE_COLUMNS = 50
+FOREST_TREE_ROWS = 40
+FOREST_ROCK_COLUMNS = 80
+FOREST_ROCK_ROWS = 50
+FOREST_EXTENT = 1000.0  # metres: the plane's side
+FOREST_BATCH_OPS = 500
+FOREST_PASSES = ("DepthNormal", "DirectionalShadows", "SpotShadows", "ForwardOpaque")
 DEVICE_PROBE_TIMEOUT_SECONDS = 120.0
 CALL_TIMEOUT_SECONDS = 120.0
 STEP_TIMEOUT_SECONDS = 600.0
@@ -595,6 +614,44 @@ class Capture:
         self.metrics.append(metric)
         self.console.print(f"  {name}: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
 
+    def forest_cost(self, client: Any) -> None:
+        """lod/Forest/gpuMs (module docstring); an engine error, a view without GPU times or a view that drew no coarser
+        level makes it a warning."""
+        try:
+            self.call(client, "scene.new", {"path": FOREST_SCENE, "template": "Empty", "discardChanges": True})
+            # The meshes by handle: an op naming a project path refreshes the project's assets before it resolves it,
+            # which 6,000 ops would repeat.
+            ops = forest_ops(self.asset_handle(client, FOREST_TREE_MESH), self.asset_handle(client, FOREST_ROCK_MESH))
+            for start in range(0, len(ops), FOREST_BATCH_OPS):
+                self.call(client, "edit.batch", {"label": "Perf: forest", "ops": ops[start:start + FOREST_BATCH_OPS]},
+                          timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {}, timeout=STEP_TIMEOUT_SECONDS)
+            samples, view = self.play_samples(client, FOREST_PASSES)
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"{FOREST_METRIC}: {detail}; not captured")
+            return
+        draws = view.get("meshLodDraws", [])
+        coarser = sum(draws[1:]) if isinstance(draws, list) else 0
+        if not coarser:
+            self.warnings.append(f"{FOREST_METRIC}: the game view drew no coarser level of detail; not captured")
+            return
+        if not samples:
+            self.warnings.append(f"{FOREST_METRIC}: the game view reported no GPU times; not captured")
+            return
+        metric = perf.summarize(FOREST_METRIC, "ms", samples)
+        self.metrics.append(metric)
+        self.console.print(f"  {FOREST_METRIC}: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}, draws "
+                           f"per level {draws}, {view.get('lodCrossFades', 0)} cross-fades")
+
+    def asset_handle(self, client: Any, reference: str) -> str:
+        """The 16-hex handle asset.info names for `reference`, or `reference` itself when it names none."""
+        info = self.call(client, "asset.info", {"asset": reference})
+        asset = info.get("asset") if isinstance(info, dict) else None
+        handle = asset.get("id") if isinstance(asset, dict) else None
+        return handle if isinstance(handle, str) and handle else reference
+
     def set_glossy_tiles(self, client: Any, glossy: int) -> None:
         """Gives the floor's first `glossy` tiles (in ssr_tile_names' order) the glossy material and the rest the
         rough."""
@@ -862,6 +919,53 @@ def sky_cove_ops() -> list[dict[str, Any]]:
     return ops
 
 
+def forest_jitter(column: int, row: int, scale: float) -> float:
+    """A fixed offset in [-scale, scale] of the grid cell (column, row), from integer arithmetic alone."""
+    return ((column * 37 + row * 91) % 17 - 8) / 8.0 * scale
+
+
+def forest_ops(tree_mesh: str = FOREST_TREE_MESH, rock_mesh: str = FOREST_ROCK_MESH) -> list[dict[str, Any]]:
+    """edit.batch ops of the forest: a perspective camera at (0, 14, 520) looking across it down -Z, a sun with
+    cascades, a gale, the Sky environment, a FOREST_EXTENT plane, then FOREST_TREE_COLUMNS x FOREST_TREE_ROWS trees
+    (2,000) and FOREST_ROCK_COLUMNS x FOREST_ROCK_ROWS rocks (4,000) on jittered grids over the plane, each turned and
+    the rocks scaled from 0.4 to 0.8; `tree_mesh` and `rock_mesh` name the meshes (paths or handles)."""
+    half = FOREST_EXTENT / 2
+    ops: list[dict[str, Any]] = [
+        {"method": "entity.create", "params": {"name": "Rendering", "components": {
+            "Environment": {"Environment": "engine://Environments/Sky", "Intensity": 0.8}}}},
+        {"method": "entity.create", "params": {"name": "Camera", "components": {
+            "Transform": {"Translation": [0, 14, half + 20], "EulerAngles": [-6, 0, 0]},
+            "Camera": {"Primary": True, "Projection": "Perspective", "VerticalFov": 50, "FarClip": 3000}}}},
+        {"method": "entity.create", "params": {"name": "Sun", "components": {
+            "Transform": {"EulerAngles": [-40, 30, 0]}, "DirectionalLight": {"Intensity": 2.5, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Gale", "components": {
+            "Wind": {"Direction": [1, 0, 0.3], "Strength": 20, "GustStrength": 6}}}},
+        {"method": "entity.create", "params": {"name": "Ground", "components": {
+            "Transform": {"Scale": [FOREST_EXTENT, 1, FOREST_EXTENT]},
+            "MeshRenderer": {"Mesh": "engine://Meshes/Plane"}}}},
+    ]
+    tree_x = FOREST_EXTENT / FOREST_TREE_COLUMNS
+    tree_z = FOREST_EXTENT / FOREST_TREE_ROWS
+    for index in range(FOREST_TREE_COLUMNS * FOREST_TREE_ROWS):
+        row, column = divmod(index, FOREST_TREE_COLUMNS)
+        ops.append({"method": "entity.create", "params": {"name": f"Tree{index:04d}", "components": {
+            "Transform": {"Translation": [-half + (column + 0.5) * tree_x + forest_jitter(column, row, tree_x * 0.3), 0,
+                                          -half + (row + 0.5) * tree_z + forest_jitter(row, column, tree_z * 0.3)],
+                          "EulerAngles": [0, (index * 47) % 360, 0]},
+            "MeshRenderer": {"Mesh": tree_mesh}}}})
+    rock_x = FOREST_EXTENT / FOREST_ROCK_COLUMNS
+    rock_z = FOREST_EXTENT / FOREST_ROCK_ROWS
+    for index in range(FOREST_ROCK_COLUMNS * FOREST_ROCK_ROWS):
+        row, column = divmod(index, FOREST_ROCK_COLUMNS)
+        scale = 0.4 + 0.1 * ((column * 7 + row * 3) % 5)
+        ops.append({"method": "entity.create", "params": {"name": f"Rock{index:04d}", "components": {
+            "Transform": {"Translation": [-half + (column + 0.5) * rock_x + forest_jitter(row, column, rock_x * 0.4), 0,
+                                          -half + (row + 0.5) * rock_z + forest_jitter(column, row, rock_z * 0.4)],
+                          "EulerAngles": [0, (index * 29) % 360, 0], "Scale": [scale, scale, scale]},
+            "MeshRenderer": {"Mesh": rock_mesh}}}})
+    return ops
+
+
 def run_editor(capture: Capture, editor: Path, project_file: Path, renderer: str, user_data: Path, work: Any,
                extra_arguments: tuple[str, ...] = ()) -> None:
     """Starts a headless editor with `renderer` (and `extra_arguments`) on `project_file`, runs `work(client, pid)`
@@ -949,6 +1053,7 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
                     capture.ssr_cost(client)
                     capture.mirror_cost(client)
                     capture.sky_cost(client)
+                    capture.forest_cost(client)
 
                 run_editor(capture, editor, project_file, renderer, root / "LookUserData", look,
                            ("--headless-game-view",))
