@@ -176,6 +176,7 @@
 				"Hash": "ef5a268b1926f0c2",
 				"Components": {
 					"Transform": "df7bf84320352005",
+					"PlanarReflection": "340a8c74bf50a67b",
 					"Water": "c942d9311c2c83e5"
 				}
 			},
@@ -317,41 +318,41 @@
 	"Checkpoints": [
 		{
 			"Tick": 60,
-			"StateHash": "3be6c51b4c2d0c9e"
+			"StateHash": "cc33afe1fc3b4d7d"
 		},
 		{
 			"Tick": 120,
-			"StateHash": "14d2b23fdb973733"
+			"StateHash": "c6ee07c4b7f67377"
 		},
 		{
 			"Tick": 180,
-			"StateHash": "e707455dde4d0b15"
+			"StateHash": "cfd8662d6c54fae5"
 		},
 		{
 			"Tick": 240,
-			"StateHash": "080ba5aa4ccbab16"
+			"StateHash": "199fcbc808b3a705"
 		},
 		{
 			"Tick": 300,
-			"StateHash": "3e79ba1694d9fdea"
+			"StateHash": "ef2cf0686992391a"
 		},
 		{
 			"Tick": 360,
-			"StateHash": "b59598ccfd2c1e1d"
+			"StateHash": "56d074a8c1debea5"
 		},
 		{
 			"Tick": 420,
-			"StateHash": "d8dfbbdd953537c0"
+			"StateHash": "be46c437ff9aa9ec"
 		},
 		{
 			"Tick": 480,
-			"StateHash": "1aabc418cab288d1"
+			"StateHash": "d8be34c69eb87eb8"
 		},
 		{
 			"Tick": 540,
-			"StateHash": "f285ea9859fe92a6"
+			"StateHash": "134dc6274171770a"
 		}
 	],
 	"FinalTick": 600,
-	"FinalStateHash": "23976d1a83d0000e"
+	"FinalStateHash": "6f53a7dac9bab5e5"
 }

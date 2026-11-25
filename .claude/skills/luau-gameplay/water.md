@@ -127,3 +127,11 @@ end
 
 return Script.Define("Wader", Wader)
 ```
+
+## The view under water
+
+A camera needs no script under the surface: where its near plane lies under a water the view is fogged toward the
+water's `UnderwaterColor` over `UnderwaterVisibility` metres (a cave lake's within its volume only), a camera straddling
+the surface draws one waterline, and the surface seen from below shows the sky through Snell's window and the
+`UnderwaterColor` outside it. A script that wants its own cue (muffled audio, a breath meter) asks
+`water:IsUnderwater(camera.Transform.WorldPosition)`, or `Physics.SampleWater`'s `Depth` there, in `OnFixedUpdate`.

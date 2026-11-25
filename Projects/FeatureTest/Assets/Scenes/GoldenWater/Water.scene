@@ -1,0 +1,321 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Water",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 2,
+		"Fog": 1,
+		"Water": 1
+	},
+	"Entities": [
+		{
+			"ID": "5fd6c81ae4808376",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000202",
+					"Intensity": 0.8,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": true,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Fxaa"
+				}
+			}
+		},
+		{
+			"ID": "6ed3602214739e0c",
+			"Name": "Haze",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Fog": {
+					"Color": [0.62, 0.68, 0.75],
+					"AmbientTint": 0,
+					"Density": 0.004,
+					"StartDistance": 30,
+					"MaxOpacity": 0.75,
+					"HeightDensity": 0,
+					"HeightFalloff": 0.5,
+					"BaseHeight": 0,
+					"SunGlow": 0,
+					"SunGlowExponent": 8,
+					"FogSkybox": true
+				}
+			}
+		},
+		{
+			"ID": "d0e225646e5ae8b0",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 3, 12],
+					"Rotation": [-0.0784591, 0, 0, 0.9969173],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "c43330774bfa7f21",
+			"Name": "UnderwaterCamera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.5, -1.6, -11],
+					"Rotation": [0.0099861715, 0.9802819, -0.0513744, 0.1905475],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": false,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "f15fbda5c83a7b8e",
+			"Name": "WaterlineCamera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, -0.2, -9],
+					"Rotation": [0, 0.98162717, 0, 0.190809],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": false,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "2092f4328ff70653",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.042009298, 0.9555548, 0.23824656, 0.16849008],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "552723f0d6abcacd",
+			"Name": "Sea",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Water": {
+					"Shape": "Ocean",
+					"Size": [20, 20],
+					"Depth": 5,
+					"Headroom": 10,
+					"Waves": [
+						{
+							"Direction": -80,
+							"Wavelength": 60,
+							"Amplitude": 0.3,
+							"Steepness": 0.3,
+							"Speed": 0,
+							"Phase": 0
+						},
+						{
+							"Direction": -95,
+							"Wavelength": 16,
+							"Amplitude": 0.18,
+							"Steepness": 0.55,
+							"Speed": 0,
+							"Phase": 30
+						},
+						{
+							"Direction": -60,
+							"Wavelength": 7,
+							"Amplitude": 0.06,
+							"Steepness": 0.7,
+							"Speed": 0,
+							"Phase": 140
+						},
+						{
+							"Direction": -120,
+							"Wavelength": 3.2,
+							"Amplitude": 0.025,
+							"Steepness": 0.8,
+							"Speed": 0,
+							"Phase": 250
+						}
+					],
+					"WaveScale": 1,
+					"Current": [0, 0],
+					"Density": 1000,
+					"ShallowColor": [0.1, 0.55, 0.5],
+					"DeepColor": [0.01, 0.07, 0.12],
+					"Clarity": 5,
+					"Roughness": 0.05,
+					"RefractionStrength": 0.3,
+					"FoamAmount": 0.6,
+					"ShoreFoamDepth": 0.6,
+					"DetailNormalStrength": 0.5,
+					"DetailScale": 4,
+					"DetailDrift": [2, 1],
+					"UnderwaterColor": [0.07, 0.3, 0.33],
+					"UnderwaterVisibility": 8,
+					"NormalMap": null,
+					"FoamTexture": null
+				}
+			}
+		},
+		{
+			"ID": "f28d8703bf7fa6c4",
+			"Name": "Sand",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -3.2, -10],
+					"Rotation": [-0.104528464, 0, 0, 0.9945219],
+					"Scale": [80, 1, 70]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["a23959222b4ad5ff"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "45012c041f8c1fad",
+			"Name": "Rock",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.5, -0.5, -2],
+					"Rotation": [0.056709655, 0.21918072, -0.066048294, 0.97179294],
+					"Scale": [2.2, 2.8, 1.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["ad647f41c00cbe3d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "f7b2b2ad8069915e",
+			"Name": "FarRock",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [7, -1.5, -22],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [7, 6, 6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["ad647f41c00cbe3d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

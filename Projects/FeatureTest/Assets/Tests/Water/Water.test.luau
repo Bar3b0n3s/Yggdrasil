@@ -1,9 +1,10 @@
 --!strict
 -- Water and buoyancy in every run mode (M47; Docs/Decisions/0065-m47-water.md decision 3; Water.jsonl, IdSeed 4401).
 -- Water.scene holds a Sea (the Ocean at y = 0, three waves at WaveScale 0.8), a raised Pool (a Rectangle 6 m wide around
--- (16, 3, 0), 2.5 m deep with 3 m of headroom, a current, a denser water and its own maps), and a Grotto (a calm
--- Rectangle at y = -6 inside a closed rock box at -9 to -2, its Headroom reaching the ceiling, so the sea is masked inside
--- it); a 400 kg Boat with four box pontoons and a Buoyancy at its defaults, and a Crate whose Buoyancy names the Pool.
+-- (16, 3, 0), 2.5 m deep with 3 m of headroom, a current, a denser water, its own maps and a PlanarReflection), and a
+-- Grotto (a calm Rectangle at y = -6 inside a closed rock box at -9 to -2, its Headroom reaching the ceiling, so the sea
+-- is masked inside it); a 400 kg Boat with four box pontoons and a Buoyancy at its defaults, and a Crate whose Buoyancy
+-- names the Pool. Where the game view renders (the exported Release and Dist runs, headless) it draws the three waters.
 -- Each case starts the scene afresh (Isolation "Case").
 local Support = require("../Api/Support")
 
@@ -184,6 +185,16 @@ return Test.Suite("Water", function()
 			water.Waves = nine
 		end), "a ninth wave is refused")
 		Test.ExpectEqual(#water.Waves, 2, "a refused list keeps the waves")
+	end)
+
+	Test.Case("where the game view renders, it draws the sea, the pool and the grotto's lake", function()
+		Test.WaitTicks(4)
+		local stats = Application.GetStats()
+		if stats.RenderAvailable then
+			Test.ExpectEqual(stats.WaterSurfaces, 3, "the game view draws the three waters")
+		else
+			Test.ExpectEqual(stats.WaterSurfaces, 0, "nothing is drawn without a renderer")
+		end
 	end)
 
 	Test.Case("every Buoyancy field reads and writes through the proxy", function()

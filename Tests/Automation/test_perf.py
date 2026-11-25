@@ -191,6 +191,58 @@ class PerfTests(unittest.TestCase):
         for boat in boats:
             self.assertEqual(boat["params"]["components"]["RigidBody"]["Type"], "Dynamic")
 
+    def test_the_water_look_sums_the_surfaces_rows_and_the_underwater_row_of_a_generated_sea(self) -> None:
+        """M47 (Docs/Decisions/0065-m47-water.md decision 3): water/Ocean/gpuMs sums the WaterRefraction and Water rows,
+        water/Underwater/gpuMs is the Underwater row; budgets 1.0 and 0.3 ms."""
+        stats = {"views": [{"name": "game", "gpuAvailable": True, "passes": [
+            {"name": "WaterRefraction", "gpuAvailable": True, "gpuMilliseconds": 0.125},
+            {"name": "Water", "gpuAvailable": True, "gpuMilliseconds": 0.5},
+            {"name": "Underwater", "gpuAvailable": True, "gpuMilliseconds": 0.25},
+            {"name": "SSR", "gpuAvailable": True, "gpuMilliseconds": 2.0}]}]}
+        view = Perf.game_view(stats)
+        self.assertEqual(Perf.summed_gpu_time(view, Perf.WATER_OCEAN_PASSES), 0.625)
+        self.assertEqual(Perf.summed_gpu_time(view, Perf.WATER_UNDERWATER_PASSES), 0.25)
+        self.assertEqual(perf.BUDGETS[Perf.WATER_OCEAN_METRIC], 1.0)
+        self.assertEqual(perf.BUDGETS[Perf.WATER_UNDERWATER_METRIC], 0.3)
+        ops = Perf.water_look_ops()
+        seas = [op["params"]["components"]["Water"] for op in ops if "Water" in op["params"]["components"]]
+        self.assertEqual(len(seas), 1)
+        self.assertNotIn("Shape", seas[0])  # the default, an Ocean
+        rendering = next(op for op in ops if op["params"]["name"] == "Rendering")
+        self.assertTrue(rendering["params"]["components"]["PostProcess"]["SsrEnabled"])
+        self.assertLess(Perf.WATER_UNDER_POSE["Translation"][1], -sum(wave["Amplitude"] for wave in seas[0]["Waves"]))
+
+    def test_the_water_look_is_captured_only_when_the_view_drew_the_water_and_the_underwater_pass(self) -> None:
+        class FakeEditor:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+                self.calls.append(method)
+                return {}
+
+        class FixedSamples(Perf.Capture):
+            views = ({"waterSurfaces": 1, "underwater": False}, {"waterSurfaces": 1, "underwater": True})
+
+            def play_samples(self, client: Any, passes: tuple[str, ...]) -> tuple[list[float], dict[str, Any]]:
+                under = passes == Perf.WATER_UNDERWATER_PASSES
+                return ([0.25, 0.125, 0.5] if under else [1.0, 0.75, 0.5]), self.views[1 if under else 0]
+
+        capture = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        editor = FakeEditor()
+        capture.water_look_cost(editor)
+        self.assertEqual(capture.warnings, [])
+        self.assertEqual(editor.calls, ["scene.new", "edit.batch", "scene.save", "entity.update"])
+        self.assertEqual([(metric.name, metric.median) for metric in capture.metrics],
+                         [(Perf.WATER_OCEAN_METRIC, 0.75), (Perf.WATER_UNDERWATER_METRIC, 0.25)])
+        dropped = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        dropped.views = ({"waterSurfaces": 0}, {"waterSurfaces": 1, "underwater": False})
+        dropped.water_look_cost(FakeEditor())
+        self.assertEqual(dropped.metrics, [])
+        self.assertEqual(len(dropped.warnings), 2)
+        self.assertIn("drew no water", dropped.warnings[0])
+        self.assertIn("did not record the Underwater pass", dropped.warnings[1])
+
     def test_the_mirror_cost_is_captured_only_when_the_view_drew_the_three_mirrors(self) -> None:
         class FakeEditor:
             def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:

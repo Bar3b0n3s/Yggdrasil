@@ -59,6 +59,10 @@ namespace Engine {
 			// Synchronously observes the final snapshot after EditSnapshot and real scene annotation assembly, before
 			// capture. The const snapshot is borrowed only for this call.
 			std::function<void(const RenderSnapshot&)> InspectSnapshot{};
+			// The path (Scene::ResolveEntityPath) of the camera entity whose view renders, as viewport.screenshot's "camera"
+			// does (RenderCameraSource::Entity); empty for the scene's primary camera. M47's Water goldens render one scene
+			// through three cameras.
+			std::string Camera{};
 		};
 
 		// Renders the golden scene `name` of Projects/FeatureTest's scene list (ListGoldenScenes; "MaterialGrid" for

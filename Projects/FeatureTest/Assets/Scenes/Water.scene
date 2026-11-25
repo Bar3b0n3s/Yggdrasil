@@ -13,6 +13,7 @@
 		"RigidBody": 1,
 		"BoxCollider": 1,
 		"Script": 2,
+		"PlanarReflection": 1,
 		"Water": 1,
 		"Buoyancy": 1
 	},
@@ -185,6 +186,11 @@
 					"Translation": [16, 3, 0],
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [1, 1, 1]
+				},
+				"PlanarReflection": {
+					"Normal": [0, 0, 1],
+					"Offset": 0,
+					"ResolutionScale": 0.5
 				},
 				"Water": {
 					"Shape": "Rectangle",

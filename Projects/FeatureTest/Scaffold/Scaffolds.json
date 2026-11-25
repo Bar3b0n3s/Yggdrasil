@@ -607,6 +607,15 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "GoldenWater.jsonl",
+			"IdSeed": 4403,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenWater",
+				"Assets/Scenes/GoldenWater"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"
