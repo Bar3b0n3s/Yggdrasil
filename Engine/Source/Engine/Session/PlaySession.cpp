@@ -625,6 +625,11 @@ namespace Engine {
 			stats.Bodies = counters.Bodies;
 			stats.ActiveBodies = counters.ActiveBodies;
 			stats.Particles = counters.Particles;
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the last tick's work and the last extraction's static set.
+			stats.TransformsUpdated = counters.TransformsUpdated;
+			stats.EntitiesVisited = counters.EntitiesVisited;
+			stats.StaticCellRebuilds = counters.StaticCellRebuilds;
+			stats.StaticItems = counters.StaticItems;
 			if (Scripts != nullptr)
 				stats.ScriptHeapBytes = Scripts->GetMemoryState().UsedBytes;
 			return stats;

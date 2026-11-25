@@ -30442,6 +30442,24 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"transformsUpdated": {
+						"description": "World matrices the play session's last tick and the frame phase after it recomputed: only the entities whose transforms changed and their descendants; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"entitiesVisited": {
+						"description": "Entities the per-entity passes of the play session's last tick visited (physics, audio, UI, animation, particles and scripts), summed: 0 a tick in which nothing changes; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"staticCellRebuilds": {
+						"description": "Static cells the session scene's last render extraction rebuilt or removed: a write to a static entity rebuilds its cell at the next extracted frame, so this counts per rendered frame, not per tick; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -30632,6 +30650,30 @@
 								"items": {
 									"type": "string"
 								}
+							},
+							"staticItems": {
+								"description": "Mesh items of the frame's static set: the MeshRenderers of entities a Static makes static scenery, which render extraction does not visit and the renderer prepares once per cell.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"staticCells": {
+								"description": "Cells of the frame's static set: 32 m squares on the XZ plane, each holding the static items whose origin lies in it.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"staticCellsVisible": {
+								"description": "Static cells the view's camera did not cull whole: the view's static work follows them, testing only their items.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"dynamicItems": {
+								"description": "Mesh items render extraction visited for the frame: every MeshRenderer that is not static scenery.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false

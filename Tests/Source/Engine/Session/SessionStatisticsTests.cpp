@@ -2,11 +2,15 @@
 #include "Engine/Session/SessionStatistics.h"
 
 #include "Engine/Renderer/RenderStats.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
@@ -14,6 +18,7 @@
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
+#include <glm/glm.hpp>
 
 #include <string>
 #include <string_view>
@@ -81,6 +86,7 @@ namespace Engine {
 			view.SkinnedMeshes = 5;
 			view.PlanarReflections = 3; // M42
 			view.DroppedPlanarReflections = 2;
+			view.StaticCellsVisible = 7; // M43
 			view.Passes.push_back({ .Name = "Forward", .CpuMilliseconds = 1.0, .GpuMilliseconds = 2.0, .GpuAvailable = true, .DrawCalls = 10, .Dispatches = 0, .Triangles = 300 });
 			view.Passes.push_back({ .Name = "Shadows", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.5, .GpuAvailable = false, .DrawCalls = 4, .Dispatches = 0, .Triangles = 120 });
 			view.Passes.push_back({ .Name = "Skinning", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.25, .GpuAvailable = true, .DrawCalls = 0, .Dispatches = 5, .Triangles = 0 });
@@ -93,6 +99,7 @@ namespace Engine {
 			CHECK(stats.SkinnedMeshes == 5);
 			CHECK(stats.PlanarReflections == 3);
 			CHECK(stats.DroppedPlanarReflections == 2);
+			CHECK(stats.StaticCellsVisible == 7);
 			CHECK(stats.DrawCalls == 14);
 			CHECK(stats.Triangles == 420);
 			// Only the passes with a GPU sample add to the GPU time.
@@ -224,6 +231,48 @@ return Script.Define("Readout", Readout)
 			const auto evaluated = session->GetScripts()->Evaluate("local s = Application.GetStats() return {s.RenderAvailable, s.Fps, s.DrawCalls, s.Entities}", {});
 			REQUIRE(evaluated);
 			CHECK(evaluated->Value.Get() == Json::array({ false, 0, 0, 1 }));
+			// M43: no tick yet and no Static: the static scenery's counters are 0.
+			const auto staticCounters = session->GetScripts()->Evaluate(
+				"local s = Application.GetStats() return {s.TransformsUpdated, s.EntitiesVisited, s.StaticCellRebuilds, s.StaticItems, s.StaticCellsVisible}", {});
+			REQUIRE(staticCounters);
+			CHECK(staticCounters->Value.Get() == Json::array({ 0, 0, 0, 0, 0 }));
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the readout's StaticItems and StaticCellRebuilds are the
+		// session scene's static set as its last render extraction refreshed it, so they move per extracted frame.
+		TEST_CASE("SessionStatistics: the static counters are the session scene's last extraction's set")
+		{
+			Test::ScriptTestFixture fixture;
+			Entity root = fixture.GetScene().CreateEntity("Scenery");
+			root.AddComponent<StaticComponent>();
+			for (int index = 0; index < 3; ++index)
+			{
+				Entity rock = fixture.GetScene().CreateEntity("Rock", root);
+				rock.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+				rock.Patch<TransformComponent>([index](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(40.0f * static_cast<float>(index), 0.0f, 0.0f);
+				});
+			}
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			auto created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE(created);
+			auto session = std::move(*created);
+			const SessionStatistics before = ReadSessionStatistics(*session);
+			CHECK(before.StaticItems == 0);
+			CHECK(before.StaticCellRebuilds == 0);
+			const RenderExtractionRequest request{ .Camera = RenderCameraSource::Explicit, .Width = 64, .Height = 64, .Alpha = 0.0f };
+			REQUIRE(session->ExtractView(request).has_value());
+			const SessionStatistics first = ReadSessionStatistics(*session);
+			CHECK(first.StaticItems == 3);
+			CHECK(first.StaticCellRebuilds == 3); // the first refresh builds the three cells
+			REQUIRE(session->ExtractView(request).has_value());
+			const SessionStatistics second = ReadSessionStatistics(*session);
+			CHECK(second.StaticItems == 3);
+			CHECK(second.StaticCellRebuilds == 0);
 		}
 	}
 

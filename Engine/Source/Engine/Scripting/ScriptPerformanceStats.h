@@ -47,6 +47,17 @@ namespace Engine {
 		// DroppedPlanarReflections).
 		uint32_t PlanarReflections = 0;
 		uint32_t DroppedPlanarReflections = 0;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; ADR 0060's ledger: first of phase 8's members): the
+		// session's last tick's work (PlaySession::GetLastTickWork: TransformsUpdated, the world matrices recomputed;
+		// EntitiesVisited, the entities its per-entity passes visited), the static cells its scene's last render extraction
+		// rebuilt or removed and the static items of that extraction's set (StaticCellRebuilds and StaticItems, in every mode,
+		// a renderer or not: extraction runs either way), and the static cells the game view's camera did not cull
+		// (StaticCellsVisible, RenderStats').
+		uint32_t TransformsUpdated = 0;
+		uint32_t EntitiesVisited = 0;
+		uint32_t StaticCellRebuilds = 0;
+		uint32_t StaticItems = 0;
+		uint32_t StaticCellsVisible = 0;
 	};
 
 }

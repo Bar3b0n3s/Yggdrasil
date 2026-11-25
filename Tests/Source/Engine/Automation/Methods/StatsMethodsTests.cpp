@@ -49,6 +49,11 @@ namespace Engine {
 			stats.DroppedPlanarReflections = 1;
 			stats.CulledPlanarReflections = 6;
 			stats.PlanarReflectionEntities = { UUID(0x2a), UUID(0x17) };
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set, its cells seen, the dynamic items.
+			stats.StaticItems = 20000;
+			stats.StaticCells = 64;
+			stats.StaticCellsVisible = 9;
+			stats.DynamicItems = 31;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -73,6 +78,10 @@ namespace Engine {
 			CHECK(summary.DroppedPlanarReflections == 1);
 			CHECK(summary.CulledPlanarReflections == 6);
 			CHECK(summary.PlanarReflectionEntities == std::vector<std::string>{ UUID(0x2a).ToString(), UUID(0x17).ToString() });
+			CHECK(summary.StaticItems == 20000);
+			CHECK(summary.StaticCells == 64);
+			CHECK(summary.StaticCellsVisible == 9);
+			CHECK(summary.DynamicItems == 31);
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
@@ -105,6 +114,10 @@ namespace Engine {
 			CHECK(unavailable.SkinnedMeshes == 0);
 			CHECK(unavailable.PlanarReflections == 0);
 			CHECK(unavailable.PlanarReflectionEntities.empty());
+			CHECK(unavailable.StaticItems == 0);
+			CHECK(unavailable.StaticCells == 0);
+			CHECK(unavailable.StaticCellsVisible == 0);
+			CHECK(unavailable.DynamicItems == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")
