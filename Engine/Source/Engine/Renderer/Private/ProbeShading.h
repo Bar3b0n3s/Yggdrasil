@@ -6,8 +6,10 @@
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Shared/ProbeConstants.h"
 
+#include <glm/glm.hpp>
 #include <nvrhi/nvrhi.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -26,6 +28,18 @@
 // dropped too (counted). Each list is then ordered by its boxes' world volumes, the largest first, ties in snapshot order
 // (ProbeConstants). Intensity is clamped to [0, MaxEnvironmentIntensity] (a non-finite one is 0) and a non-finite or negative
 // BlendDistance is 0.
+//
+// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): in a view a Sky lights, each kept volume
+// whose data is relightable brings its GPU relight block (GpuIrradianceVolume::Relight), which the view's ProbeRelight row
+// relights into the view's IrradianceProbes copy (now UAV-capable), and each reflection probe its relight entry: the relit
+// constant term of the probe nearest its centre of the smallest relightable volume whose box holds that centre, that probe's
+// baked constant term's luminance and its Intensity (Shared/SkyConstants.h's ReflectionRelights layout), from which
+// CSProbeRelight scales its Intensity. So that a reflection probe's relight does not depend on where the camera looks (the
+// W45.3 review's finding 3), a relightable volume the view culls is kept too when its box holds a kept reflection probe's
+// centre: after the view's own volumes, only while one of the MaxViewIrradianceVolumes slots is free (it is not counted as
+// dropped otherwise); no surface the view's camera sees lies in its box, so the view's own pixels do not change (a mirror
+// view, which shades with the view's probes, may see into it). A view whose copy holds relit probes and whose sky no longer
+// relights them copies its volumes' bakes again.
 
 namespace Engine {
 
@@ -63,12 +77,22 @@ namespace Engine {
 			uint32_t DroppedVolumes = 0;
 			uint32_t DroppedReflectionProbes = 0;
 			uint32_t MismatchedReflectionProbes = 0;
+			// M45, with `relight` (PrepareProbeShading): each of Volumes' relight block (null for a volume baked without one), in
+			// their order, and each of Constants' reflection probes' relight entry (x -1 outside every relit volume); without it,
+			// Relights is all null.
+			std::vector<nvrhi::BufferHandle> Relights{};
+			std::array<glm::vec4, MaxViewReflectionProbes> ReflectionRelights{};
+
+			// Whether a volume of Volumes is relit (a non-null entry of Relights).
+			[[nodiscard]] bool HasRelight() const;
 		};
 
 		// The view's probes in `snapshot` seen by `camera` (see the file comment), resolving their data through `cache` (which
 		// may upload: the caller holds no mirror reference across it). Empty (Counts 0, no mirror resolved) when `enabled` is
-		// false: no camera, a view other than Lit, the wireframe view, or RenderQualitySettings::Probes false.
-		[[nodiscard]] ProbeShadingInputs PrepareProbeShading(GpuResourceCache& cache, const RenderSnapshot& snapshot, const CameraData& camera, bool enabled);
+		// false: no camera, a view other than Lit, the wireframe view, or RenderQualitySettings::Probes false. M45: `relight`, a
+		// Sky lights the view, so its relightable volumes and its reflection probes take their relight inputs.
+		[[nodiscard]] ProbeShadingInputs PrepareProbeShading(GpuResourceCache& cache, const RenderSnapshot& snapshot, const CameraData& camera, bool enabled,
+			bool relight);
 
 		// The view's copies of its probes' mirrors (place 2), each null until a render needs it: the ProbeConstants buffer (b4),
 		// the volumes' coefficients one after another (t13, a structured buffer of float4 grown to the view's count) and the
@@ -76,7 +100,9 @@ namespace Engine {
 		// with the ids of the data the last copies took, in their order, so a render whose probes did not change copies nothing.
 		// Ids, never the mirrors' handles: the view holds no mirror, so a mirror the cache releases (CollectStale, TrimUnused,
 		// a scene unloaded) is freed whatever the view last drew (W26.1's review). Released with the renderer's state on a
-		// device loss, and created again by the next render.
+		// device loss, and created again by the next render. M45: the coefficients are UAV-capable, HoldsRelight says that the
+		// relightable volumes' copies hold the ProbeRelight row's relight rather than their bakes, and RelitIntensity is the
+		// Sky's Intensity that relight took (the sky's lighting key leaves it out, the finalize applying it every frame).
 		struct ProbeViewResources
 		{
 			nvrhi::BufferHandle Constants{};
@@ -84,6 +110,8 @@ namespace Engine {
 			nvrhi::TextureHandle Cubes{};
 			std::vector<ProbeMirrorId> CopiedVolumes{};
 			std::vector<ProbeMirrorId> CopiedCubes{};
+			bool HoldsRelight = false;
+			float RelitIntensity = 0.0f;
 		};
 
 		// Creates what `inputs` needs of `resources` on `device`: the constants buffer, and the coefficient buffer or the cube
@@ -93,8 +121,9 @@ namespace Engine {
 		[[nodiscard]] Status EnsureProbeViewResources(GraphicsDevice& device, ProbeViewResources& resources, ProbeShadingInputs& inputs);
 
 		// Records `inputs`' upload into `resources` (EnsureProbeViewResources first): the constants, and the mirrors' copies
-		// when they differ from the last copies (every face level of every cube, the volumes' coefficients at their offsets).
-		// Nothing without the constants buffer.
+		// when they differ from the last copies (every face level of every cube, the volumes' coefficients at their offsets),
+		// or, M45, when the copies hold a relight that `inputs` does not ask for (their bakes again; any copy of the volumes
+		// clears HoldsRelight). Nothing without the constants buffer.
 		void RecordProbeUploads(nvrhi::ICommandList& commandList, ProbeViewResources& resources, const ProbeShadingInputs& inputs);
 
 		// The forward set's neutral probe resources (startup objects of the pipeline set, created by one command list executed

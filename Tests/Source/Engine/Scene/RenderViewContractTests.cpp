@@ -53,7 +53,12 @@ namespace Engine {
 				Entity entity = scene.CreateEntityWithID(UUID(value), "Mesh");
 				entity.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
 				if (value == 5)
-					entity.GetComponent<TransformComponent>().Translation = { 9000.0f, 0.0f, 0.0f };
+				{
+					entity.Patch<TransformComponent>([](TransformComponent& transform)
+					{
+						transform.Translation = { 9000.0f, 0.0f, 0.0f };
+					});
+				}
 				if (value == 2)
 					entity.SetActive(false);
 				if (value == 3)

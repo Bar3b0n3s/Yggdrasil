@@ -6,11 +6,18 @@
 #include "Engine/Asset/IrradianceVolumeData.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
+#include "Engine/Scene/Components/SkyComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SkyValidation.h"
+#include "Engine/Scene/TransformSystem.h"
 
+#include <glm/glm.hpp>
+
+#include <algorithm>
 #include <format>
 #include <utility>
+#include <vector>
 
 // The probe checks of a scene (ProbeValidation.h; Docs/Decisions/0037-m26-contract.md decision 9).
 
@@ -62,6 +69,44 @@ namespace Engine {
 			return issue;
 		}
 
+		// M45: whether `scene` has an effectively enabled Sky.
+		[[nodiscard]] static bool HasActiveSky(const Scene& scene)
+		{
+			for (const entt::entity handle : scene.GetRegistry().view<SkyComponent>())
+			{
+				if (ConstEntity(handle, &scene).IsActive())
+					return true;
+			}
+			return false;
+		}
+
+		[[nodiscard]] static ProbeSceneIssue MakeProbeNotRelightable(ConstEntity entity, std::string_view component)
+		{
+			ProbeSceneIssue issue;
+			issue.Code = std::string(ProbeNotRelightableCode);
+			issue.Severity = DiagnosticSeverity::Warning;
+			issue.Entity = entity.GetUUID();
+			issue.Component = std::string(component);
+			issue.Field = "Data";
+			issue.Message = component == "IrradianceVolume"
+				? std::format("the IrradianceVolume of '{}' was baked without the scene's Sky, so the sky does not relight it: it keeps its bake's "
+							  "light as the sun turns",
+					  entity.GetName())
+				: std::format("the ReflectionProbe of '{}' lies in no relightable IrradianceVolume, so the scene's Sky does not dim or brighten it: "
+							  "it keeps its bake's brightness as the sun turns",
+					  entity.GetName());
+			issue.Hint = "Bake the scene's lighting under its Sky with lighting.bake (the editor's Bake Lighting), with an IrradianceVolume around "
+						 "each ReflectionProbe, and save the scene.";
+			return issue;
+		}
+
+		// M45: a relightable volume's box in the world: its world matrix's inverse and its half Size.
+		struct RelitBox
+		{
+			glm::mat4 WorldToLocal = glm::mat4(1.0f);
+			glm::vec3 HalfSize = glm::vec3(0.0f);
+		};
+
 	}
 
 	std::vector<ProbeSceneIssue> FindProbeSceneIssues(const Scene& scene, AssetManager& assets)
@@ -69,7 +114,27 @@ namespace Engine {
 		std::vector<ProbeSceneIssue> issues;
 		if (scene.GetRegistry().view<IrradianceVolumeComponent>().empty() && scene.GetRegistry().view<ReflectionProbeComponent>().empty())
 			return issues;
-		scene.ForEachCanonical([&issues, &assets](ConstEntity entity)
+		// M45: under a Sky, the relightable volumes' boxes first, so a reflection probe anywhere in the scene finds them.
+		const bool sky = Utils::HasActiveSky(scene);
+		std::vector<Utils::RelitBox> relitBoxes;
+		if (sky)
+		{
+			scene.ForEachCanonical([&relitBoxes, &assets](ConstEntity entity)
+			{
+				const IrradianceVolumeComponent* volume = entity.TryGetComponent<IrradianceVolumeComponent>();
+				if (volume == nullptr || !entity.IsActive() || !volume->Data.GetHandle().IsValid())
+					return;
+				const Result<AssetRef<Asset>> loaded = assets.Load(volume->Data.GetHandle());
+				const AssetRef<IrradianceVolumeData> data = loaded.has_value() ? AssetCast<IrradianceVolumeData>(*loaded) : AssetRef<IrradianceVolumeData>();
+				if (data == nullptr || data->Relight.empty())
+					return;
+				const glm::mat4 world = TransformSystem::ComputeWorldMatrix(entity);
+				if (glm::determinant(glm::mat3(world)) == 0.0f)
+					return;
+				relitBoxes.push_back({ .WorldToLocal = glm::inverse(world), .HalfSize = volume->Size * 0.5f });
+			});
+		}
+		scene.ForEachCanonical([&issues, &assets, sky, &relitBoxes](ConstEntity entity)
 		{
 			if (!entity.IsActive())
 				return;
@@ -77,6 +142,12 @@ namespace Engine {
 			{
 				if (!Utils::LoadAs<IrradianceVolumeData>(assets, volume->Data.GetHandle()).has_value())
 					issues.push_back(Utils::MakeProbeNotBaked(entity, "IrradianceVolume", volume->Data.GetHandle()));
+				else if (sky)
+				{
+					const Result<AssetRef<Asset>> loaded = assets.Load(volume->Data.GetHandle());
+					if (loaded.has_value() && AssetCast<IrradianceVolumeData>(*loaded)->Relight.empty())
+						issues.push_back(Utils::MakeProbeNotRelightable(entity, "IrradianceVolume"));
+				}
 			}
 			if (const ReflectionProbeComponent* probe = entity.TryGetComponent<ReflectionProbeComponent>())
 			{
@@ -85,6 +156,17 @@ namespace Engine {
 				{
 					issues.push_back(loaded.error().GetCode() == ErrorCode::Unsupported ? Utils::MakeProbeBakeDeferred(entity, data, loaded.error())
 																						: Utils::MakeProbeNotBaked(entity, "ReflectionProbe", data));
+				}
+				else if (sky)
+				{
+					const glm::vec3 centre(TransformSystem::ComputeWorldMatrix(entity)[3]);
+					const bool inside = std::ranges::any_of(relitBoxes, [&centre](const Utils::RelitBox& box)
+					{
+						const glm::vec3 local(box.WorldToLocal * glm::vec4(centre, 1.0f));
+						return glm::all(glm::lessThanEqual(glm::abs(local), box.HalfSize));
+					});
+					if (!inside)
+						issues.push_back(Utils::MakeProbeNotRelightable(entity, "ReflectionProbe"));
 				}
 			}
 		});

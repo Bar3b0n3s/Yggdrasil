@@ -40,7 +40,11 @@
 #include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderStage.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Engine/Renderer/SkyAtmosphere.h"
+#include "Engine/Renderer/SkyLighting.h"
+#include "Engine/Renderer/SkyPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SsrPass.h"
 #include "Engine/Renderer/TaaPass.h"
@@ -142,7 +146,7 @@ namespace Engine {
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
 			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount
 			+ ExposurePass::PipelineCount + TaaPass::PipelineCount + SsrPass::PipelineCount + TerrainPass::PipelineCount
-			+ ParticlePass::PipelineCount + PlanarReflectionPass::PipelineCount);
+			+ ParticlePass::PipelineCount + PlanarReflectionPass::PipelineCount + SkyLightingPass::PipelineCount + SkyPass::PipelineCount);
 	// M42: the forward set binds one planar reflection per slot (Private/ForwardPipelines.h).
 	static_assert(Utils::PlanarReflectionSlotCount == MaxPlanarReflectionsPerView);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
@@ -376,17 +380,6 @@ namespace Engine {
 				return 1.0f;
 			const float exposure = std::exp2(post.ExposureEV);
 			return std::isfinite(exposure) ? exposure : 1.0f;
-		}
-
-		// The material slot `slot` of `item` drawing a submesh of a mesh with `defaults`: the item's slot when it is set,
-		// else the mesh's default material, else the built-in Default material.
-		static AssetHandle SelectMaterial(const MeshDrawItem& item, std::span<const AssetHandle> defaults, uint32_t slot)
-		{
-			if (slot < item.Materials.size() && item.Materials[slot].IsValid())
-				return item.Materials[slot];
-			if (slot < defaults.size() && defaults[slot].IsValid())
-				return defaults[slot];
-			return BuiltinAssetHandles::DefaultMaterial;
 		}
 
 		// A 1x1 RGBA16_FLOAT cube of zeros: EnvSpecular of a view without an environment map, so the forward set always binds a
@@ -628,13 +621,17 @@ namespace Engine {
 		// neutral black reflection.
 		ENGINE_TRY_ASSIGN(created.PlanarReflections, PlanarReflectionPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.EmptyPlanarReflection, Utils::CreateSceneNeutralTexture(device, SceneColorFormat, false, 0.0f));
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's lighting computes and its pass.
+		ENGINE_TRY_ASSIGN(created.SkyLighting, SkyLightingPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.Sky, SkyPass::Create(device, pipelines));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
 			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
 			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount()
 			+ created.Exposure->GetPipelineCount() + created.Taa->GetPipelineCount() + created.Ssr->GetPipelineCount()
-			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount() + PlanarReflectionPass::PipelineCount;
+			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount() + PlanarReflectionPass::PipelineCount
+			+ created.SkyLighting->GetPipelineCount() + created.Sky->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -677,6 +674,8 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, TerrainPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, ParticlePass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, PlanarReflectionPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, SkyLightingPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, SkyPass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -832,12 +831,15 @@ namespace Engine {
 		SsrBindings.Clear();
 		TaaBindings.Clear();
 		ReflectionBindings.Clear();
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the Sky pass's sets (the view's targets and constants).
+		SkyBindings.Clear();
 	}
 
 	void SceneRenderer::State::ClearBindings()
 	{
 		ClearTargetBindings();
 		LightClusterBindings.Clear();
+		SkyLightingBindings.Clear(); // M45: made for the sky's computes' layouts
 		// M42: the mirror views' terrain sets, made for the terrain pass's set-1 layout.
 		for (Detail::SceneRendererReflectionSlot& slot : ReflectionSlots)
 			slot.TerrainResources.Bindings.Clear();
@@ -871,6 +873,8 @@ namespace Engine {
 		SsrBindings.ReleaseUnused();
 		TaaBindings.ReleaseUnused();
 		ReflectionBindings.ReleaseUnused();
+		SkyLightingBindings.ReleaseUnused();
+		SkyBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 		UiQuadBindings.ReleaseUnused();
 		ParticleBindings.ReleaseUnused();
@@ -878,6 +882,20 @@ namespace Engine {
 		TerrainPass::ReleaseUnused(TerrainResources);
 
 		Materials.ReleaseUnused();
+	}
+
+	AssetHandle Detail::SelectSubmeshMaterial(const MeshDrawItem& item, std::span<const AssetHandle> defaults, uint32_t slot)
+	{
+		if (slot < item.Materials.size() && item.Materials[slot].IsValid())
+			return item.Materials[slot];
+		if (slot < defaults.size() && defaults[slot].IsValid())
+			return defaults[slot];
+		return BuiltinAssetHandles::DefaultMaterial;
+	}
+
+	bool Detail::IsFiniteMatrix(const glm::mat4& matrix)
+	{
+		return Utils::IsFinite(matrix);
 	}
 
 	Result<Detail::SceneRendererMaterial> SceneRenderer::State::ResolveMaterial(AssetHandle handle)
@@ -906,6 +924,9 @@ namespace Engine {
 		Status status;
 		std::map<AssetHandle, Detail::SceneRendererMaterial> materials;
 		std::set<AssetHandle> culledMaterials; // the materials of culled submeshes this render looked at
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's draws first (SceneRendererStatic.cpp), so
+		// each opaque one, ahead in snapshot order, sorts before the dynamic draws of its key.
+		AppendStaticViewDraws(frame, camera, mirror, opaque, transparent, materials, culledMaterials, status);
 		std::vector<GpuSubmesh> submeshes;
 		std::vector<AssetHandle> defaults;
 		for (size_t index = 0; index < snapshot.Meshes.size(); ++index)
@@ -968,7 +989,7 @@ namespace Engine {
 				const GpuSubmesh& submesh = submeshes[submeshIndex];
 				if (submesh.IndexCount == 0)
 					continue;
-				const AssetHandle materialHandle = Utils::SelectMaterial(item, defaults, submesh.MaterialSlot);
+				const AssetHandle materialHandle = Detail::SelectSubmeshMaterial(item, defaults, submesh.MaterialSlot);
 				// M23 (C23.3): a deformed item's submeshes are culled by its deformed bounds.
 				const Aabb& bounds = deform.Deformed ? deform.Bounds : submesh.Bounds;
 				// M42: a mirror view also culls what lies wholly behind its glass.
@@ -1101,14 +1122,32 @@ namespace Engine {
 		reorder(opaque, opaqueKeys);
 		reorder(transparent, transparentKeys);
 
-		// M23 (R-INST): the draws' instance records in their order, opaque then transparent, and their instanced draws.
-		const auto appendInstances = [this, &snapshot](std::vector<Detail::SceneRendererDraw>& draws)
+		// M23 (R-INST): the draws' instance records in their order, opaque then transparent, and their instanced draws. M43: a
+		// static draw's records are the static set's, read through InstanceIndices: an opaque one has its entries already, a
+		// transparent one takes its entry now, in the sorted order, so a run of them of one key reads consecutive entries.
+		const auto appendInstances = [this, &snapshot](std::vector<Detail::SceneRendererDraw>& draws, bool transparentDraws)
 		{
 			std::vector<MeshInstanceKey> keys;
 			keys.reserve(draws.size());
 			Instances.reserve(Instances.size() + draws.size());
 			for (Detail::SceneRendererDraw& draw : draws)
 			{
+				if (draw.StaticInstances != 0)
+				{
+					if (transparentDraws)
+					{
+						const uint32_t record = draw.Instance;
+						draw.Instance = static_cast<uint32_t>(InstanceIndices.size());
+						InstanceIndices.push_back({ .Record = record });
+					}
+					draw.Batch = 1;
+					keys.push_back({ .Pipeline = draw.ForwardVariant,
+						.Material = draw.MaterialHandle,
+						.Mesh = draw.Mesh,
+						.Submesh = draw.Submesh,
+						.VertexStream = Detail::StaticVertexStream });
+					continue;
+				}
 				const MeshDrawItem& item = snapshot.Meshes[draw.SnapshotIndex];
 				draw.Instance = static_cast<uint32_t>(Instances.size());
 				draw.Batch = 1;
@@ -1136,8 +1175,8 @@ namespace Engine {
 					draws[batch.First + index].Batch = index == 0 ? batch.Count : 0;
 			}
 		};
-		appendInstances(opaque);
-		appendInstances(transparent);
+		appendInstances(opaque, false);
+		appendInstances(transparent, true);
 		return status;
 	}
 
@@ -1200,17 +1239,30 @@ namespace Engine {
 			}
 			DrawConstants constants{};
 			constants.FirstInstance = draw.Instance;
+			// M43: a static draw reads its instances through InstanceIndices; its batch's draws stand for their instances.
+			uint32_t instances = draw.Batch;
+			if (draw.StaticInstances != 0)
+			{
+				constants.Flags = DrawConstantsStaticInstances;
+				instances = 0;
+				for (uint32_t member = 0; member < draw.Batch; ++member)
+					instances += draws[index + member].StaticInstances;
+			}
 			commandList.setPushConstants(&constants, sizeof(constants));
-			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(draw.IndexCount).setInstanceCount(draw.Batch).setStartIndexLocation(draw.IndexOffset));
+			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(draw.IndexCount).setInstanceCount(instances).setStartIndexLocation(draw.IndexOffset));
 			++counters.DrawCalls;
-			counters.Triangles += draw.IndexCount / 3 * draw.Batch;
+			counters.Triangles += draw.IndexCount / 3 * instances;
 		}
 		if (target != nullptr)
 			return; // a mirror view's draws are not the main view's (SceneRenderStats)
+		// The submesh draws the list stands for (M43: an opaque static draw stands for each instance of its key).
+		uint32_t submeshDraws = 0;
+		for (const Detail::SceneRendererDraw& draw : draws)
+			submeshDraws += draw.StaticInstances != 0 ? draw.StaticInstances : 1U;
 		if (pass == Detail::SceneRendererMeshPass::ForwardOpaque || pass == Detail::SceneRendererMeshPass::ForwardTransparent)
-			Stats.MeshDraws += static_cast<uint32_t>(draws.size());
+			Stats.MeshDraws += submeshDraws;
 		if (pass == Detail::SceneRendererMeshPass::ForwardTransparent)
-			Stats.TransparentDraws = static_cast<uint32_t>(draws.size());
+			Stats.TransparentDraws = submeshDraws;
 	}
 
 	SceneRenderer::SceneRenderer(ConstructionKey /*key*/)
@@ -1382,6 +1434,14 @@ namespace Engine {
 		{
 			state.ClearBindings();
 			state.ShadowCache.Clear(); // M29: maps drawn by the replaced pipelines are not reused
+			// M45 (the W45.2 review's finding 1): nor are the sky's LUTs and image-based light, nor the probes they relit, which
+			// the view copies again from their bakes (and relights when its sky asks).
+			if (state.SkyResources.has_value())
+			{
+				state.SkyResources->LutKey.reset();
+				state.SkyResources->LightingKey.reset();
+			}
+			state.ProbeResources.CopiedVolumes.clear();
 			state.PipelineGeneration = state.Pipelines->Generation;
 		}
 		state.Stats = {};
@@ -1470,6 +1530,13 @@ namespace Engine {
 		state.ImageRevision = snapshot.SceneRevision;
 		state.ImageGeneration = state.Generation;
 		state.ImagePickTable = frame.Picking ? std::vector<UUID>(snapshot.PickTable.begin(), snapshot.PickTable.end()) : std::vector<UUID>();
+		// M43: the static cells whose records the picking prepass wrote, which their pick ids resolve against.
+		state.ImageStaticPicks.clear();
+		if (frame.Picking)
+		{
+			for (const Detail::SceneRendererStaticCellRef& reference : frame.StaticCells)
+				state.ImageStaticPicks.push_back({ .First = reference.FirstRecord, .Cell = reference.Prepared->Cell });
+		}
 		state.FinalTarget = 0;
 		commandList.beginMarker("SceneRenderer");
 		state.RecordViewSetup(frame);
@@ -1498,10 +1565,17 @@ namespace Engine {
 		state.ReleaseUnusedReflections();
 		std::set<size_t> visibleMeshes;
 		for (const auto& draw : state.OpaqueDraws)
-			visibleMeshes.insert(draw.SnapshotIndex);
+		{
+			if (draw.StaticInstances == 0)
+				visibleMeshes.insert(draw.SnapshotIndex);
+		}
 		for (const auto& draw : state.TransparentDraws)
-			visibleMeshes.insert(draw.SnapshotIndex);
-		stats.VisibleMeshes = static_cast<uint32_t>(visibleMeshes.size());
+		{
+			if (draw.StaticInstances == 0)
+				visibleMeshes.insert(draw.SnapshotIndex);
+		}
+		// M43: the static items the view drew a submesh of, as the dynamic items.
+		stats.VisibleMeshes = static_cast<uint32_t>(visibleMeshes.size()) + frame.StaticVisibleItems;
 		stats.CulledSubmeshes = state.Stats.CulledSubmeshes;
 		static_assert(std::tuple_size_v<decltype(stats.MeshLodDraws)> == MaxMeshLods, "a count per level of detail");
 		stats.MeshLodDraws = state.Stats.MeshLodDraws; // M46 (decision 3K)
@@ -1523,6 +1597,14 @@ namespace Engine {
 		stats.DroppedPlanarReflections = frame.DroppedPlanarReflections;
 		stats.CulledPlanarReflections = frame.CulledPlanarReflections;
 		stats.PlanarReflectionEntities = std::move(frame.PlanarReflectionEntities);
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set rendered, the cells the camera's view did not
+		// cull, and the snapshot's dynamic mesh items.
+		stats.StaticItems = frame.StaticItems;
+		stats.StaticCells = frame.StaticCellCount;
+		stats.StaticCellsVisible = frame.StaticCellsVisible;
+		stats.DynamicItems = static_cast<uint32_t>(snapshot.Meshes.size());
+		stats.SkyUpdates = frame.SkyUpdates; // M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3)
+		stats.RelitIrradianceVolumes = frame.RelitIrradianceVolumes;
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1614,6 +1696,9 @@ namespace Engine {
 			commandList.writeBuffer(LightBuffer, Lights.data(), Lights.size() * sizeof(ShaderLight));
 		if (!Instances.empty())
 			commandList.writeBuffer(InstanceBuffer, Instances.data(), Instances.size() * sizeof(InstanceRecord));
+		// M43: the static draws' indices into the static records.
+		if (!InstanceIndices.empty())
+			commandList.writeBuffer(InstanceIndexBuffer, InstanceIndices.data(), InstanceIndices.size() * sizeof(InstanceIndex));
 		// M26 (C26.1, R-GI-PROBE; stream Q-B): the probes' constants, and their mirrors' copies when the view's probes changed.
 		Utils::RecordProbeUploads(commandList, ProbeResources, frame.Probes);
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the view's planar reflections, and each drawn slot's
@@ -1743,10 +1828,12 @@ namespace Engine {
 		{
 			// Choose in snapshot order, independently of CullLights' importance ordering. Uploaded indices are remapped. A light
 			// the planner rejects (data the schemas accept that cannot be shadowed, such as a ShadowDistance within the camera's
-			// near plane) stays lit without shadows and the next eligible light is tried; it is not a render error.
+			// near plane) stays lit without shadows and the next eligible light is tried; it is not a render error. M45
+			// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): with a Sky, its Sun is offered first while above the
+			// horizon, else its Moon light (OrderShadowCandidates, Renderer/SkyAtmosphere.h).
 			uint32_t rejectedLights = 0;
 			std::string rejection;
-			for (uint32_t index = 0; index < snapshot.Lights.size(); ++index)
+			for (const uint32_t index : OrderShadowCandidates(snapshot))
 			{
 				const LightData& light = snapshot.Lights[index];
 				// M29 (the review): the type first, so a view of thousands of point lights searches its list for none of them.
@@ -1859,6 +1946,9 @@ namespace Engine {
 		OpaqueDraws.clear();
 		TransparentDraws.clear();
 		Instances.clear();
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's records and cells, before any draw.
+		InstanceIndices.clear();
+		PrepareStaticSet(frame);
 		// M23 (C23.3): this render's deformations, resolved as the passes look at their items.
 		++DeformRender;
 		ItemDeforms.assign(snapshot.Meshes.size(), Detail::SceneRendererItemDeform{});
@@ -1905,6 +1995,8 @@ namespace Engine {
 				frame.ShadowCasters = std::move(*casters);
 			else
 				frame.KeepFirstError(std::unexpected(std::move(casters).error()));
+			// M43: the static casters, culled and grouped by key per face (one draw per key and face).
+			PrepareStaticShadows(frame);
 		}
 		if (frame.Selection)
 		{
@@ -1920,21 +2012,30 @@ namespace Engine {
 			const std::vector<DeformedVertexSource> selectedSources = PrepareVertexSources(frame, selected);
 			for (size_t position = 0; position < selected.size(); ++position)
 				sources[selected[position]] = selectedSources[position];
-			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources, frame.HasWind);
+			// M43: a selected static item's record is copied into Instances, so Selection.slang reads it there.
+			const std::vector<MeshDrawItem> staticSelected = CollectSelectedStaticItems(frame);
+			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources, staticSelected, frame.HasWind);
 		}
-		const GpuEnvironment* environment = hasCamera && frame.IsLit && !frame.Wireframe ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
-		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
+		const bool environmentLit = hasCamera && frame.IsLit && !frame.Wireframe;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; SceneRendererSky.cpp): an enabled Sky lights the view in
+		// the Environment's place: its constants (the SH9 the sky's GPU copy fills) and its specular cube at t3.
+		PrepareSky(frame, snapshot, camera, environmentLit);
+		const GpuEnvironment* environment = environmentLit && !frame.Sky ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
+		frame.Environment = frame.Sky ? Utils::MakeSkyEnvironmentConstants(snapshot.Sky) : Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog, in the views that light with the environment.
-		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, frame.Environment, hasCamera && frame.IsLit && !frame.Wireframe);
-		frame.EnvironmentSpecular = environment != nullptr ? environment->Specular : Pipelines->BlackCube;
+		// M45: the glow follows a Sky's Sun (with a Sky, the fog's tinted colour is the sky's GPU copy's).
+		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, GetSkyGlowLight(snapshot), frame.Environment, environmentLit);
+		frame.EnvironmentSpecular = frame.Sky ? SkyResources->Specular : (environment != nullptr ? environment->Specular : Pipelines->BlackCube);
 		frame.EnvironmentSkybox = environment != nullptr ? environment->Skybox : nvrhi::TextureHandle();
 		// M32's milestone review: a view whose cleared pixels no skybox draws over has its clear colour for a sky, which the
-		// skybox pass fogs as the sky when the fog has FogSkybox.
+		// skybox pass fogs as the sky when the fog has FogSkybox. M45: the Sky pass draws them in a view the Sky lights.
 		frame.DrawsSkybox = frame.IsLit && frame.Camera.ClearToSkybox && frame.EnvironmentSkybox != nullptr && snapshot.Environment.ShowSkybox;
-		frame.Fog.SkyIsClearColor = frame.DrawsSkybox ? 0U : 1U;
+		frame.DrawsSky = frame.Sky && frame.Camera.ClearToSkybox;
+		frame.Fog.SkyIsClearColor = frame.DrawsSkybox || frame.DrawsSky ? 0U : 1U;
 		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the view's probes, in the views
 		// that light with the environment, never in a bake's captures (RenderQualitySettings::Probes false: one bounce).
-		frame.Probes = Utils::PrepareProbeShading(*Cache, snapshot, camera, hasCamera && frame.IsLit && !frame.Wireframe && snapshot.Quality.Probes);
+		// M45: with a Sky lighting the view, its relightable volumes are relit (SceneRendererSky.cpp's ProbeRelight row).
+		frame.Probes = Utils::PrepareProbeShading(*Cache, snapshot, camera, hasCamera && frame.IsLit && !frame.Wireframe && snapshot.Quality.Probes, frame.Sky);
 		frame.KeepFirstError(Utils::EnsureProbeViewResources(*Device, ProbeResources, frame.Probes));
 		if ((frame.Probes.DroppedVolumes > 0 || frame.Probes.DroppedReflectionProbes > 0) && !ProbeLimitLogged)
 		{
@@ -1958,10 +2059,19 @@ namespace Engine {
 		// M31 (decision 6): the dissolve noise, a procedural built-in every asset manager serves, looked up only while an item
 		// dissolves, so a snapshot without a dissolve never asks for it.
 		frame.DissolveNoise = Pipelines->WhiteAo;
-		const bool dissolves = std::ranges::any_of(snapshot.Meshes, [](const MeshDrawItem& item)
+		bool dissolves = std::ranges::any_of(snapshot.Meshes, [](const MeshDrawItem& item)
 		{
 			return item.Parameters.DissolveAmount > 0.0f;
 		});
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's items dissolve too, known per cell
+		// (RenderStaticCell::Dissolving).
+		if (!dissolves && snapshot.StaticSet != nullptr)
+		{
+			dissolves = std::ranges::any_of(snapshot.StaticSet->Cells, [](const Ref<const RenderStaticCell>& cell)
+			{
+				return cell->Dissolving;
+			});
+		}
 		if (dissolves)
 		{
 			const GpuTexture& noise = Cache->GetTexture(BuiltinAssetHandles::DissolveNoiseTexture);
@@ -1978,6 +2088,7 @@ namespace Engine {
 		});
 		recording.EndPass({});
 		ENGINE_TRY(EnsureInstanceBuffer());
+		ENGINE_TRY(EnsureInstanceIndexBuffer(frame));
 		const bool halfPoints = Utils::HasHalfTierPointShadow(frame.Points);
 		return EnsureFrameTargets(frame.Picking, frame.Ao, frame.HalfAo, frame.Cascades.Count != 0 ? snapshot.Quality.ShadowMapSize : 0, !frame.Spots.Tiles.empty(),
 			!frame.Points.Lights.empty() ? GetPointShadowFaceSize(snapshot.Quality.ShadowMapSize) : 0,
@@ -2253,6 +2364,10 @@ namespace Engine {
 			.PointHalfFramebuffers = Targets.PointShadowHalfFramebuffers,
 			.Cache = &ShadowCache,
 			.DissolveNoise = frame.DissolveNoise,
+			.StaticDraws = &frame.StaticShadows,
+			.StaticKeys = StaticCasterKeys,
+			.StaticInstances = GetStaticInstancesBinding(frame),
+			.InstanceIndices = InstanceIndexBuffer,
 			.Wind = WindConstantsBuffer,
 		};
 		auto result = Pipelines->Shadows->Record(*frame.CommandList, *frame.Recording, ShadowBindings, inputs);
@@ -2278,10 +2393,13 @@ namespace Engine {
 				nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+				// M43: the static records and the view's indices into them.
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 			};
 			auto created = ViewBindings.GetOrCreate(*Device, desc, *Pipelines->Layouts.PrepassView);
 			if (created)
@@ -2295,9 +2413,11 @@ namespace Engine {
 				overdraw.bindings = {
 					nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, ViewConstantsBuffer),
 					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
-					nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 					nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 					nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
+					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
+					nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 				};
 				auto overdrawSet = ViewBindings.GetOrCreate(*Device, overdraw, *Pipelines->Layouts.OverdrawView);
 				if (overdrawSet)
@@ -2387,6 +2507,8 @@ namespace Engine {
 			}
 		}
 		RecordLightClusters(frame);
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's LUTs, its image-based light and its copies.
+		RecordSkyLighting(frame);
 	}
 
 	Status SceneRenderer::State::EnsureLightClusterBuffers(uint32_t clusterCount, uint32_t wordCount)
@@ -2460,7 +2582,6 @@ namespace Engine {
 			nvrhi::BindingSetItem::Texture_SRV(Utils::ReflectionProbeCubesRegister, hasReflections ? ProbeResources.Cubes : Pipelines->EmptyReflectionProbeCubes),
 			nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
 			nvrhi::BindingSetItem::ConstantBuffer(Utils::PlanarReflectionConstantsRegister, PlanarReflectionConstantsBuffer),
-			nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 			nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 			nvrhi::BindingSetItem::Sampler(Utils::ShadowCompareRegister, Pipelines->ShadowCompare),
 			nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
@@ -2468,6 +2589,10 @@ namespace Engine {
 		};
 		for (uint32_t slot = 0; slot < MaxPlanarReflectionsPerView; ++slot)
 			desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(Utils::PlanarReflectionsRegister + slot, planarReflections[slot]));
+		// M43: the static records and the view's indices into them.
+		desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)));
+		desc.bindings.push_back(nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer));
+		desc.bindings.push_back(nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer)); // M46
 		return desc;
 	}
 
@@ -2511,9 +2636,17 @@ namespace Engine {
 					recording.EndPass(counters);
 				}
 				// The skybox, or (M32's milestone review) in a view fogged with FogSkybox whose sky is its clear colour, the same pass
-				// drawing that colour fogged as the sky (the black cube bound in the skybox's place, unread).
-				const bool fogsClearSky = !frame.DrawsSkybox && frame.Fog.Enabled != 0 && frame.Fog.FogSkybox != 0;
-				if (frame.DrawsSkybox || fogsClearSky)
+				// drawing that colour fogged as the sky (the black cube bound in the skybox's place, unread). M45
+				// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the Sky in their place in a view it lights.
+				const bool fogsClearSky = !frame.DrawsSkybox && !frame.DrawsSky && frame.Fog.Enabled != 0 && frame.Fog.FogSkybox != 0;
+				if (frame.DrawsSky)
+				{
+					recording.BeginPass("Sky", &commandList);
+					const Status drawn = RecordSky(commandList, *Targets.ForwardFramebuffer, *ViewConstantsBuffer, *FogConstantsBuffer, std::nullopt);
+					recording.EndPass({ .DrawCalls = drawn ? 1U : 0U, .Triangles = drawn ? 1U : 0U });
+					frame.KeepFirstError(drawn);
+				}
+				else if (frame.DrawsSkybox || fogsClearSky)
 				{
 					recording.BeginPass("Skybox", &commandList);
 					const Status drawn = Pipelines->Skybox->Record(commandList, SkyboxBindings,

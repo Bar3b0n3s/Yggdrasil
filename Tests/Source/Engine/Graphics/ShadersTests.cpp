@@ -41,6 +41,7 @@
 #include "Shared/QuadVertex.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ShaderLight.h"
+#include "Shared/SkyConstants.h"
 #include "Shared/SmokeConstants.h"
 #include "Shared/TaaConstants.h"
 #include "Shared/TerrainConstants.h"
@@ -50,6 +51,7 @@
 #include "Shared/WindConstants.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/MatrixConventionProgram.h"
+#include "Support/SkyCopyProgram.h"
 #include "Support/SmokeProgram.h"
 #include "Support/TonemapCurvesProgram.h"
 
@@ -110,6 +112,9 @@ namespace Engine {
 			Test::MakeSmokeLayoutDescription("0"),
 			Test::MakeSmokeLayoutDescription("1"),
 			Test::MakeTonemapCurvesLayoutDescription(),
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the Sky program's test entries.
+			Test::MakeSkyCopyWriteLayoutDescription(),
+			Test::MakeSkyCopyReadLayoutDescription(),
 		};
 		for (std::vector<PipelineLayoutDescription> more : { SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format::R11G11B10_FLOAT),
 				 BloomPass::GetLayoutDescriptions(nvrhi::Format::RGBA16_FLOAT), EnvironmentBaker::GetLayoutDescriptions(), QuadBatcher::GetLayoutDescriptions(),
@@ -468,7 +473,7 @@ namespace Engine {
 				.Size = sizeof(DrawConstants),
 				.Fields = {
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, FirstInstance),
-					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, Flags),
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding1),
 				},
 				.Program = "Scene",
@@ -726,6 +731,75 @@ namespace Engine {
 				.Program = "Smoke",
 				.Entry = "CSMain",
 				.Permutation = { { .Key = "SMOKE_SATURATE", .Value = "0" } },
+			},
+			{
+				// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the element of a view's InstanceIndices structured
+				// buffer (t22), which a static draw's vertex shader reads (Common/Instances.slang); first of phase 8's structs.
+				.Name = "InstanceIndex",
+				.Size = sizeof(InstanceIndex),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(InstanceIndex, Record),
+					ENGINE_TEST_SHARED_FIELD(InstanceIndex, Reserved),
+				},
+				.Program = "Scene",
+				.Entry = "VSMain",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: after M43's InstanceIndex):
+			// the sky's per-view constants.
+			{
+				.Name = "SkyConstants",
+				.Size = sizeof(SkyConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, RayleighScattering),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, BottomRadius),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, OzoneAbsorption),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, TopRadius),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, GroundAlbedo),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, MieScattering),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, MieExtinction),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, MieAsymmetry),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, CameraAltitude),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, Intensity),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, SunDirection),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, SunCosRadius),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, SunIlluminance),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, SunDiscRadiance),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, MoonDirection),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, MoonCosRadius),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, MoonIlluminance),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, MoonFraction),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, StarFrame0),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, StarFrame1),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, StarFrame2),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, Stars),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, Overcast),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, CloudCoverage),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, CloudHeight),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, CloudOffset),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, HasMoon),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, FogColor),
+					ENGINE_TEST_SHARED_FIELD(SkyConstants, FogAmbientTint),
+				},
+				.Program = "Sky",
+				.Entry = "CSTestCopyWrite",
+			},
+			// M45 (W45.2): the sky's computes' push constants.
+			{
+				.Name = "SkyDispatchConstants",
+				.Size = sizeof(SkyDispatchConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, CloudOffset),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Altitude),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Face),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Count),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Mode),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Padding1),
+				},
+				.Program = "Sky",
+				.Entry = "CSSkyCube",
 			},
 			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): b8 of every mesh layout.
 			{

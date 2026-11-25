@@ -91,13 +91,17 @@ namespace Engine {
 		// `instancing` is false). Nothing for a snapshot without a camera or a selection. Main thread; the caller writes
 		// `instances` into the buffer Record reads. M23 (C23.3, decision 27): `sources`, empty or one per snapshot item, are
 		// the vertices each item's draws bind (SkinningPass.h): a deformed item's draws bind its deformed vertices and key
-		// its VertexStream, so they batch with no other item's; a Skipped item draws no mask.
-		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): each selected item draws the
-		// level the camera's view holds most of its pixels with (SelectViewMeshLod's Level), unfaded, and nothing beyond its
-		// CullDistance; with `wind` (the snapshot has a Wind), a draw whose material has wind gets DrawFlagWind and its
+		// its VertexStream, so they batch with no other item's; a Skipped item draws no mask. M43
+		// (Docs/Decisions/0061-m43-static-scenery.md decision 3): `staticItems`, the selected items of the snapshot's static set
+		// (copies, in cell order then item order), draw after the snapshot's items by the same rule, so Selection.slang reads
+		// every selected record from Instances.
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): each selected item, static or
+		// not, draws the level the camera's view holds most of its pixels with (SelectViewMeshLod's Level), unfaded, and nothing
+		// beyond its CullDistance; with `wind` (the snapshot has a Wind), a draw whose material has wind gets DrawFlagWind and its
 		// WindResponse, so its mask covers the prepass's displaced surface.
 		[[nodiscard]] static SelectionDrawSet PrepareDraws(GpuResourceCache& cache, const RenderSnapshot& snapshot, bool instancing,
-			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {}, bool wind = false);
+			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {}, std::span<const MeshDrawItem> staticItems = {},
+			bool wind = false);
 		// Empty selection clears mask and does no composite; invalid/deleted ids are ignored. InvalidArgument for invalid
 		// radius/descriptors, or a selection without its prepared draws or instance buffer; Gpu from resources/bindings.
 		// commandList open asserted; all inputs borrowed for this call. Every mask draw is instanced (Selection.slang reads its

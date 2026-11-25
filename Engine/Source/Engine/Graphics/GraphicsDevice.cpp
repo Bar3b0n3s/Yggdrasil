@@ -1029,6 +1029,9 @@ namespace Engine {
 			return MakeError(ErrorCode::Gpu, "cannot create texture {}: out of device memory (injected by --gpu-inject-fault={})",
 				Utils::DescribeTexture(desc), GpuFaultToString(GpuFault::OomTexture));
 		}
+		// M45: a test's out-of-memory texture fails here, before NVRHI, whose failed creation asserts in Debug (GpuDiagnostics.h).
+		if (m_Diagnostics.ShouldFailSelectedTextureCreation(desc))
+			return MakeError(ErrorCode::Gpu, "cannot create texture {}: out of device memory (injected by a test)", Utils::DescribeTexture(desc));
 		// A render-target or storage texture takes C18.4's injected fault, which strikes once armed (decision 46).
 		if ((desc.isRenderTarget || desc.isUAV) && m_Diagnostics.TakeRenderTargetCreationFault())
 		{

@@ -4,6 +4,7 @@
 
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderTargetPool.h"
+#include "Engine/Renderer/AsyncPicker.h"
 #include "Engine/Renderer/BloomPass.h"
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/DebugRenderer.h"
@@ -26,11 +27,15 @@
 #include "Engine/Renderer/Private/TilemapDrawCache.h"
 #include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/RenderStaticDraws.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/ShadowCascades.h"
 #include "Engine/Renderer/ShadowPass.h"
 #include "Engine/Renderer/SkinningPass.h"
+#include "Engine/Renderer/SkyLighting.h"
+#include "Engine/Renderer/SkyPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Renderer/SsrPass.h"
@@ -53,7 +58,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -115,6 +123,95 @@ namespace Engine {
 			// or a deformed item's deformed bounds) in the item's local space, whose rectangle on screen ranks a planar
 			// reflection's glass.
 			Aabb Bounds{};
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static instances the draw stands for, 0 for a
+			// dynamic draw. A static draw reads its records from the static set's (GpuResourceCache::GetStaticRecordBuffer)
+			// through the view's InstanceIndices (DrawConstantsStaticInstances): Instance is its first entry there. An opaque
+			// static draw stands for every instance of its key (RenderStaticDrawKey) the view sees, so it is one indexed draw of
+			// that many instances; a transparent one for one instance (1), and the runs of adjacent transparent static draws of
+			// one key batch as the dynamic draws do (Batch). Its Entity is its item's (a transparent draw's) or invalid (an
+			// opaque draw's, which stands for several), and its SnapshotIndex is unused.
+			uint32_t StaticInstances = 0;
+		};
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the MeshInstanceKey::VertexStream of a static draw, which
+		// no dynamic draw has (0 is a mesh's own vertices, a deformed item's count up from 1), so GroupMeshInstances never
+		// batches a static draw with a dynamic one.
+		inline constexpr uint32_t StaticVertexStream = std::numeric_limits<uint32_t>::max();
+
+		// M43: what the static draws of one key of the camera's passes draw with (RenderStaticDrawKey: the forward variant, the
+		// material, the mesh and the submesh): its mesh's buffers and submesh range, its prepass variant (Opaque and Mask
+		// keys) and whether it is a Blend key, resolved when a cell holding it is prepared (SceneRenderer::State::StaticKeys).
+		struct SceneRendererStaticKey
+		{
+			RenderStaticDrawKey Key{};
+			nvrhi::BufferHandle VertexBuffer{};
+			nvrhi::BufferHandle AttributeBuffer{};
+			nvrhi::BufferHandle IndexBuffer{};
+			uint32_t IndexOffset = 0;
+			uint32_t IndexCount = 0;
+			uint32_t PrepassVariant = 0;
+			bool Blend = false;
+		};
+
+		// M43: one submesh draw of a prepared static cell's item: its key (into StaticKeys) and its submesh's local bounds.
+		struct SceneRendererStaticDraw
+		{
+			uint32_t Key = 0;
+			uint32_t Submesh = 0;
+			Aabb Bounds{};
+		};
+
+		// M43: one item of a prepared static cell: its world matrix, whether it is finite (a non-finite one draws nothing and
+		// is the render's error, as a dynamic item's), and its draws (Draws[FirstDraw, FirstDraw + DrawCount)).
+		struct SceneRendererStaticItem
+		{
+			glm::mat4 World = glm::mat4(1.0f);
+			uint32_t FirstDraw = 0;
+			uint32_t DrawCount = 0;
+			bool Finite = true;
+		};
+
+		// M43: a mirror a prepared cell depends on: a mesh's GpuMesh at its Version with its vertex buffer (held, so the
+		// comparison cannot meet a reused address), or a material's GpuMaterial::Generation.
+		struct SceneRendererStaticAsset
+		{
+			AssetHandle Handle{};
+			uint64_t Version = 0;
+			nvrhi::BufferHandle Vertices{};
+		};
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): one static cell prepared for this renderer, keyed by the
+		// cell object it holds (RenderStaticSet.h: cell versions are unique only within one scene's set) and the mirrors it
+		// was prepared from: its items' camera draws and shadow casters, its box (the world box of its draws' moved bounds,
+		// inflated by InflateStaticCellBox; Unbounded when a draw's bounds are empty, which no view culls) and its casters'
+		// (CasterBox, CastersUnbounded), its submesh draws (what a view that culls the cell adds to CulledSubmeshes), its
+		// distinct materials (R-MATSET's Keep for a culled cell), its items' entities sorted (the selection's lookup), and
+		// the first item whose world matrix is not finite. Prepared when its cell first reaches the renderer and again when
+		// a mirror it depends on changed; released by the first render whose set does not hold it.
+		struct SceneRendererStaticCell
+		{
+			Ref<const RenderStaticCell> Cell{};
+			std::vector<SceneRendererStaticItem> Items{};
+			std::vector<SceneRendererStaticDraw> Draws{};
+			std::vector<StaticShadowCaster> Casters{};
+			Aabb Box{};
+			bool Unbounded = false;
+			Aabb CasterBox{};
+			bool CastersUnbounded = false;
+			uint32_t SubmeshCount = 0;
+			std::vector<AssetHandle> Materials{};
+			std::vector<SceneRendererStaticAsset> Meshes{};
+			std::vector<SceneRendererStaticAsset> MaterialGenerations{};
+			std::vector<std::pair<UUID, uint32_t>> Entities{};
+			std::optional<UUID> NonFinite{};
+			bool Used = false; // the render being prepared holds it
+		};
+
+		// M43: a cell of the render's static set: its preparation and its first record in the static record buffer.
+		struct SceneRendererStaticCellRef
+		{
+			const SceneRendererStaticCell* Prepared = nullptr;
+			uint32_t FirstRecord = 0;
 		};
 
 		// A material of the frame, resolved once per render: its set, or null when its draws are skipped.
@@ -418,6 +515,21 @@ namespace Engine {
 			bool HalfSsr = false;
 			// M32's milestone review: the skybox draws over the cleared pixels (a Lit view clearing to a skybox it has and shows).
 			bool DrawsSkybox = false;
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; Renderer/SkyLighting.h): set by the Prepare stage: a
+			// Sky lights the view (an enabled Sky in a Lit view with a camera outside the wireframe whose resources exist), the Sky
+			// pass draws over the cleared pixels (it lights the view and the camera clears to the skybox), the atmosphere's LUTs
+			// and the image-based light are regenerated this render (their keys changed), and the view's SkyConstants and the
+			// light's key. SkyUpdates is RenderStats::SkyUpdates, and RelitIrradianceVolumes (W45.3) the volumes its ProbeRelight row
+			// relit (RenderStats::RelitIrradianceVolumes).
+			bool Sky = false;
+			bool DrawsSky = false;
+			bool SkyLutUpdate = false;
+			bool SkyUpdate = false;
+			uint32_t SkyUpdates = 0;
+			uint32_t RelitIrradianceVolumes = 0;
+			SkyConstants SkyView{};
+			SkyLutKey SkyLuts{};
+			SkyLightingKey SkyLighting{};
 			ViewConstants View{};
 			EnvironmentConstants Environment{};
 			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Renderer/Fog.h), Enabled only in a Lit view
@@ -500,6 +612,20 @@ namespace Engine {
 			uint32_t DroppedPlanarReflections = 0;
 			uint32_t CulledPlanarReflections = 0;
 			std::vector<UUID> PlanarReflectionEntities{};
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): set by the Prepare stage (PrepareStaticSet): the static
+			// set's cells this render draws, in the set's order, and the static record buffer they index (empty and null without
+			// a static set, or when its records could not be acquired, the error kept: no static draw then); the set's items and
+			// cells (RenderStats' StaticItems and StaticCells); the cells the camera's view did not cull and the static items it
+			// drew a submesh of (StaticCellsVisible, and VisibleMeshes' static part); and the static casters' draws per shadow
+			// face (ShadowPass::PrepareStaticFaces) with their cells.
+			std::vector<SceneRendererStaticCellRef> StaticCells{};
+			nvrhi::BufferHandle StaticInstances{};
+			uint32_t StaticItems = 0;
+			uint32_t StaticCellCount = 0;
+			uint32_t StaticCellsVisible = 0;
+			uint32_t StaticVisibleItems = 0;
+			StaticShadowSet StaticShadows{};
+			std::vector<StaticShadowCell> StaticShadowCells{};
 
 			// Keeps `result` when it is the render's first error.
 			void KeepFirstError(Status result)
@@ -525,6 +651,12 @@ namespace Engine {
 		// The ViewConstants of `camera` for a `width` x `height` target without jitter, with `exposure` (SceneRenderer.cpp's
 		// MakeViewConstants).
 		[[nodiscard]] ViewConstants MakeSceneViewConstants(const CameraData& camera, uint32_t width, uint32_t height, float exposure);
+		// M43 (SceneRendererStatic.cpp): SceneRenderer.cpp's material choice of a submesh: the material slot `slot` of `item`
+		// drawing a submesh of a mesh with `defaults`: the item's slot when it is set, else the mesh's default material, else
+		// the built-in Default material.
+		[[nodiscard]] AssetHandle SelectSubmeshMaterial(const MeshDrawItem& item, std::span<const AssetHandle> defaults, uint32_t slot);
+		// M43: whether every element of `matrix` is finite (SceneRenderer.cpp's test of an item's world matrix).
+		[[nodiscard]] bool IsFiniteMatrix(const glm::mat4& matrix);
 
 	}
 
@@ -596,6 +728,9 @@ namespace Engine {
 		// a drawn reflection, binds at t17 to t20.
 		Scope<PlanarReflectionPass> PlanarReflections{};
 		nvrhi::TextureHandle EmptyPlanarReflection{};
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's lighting computes and its pass (place 1).
+		Scope<SkyLightingPass> SkyLighting{};
+		Scope<SkyPass> Sky{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -617,6 +752,9 @@ namespace Engine {
 		// The view's binding sets (PassBindingCache.h): its own set-0 sets, those of each shared pass, the materials'.
 		PassBindingCache ViewBindings{};
 		PassBindingCache SkyboxBindings{};
+		// M45 (decision 3): the sky's computes' sets and the Sky pass's (the main view's and its mirror slots').
+		PassBindingCache SkyLightingBindings{};
+		PassBindingCache SkyBindings{};
 		PassBindingCache BloomBindings{};
 		PassBindingCache TonemapBindings{};
 		PassBindingCache FxaaBindings{};
@@ -802,6 +940,9 @@ namespace Engine {
 		// limits, or a reflection probe whose cube's format or size differs from the first's) were logged, once per renderer
 		// each.
 		Utils::ProbeViewResources ProbeResources{};
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; Renderer/SkyLighting.h): the view's sky resources (the
+		// placement rule's place 2), created by the first render with a Sky and dropped with the state on a device loss.
+		std::optional<SkyViewResources> SkyResources{};
 		bool ProbeLimitLogged = false;
 		bool ProbeFormatLogged = false;
 		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decisions 22 and 29; stream T-C): the view's terrain state
@@ -826,6 +967,32 @@ namespace Engine {
 		// view. CPU state that a device loss's release keeps (SceneRendererRecovery.cpp).
 		RenderDebugView RenderedDebugView = RenderDebugView::Lit;
 		std::array<bool, RenderDebugViewCount> DebugViewFailureLogged{};
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static path (the placement rule's place 2,
+		// SceneRendererStatic.cpp): the prepared cells by their object; the camera's keys and the casters' keys, each with its
+		// lookup and the prepared draws or casters that use it, which a cell prepared again refreshes; a key no prepared cell
+		// uses lets go of its mirrors' GPU objects (so a scene unload's collection and a trim release them), and the tables
+		// start afresh, every cell prepared again, without a static set or once they hold more than twice the keys in use
+		// (StaticKeysInUse, both tables') and 256 more; the per-view buckets of visible static records by key and the keys
+		// touched, and the shadow faces' (ShadowPass::PrepareStaticFaces), each empty between uses; the view's InstanceIndices
+		// (written by RecordViewSetup) and its buffer (t22, grown to them, never shrunk; a device loss's release drops it);
+		// the picked image's static cells (AsyncPicker's StaticPickRange); and the entities whose static mesh morphs by its
+		// default weights, which this renderer reported once each (kept across a device loss, as the other once-per-renderer
+		// reports).
+		std::map<const RenderStaticCell*, Detail::SceneRendererStaticCell> StaticCells{};
+		std::vector<Detail::SceneRendererStaticKey> StaticKeys{};
+		std::map<RenderStaticDrawKey, uint32_t> StaticKeyIndex{};
+		std::vector<uint32_t> StaticKeyUses{};
+		std::vector<StaticShadowKey> StaticCasterKeys{};
+		std::map<RenderStaticDrawKey, uint32_t> StaticCasterKeyIndex{};
+		std::vector<uint32_t> StaticCasterKeyUses{};
+		size_t StaticKeysInUse = 0;
+		std::vector<std::vector<uint32_t>> StaticBuckets{};
+		std::vector<uint32_t> StaticTouched{};
+		StaticShadowBuckets StaticFaceBuckets{};
+		std::vector<InstanceIndex> InstanceIndices{};
+		nvrhi::BufferHandle InstanceIndexBuffer{};
+		std::vector<StaticPickRange> ImageStaticPicks{};
+		std::set<UUID> StaticMorphLogged{};
 
 		// The targets of `width` x `height` with their framebuffers.
 		[[nodiscard]] Result<Detail::SceneRendererTargets> CreateTargets(uint32_t width, uint32_t height) const;
@@ -887,6 +1054,48 @@ namespace Engine {
 		// release, so the next Render creates it again), to hold Instances (at least one record, so every set binds a buffer).
 		// Errors: Gpu when the buffer cannot be created (the previous one stays).
 		[[nodiscard]] Status EnsureInstanceBuffer();
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; SceneRendererStatic.cpp): the start of the Prepare stage:
+		// the snapshot's static set's records acquired (GpuResourceCache::AcquireStaticRecords) and each of its cells
+		// prepared for this renderer when it was not or a mirror it depends on changed (PrepareStaticCell), into
+		// frame.StaticCells; the cells the set no longer holds released. Without a set, or when its records cannot be
+		// acquired (the error kept in frame), nothing static is drawn.
+		void PrepareStaticSet(Detail::SceneRendererFrame& frame);
+		// M43: `cell` prepared for this renderer: its items' camera draws (PrepareViewDraws' rule: the submeshes with indices,
+		// each with its material's variants), its shadow casters (ShadowPass::AppendStaticItemCasters), its boxes and the
+		// mirrors it reads, the keys interned into StaticKeys and StaticCasterKeys; an item whose mesh morphs by its default
+		// weights draws undeformed, reported once per entity (StaticMorphLogged).
+		[[nodiscard]] Detail::SceneRendererStaticCell PrepareStaticCell(const Ref<const RenderStaticCell>& cell);
+		// M43: the uses of the keys of `cell` (a prepared cell about to be dropped or replaced) released: a key left unused
+		// lets go of the GPU objects it holds and keeps its place in its table.
+		void ReleaseStaticCellKeys(const Detail::SceneRendererStaticCell& cell);
+		// M43: every prepared cell and both key tables dropped.
+		void ClearStaticKeys();
+		// M43: the static draws of the view of `camera` (with `mirror`, a mirror view's, as PrepareViewDraws) into `opaque` (one
+		// per visible key, before the dynamic draws, their indices appended to InstanceIndices) and `transparent` (one per
+		// visible Blend submesh, its record in Instance until PrepareViewDraws orders them): each cell classified by its box
+		// (ClassifyStaticCell, the mirror's clip plane), a culled one adding its submesh draws to CulledSubmeshes (main view)
+		// and keeping its materials' sets (R-MATSET), the draws of a partial cell tested one by one with IsOutsideView (and
+		// the clip plane), as the dynamic path tests them. `materials` and `culledMaterials` are PrepareViewDraws'; `status`
+		// takes the first error (a non-finite item, a material set's creation).
+		void AppendStaticViewDraws(Detail::SceneRendererFrame& frame, const CameraData& camera, const Detail::SceneRendererMirrorCull* mirror,
+			std::vector<Detail::SceneRendererDraw>& opaque, std::vector<Detail::SceneRendererDraw>& transparent,
+			std::map<AssetHandle, Detail::SceneRendererMaterial>& materials, std::set<AssetHandle>& culledMaterials, Status& status);
+		// M43: the static casters' draws of every shadow face the frame plans (ShadowPass::PrepareStaticFaces), their indices
+		// appended to InstanceIndices, into frame.StaticShadows.
+		void PrepareStaticShadows(Detail::SceneRendererFrame& frame);
+		// M43: copies of the static set's items whose entity the snapshot selects, in cell order then item order (the
+		// selection mask's static items, SelectionPass::PrepareDraws).
+		[[nodiscard]] std::vector<MeshDrawItem> CollectSelectedStaticItems(const Detail::SceneRendererFrame& frame) const;
+		// M43: the end of the Prepare stage: InstanceIndexBuffer grown to InstanceIndices (at least 64 entries, so every set binds
+		// one); when it cannot grow, every static draw of the render is dropped (the camera's, the mirror views' and the shadow
+		// faces') and the error is kept, an earlier buffer bound. Errors: Gpu when no buffer exists and none can be created.
+		[[nodiscard]] Status EnsureInstanceIndexBuffer(Detail::SceneRendererFrame& frame);
+		// M43: drops every static draw of the render (a failed InstanceIndices buffer's growth): no static item or cell is
+		// then visible in the render's stats.
+		void DropStaticDraws(Detail::SceneRendererFrame& frame);
+		// M43: the static records a view's sets bind at t21: the frame's static record buffer, or the view's Instances in its
+		// place (nothing reads it then).
+		[[nodiscard]] nvrhi::IBuffer* GetStaticInstancesBinding(const Detail::SceneRendererFrame& frame) const;
 		// What Render records between the Prepare stage and the Deform stage: the per-view constants the Prepare stage made
 		// (frame's View, Environment and Shadow, the packed Lights and the instance records), then the clears of SceneColor (the camera's
 		// ClearColor), SceneDepth (0, the far plane), SceneNormals and, for a picking view, EntityId.
@@ -921,6 +1130,15 @@ namespace Engine {
 		// recorded (its error kept), it writes the brute-force constants. Without both buffers (their creation error kept) it
 		// writes nothing, and the forward passes and the data views' composite, which bind them, are skipped.
 		void RecordLightClusters(Detail::SceneRendererFrame& frame);
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; SceneRendererSky.cpp): the Prepare stage's sky inputs
+		// (after the environment's), the Ambient stage's SkyLighting rows (its end) and the Sky pass of a view (the main view's,
+		// or a mirror slot's with its framebuffer, constants and scissor).
+		void PrepareSky(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera, bool lit);
+		void RecordSkyLighting(Detail::SceneRendererFrame& frame);
+		// M45's W45.3: the ProbeRelight row (SceneRendererSky.cpp), at the end of RecordSkyLighting.
+		void RecordProbeRelight(Detail::SceneRendererFrame& frame);
+		[[nodiscard]] Status RecordSky(nvrhi::ICommandList& commandList, nvrhi::IFramebuffer& framebuffer, nvrhi::IBuffer& viewConstants, nvrhi::IBuffer& fogConstants,
+			const std::optional<nvrhi::Rect>& scissor);
 		// LightClusterConstantsBuffer when it is null, and LightClusterBuffer when it is null or holds fewer than
 		// `clusterCount` clusters of `wordCount` words (LightClusterPass's descs; M29: the grid's WordCount), each replacing
 		// the member only when its creation succeeded. Errors: those of GraphicsDevice::CreateBuffer (Gpu).

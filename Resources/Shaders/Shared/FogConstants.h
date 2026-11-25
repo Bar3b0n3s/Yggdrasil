@@ -29,8 +29,8 @@ namespace Engine {
 		// The camera's forward axis (its -Z) in world space, unit; and the most fog a point receives, in [0, 1].
 		Float3 ViewForward;
 		float MaxOpacity = 0.0f;
-		// The direction toward the first directional light (the light list's first, in canonical order), unit; and the glow's
-		// exponent.
+		// The direction toward the glow's light, unit (an enabled Sky's Sun, else the light list's first directional light, in
+		// canonical order: GetSkyGlowLight, Renderer/SkyAtmosphere.h); and the glow's exponent.
 		Float3 SunDirection;
 		float SunGlowExponent = 1.0f;
 		// The glow's radiance at its centre: Fog.SunGlow times that light's Color times its Intensity; zero without a

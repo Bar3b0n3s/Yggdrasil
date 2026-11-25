@@ -241,6 +241,30 @@ namespace Engine {
 			CHECK((*checkpoint)["colliders"][0]["name"] == Json("Checkpoint"));
 		}
 
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): centerOfMass, before tick.
+		TEST_CASE("PhysicsMethods: physics.bodyInfo reports the body's centre of mass")
+		{
+			Test::AutomationFixture setup("PhysicsBodyInfoCenterOfMass");
+			REQUIRE(setup.Call("edit.batch", ParsePhysicsMethodJson(R"({"label":"Masses","ops":[
+				{"method":"entity.create","params":{"name":"Buggy","components":{"Transform":{"Translation":[2,5,0]},
+					"RigidBody":{"Type":"Dynamic","GravityFactor":0},"BoxCollider":{"Offset":[0,0.5,0]},
+					"MassProperties":{"CenterOfMassOffset":[0,-0.75,0.25]}}}},
+				{"method":"entity.create","params":{"name":"Crate","components":{"Transform":{"Translation":[-2,5,0]},
+					"RigidBody":{"Type":"Dynamic","GravityFactor":0},"BoxCollider":{}}}}]})"))
+					.has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "mode", "simulate" } }).has_value());
+			const Result<Json> buggy = setup.Call("physics.bodyInfo", Json{ { "entity", "/Buggy" } });
+			REQUIRE_MESSAGE(buggy.has_value(), buggy.error().ToString());
+			// The collider's centre (0.5 m above the origin) moved by the offset, in world space.
+			CHECK(ReadComponent((*buggy)["centerOfMass"], 0) == doctest::Approx(2.0f).epsilon(1.0e-4));
+			CHECK(ReadComponent((*buggy)["centerOfMass"], 1) == doctest::Approx(4.75f).epsilon(1.0e-4));
+			CHECK(ReadComponent((*buggy)["centerOfMass"], 2) == doctest::Approx(0.25f).epsilon(1.0e-4));
+			const Result<Json> crate = setup.Call("physics.bodyInfo", Json{ { "entity", "/Crate" } });
+			REQUIRE_MESSAGE(crate.has_value(), crate.error().ToString());
+			CHECK(ReadComponent((*crate)["centerOfMass"], 0) == doctest::Approx(-2.0f).epsilon(1.0e-4));
+			CHECK(ReadComponent((*crate)["centerOfMass"], 1) == doctest::Approx(5.0f).epsilon(1.0e-4));
+		}
+
 		TEST_CASE("PhysicsMethods: physics.jointInfo reports a joint's bodies, reading, force and motor in play")
 		{
 			Test::AutomationFixture setup("PhysicsJointInfo");
@@ -330,6 +354,139 @@ namespace Engine {
 			RegisterEditorMethods(methods, {});
 			methods.Freeze();
 			const MethodDescriptor* method = methods.Find("physics.jointInfo");
+			REQUIRE(method != nullptr);
+			const MethodSpecification& specification = method->Specification;
+			CHECK_FALSE(specification.Mutates);
+			CHECK_FALSE(specification.SupportsDryRun);
+			CHECK_FALSE(specification.ExposeAsTool);
+			CHECK_FALSE(specification.AvailableInLauncher);
+			CHECK(specification.AvailableInRuntime);
+			CHECK(specification.AllowedInBatch);
+			CHECK(specification.RequiredParams == std::vector<std::string>{ "entity" });
+			CHECK_FALSE(method->Pending);
+		}
+
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a buggy driving at full throttle with half a right lock, read
+		// through itself and a wheel, and a sled refused for its missing differential.
+		TEST_CASE("PhysicsMethods: physics.vehicleInfo reports a vehicle's drivetrain and wheels in play")
+		{
+			Test::AutomationFixture setup("PhysicsVehicleInfo");
+			REQUIRE(setup.Call("edit.batch", ParsePhysicsMethodJson(R"({"label":"Vehicles","ops":[
+				{"method":"entity.create","params":{"name":"Ground","components":{"Transform":{"Translation":[0,-0.5,0]},
+					"RigidBody":{"Type":"Static"},"BoxCollider":{"HalfExtents":[100,0.5,100]}}}},
+				{"method":"entity.create","params":{"name":"Buggy","components":{"Transform":{"Translation":[0,1,0]},
+					"RigidBody":{"Type":"Dynamic","Mass":1200},"BoxCollider":{"HalfExtents":[0.9,0.25,2]}}}},
+				{"method":"entity.create","params":{"name":"FL","parent":"/Buggy","components":{"Transform":{"Translation":[-0.9,-0.5,-1.4]},
+					"VehicleWheel":{"Radius":0.4,"Width":0.3,"MaxSteerAngle":35}}}},
+				{"method":"entity.create","params":{"name":"FR","parent":"/Buggy","components":{"Transform":{"Translation":[0.9,-0.5,-1.4]},
+					"VehicleWheel":{"Radius":0.4,"Width":0.3,"MaxSteerAngle":35}}}},
+				{"method":"entity.create","params":{"name":"RL","parent":"/Buggy","components":{"Transform":{"Translation":[-0.9,-0.5,1.4]},
+					"VehicleWheel":{"Radius":0.4,"Width":0.3,"MaxSteerAngle":0}}}},
+				{"method":"entity.create","params":{"name":"RR","parent":"/Buggy","components":{"Transform":{"Translation":[0.9,-0.5,1.4]},
+					"VehicleWheel":{"Radius":0.4,"Width":0.3,"MaxSteerAngle":0}}}},
+				{"method":"entity.update","params":{"entity":"/Buggy","components":{"WheeledVehicle":{"Throttle":1,"Steering":0.5,
+					"Differentials":[{"LeftWheel":"/Buggy/RL","RightWheel":"/Buggy/RR"}]}}}},
+				{"method":"entity.create","params":{"name":"Sled","components":{"Transform":{"Translation":[20,1,0]},
+					"RigidBody":{"Type":"Dynamic"},"BoxCollider":{"HalfExtents":[0.5,0.25,1]}}}},
+				{"method":"entity.create","params":{"name":"Runner","parent":"/Sled","components":{"Transform":{"Translation":[0,-0.5,0]},
+					"VehicleWheel":{}}}},
+				{"method":"entity.update","params":{"entity":"/Sled","components":{"WheeledVehicle":{}}}},
+				{"method":"entity.create","params":{"name":"Plinth","components":{"Transform":{"Translation":[-20,1,0]},
+					"RigidBody":{"Type":"Static"},"BoxCollider":{},"WheeledVehicle":{}}}}]})"))
+					.has_value());
+			// The sled names no differential: PHYSICS_VEHICLE_INVALID "differential".
+			const Test::ExpectLog invalid(LogLevel::Error, "PHYSICS_VEHICLE_INVALID");
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "seed", 3 } }).has_value());
+			StepPhysicsScene(setup, 90);
+
+			const Result<Json> buggy = setup.Call("physics.vehicleInfo", Json{ { "entity", "/Buggy" } });
+			REQUIRE_MESSAGE(buggy.has_value(), buggy.error().ToString());
+			CHECK((*buggy)["entity"]["name"] == Json("Buggy"));
+			CHECK((*buggy)["body"]["name"] == Json("Buggy"));
+			CHECK((*buggy)["created"] == Json(true));
+			CHECK(JsonReader((*buggy)["speed"]).ReadFloat().value_or(0.0f) > 1.0f);
+			const float rpm = JsonReader((*buggy)["engineRpm"]).ReadFloat().value_or(0.0f);
+			CHECK(rpm >= 1000.0f);
+			CHECK(rpm <= 6000.0f);
+			CHECK(JsonReader((*buggy)["gear"]).ReadInt32().value_or(0) >= 1);
+			const float clutch = JsonReader((*buggy)["clutch"]).ReadFloat().value_or(-1.0f);
+			CHECK(clutch >= 0.0f);
+			CHECK(clutch <= 1.0f);
+			CHECK((*buggy)["shifting"].is_boolean());
+			CHECK((*buggy)["tick"] == Json(90));
+			const Json& wheels = (*buggy)["wheels"];
+			REQUIRE(wheels.size() == 4);
+			CHECK(wheels[0]["entity"]["path"] == Json("/Buggy/FL"));
+			CHECK(wheels[3]["entity"]["path"] == Json("/Buggy/RR"));
+			for (const Json& wheel : wheels)
+			{
+				CAPTURE(wheel.dump());
+				CHECK(wheel["touching"] == Json(true));
+				CHECK(std::abs(ReadComponent(wheel["point"], 1)) < 0.05f);
+				CHECK(ReadComponent(wheel["normal"], 1) > 0.99f);
+				CHECK(wheel["collider"]["name"] == Json("Ground"));
+				CHECK(JsonReader(wheel["suspensionLength"]).ReadFloat().value_or(1.0f) < 0.5f);
+				CHECK(JsonReader(wheel["suspensionForce"]).ReadFloat().value_or(0.0f) > 1000.0f);
+				const float rotation = JsonReader(wheel["rotation"]).ReadFloat().value_or(-1.0f);
+				CHECK(rotation >= 0.0f);
+				CHECK(rotation < 360.0f);
+				CHECK(JsonReader(wheel["angularVelocity"]).ReadFloat().value_or(0.0f) > 0.0f);
+				CHECK(JsonReader(wheel["longitudinalSlip"]).ReadFloat().value_or(-1.0f) >= 0.0f);
+				CHECK(JsonReader(wheel["lateralSlip"]).ReadFloat().value_or(-1.0f) >= 0.0f);
+			}
+			// Half a right lock of 35 degrees, positive to the right.
+			CHECK(JsonReader(wheels[0]["steerAngle"]).ReadFloat().value_or(0.0f) == doctest::Approx(17.5f).epsilon(1.0e-3));
+			CHECK(wheels[2]["steerAngle"] == Json(0.0));
+
+			// A wheel names its vehicle, which reads the same.
+			const Result<Json> byWheel = setup.Call("physics.vehicleInfo", Json{ { "entity", "/Buggy/RL" } });
+			REQUIRE_MESSAGE(byWheel.has_value(), byWheel.error().ToString());
+			CHECK((*byWheel)["entity"]["name"] == Json("Buggy"));
+			CHECK((*byWheel)["wheels"] == wheels);
+
+			// The refused sled is not in force: its readings are zero and its wheel stands nowhere.
+			const Result<Json> sled = setup.Call("physics.vehicleInfo", Json{ { "entity", "/Sled" } });
+			REQUIRE_MESSAGE(sled.has_value(), sled.error().ToString());
+			CHECK((*sled)["body"]["name"] == Json("Sled"));
+			CHECK((*sled)["created"] == Json(false));
+			CHECK((*sled)["engineRpm"] == Json(0.0));
+			REQUIRE((*sled)["wheels"].size() == 1);
+			CHECK((*sled)["wheels"][0]["entity"]["name"] == Json("Runner"));
+			CHECK((*sled)["wheels"][0]["touching"] == Json(false));
+			CHECK((*sled)["wheels"][0]["collider"].is_null());
+			// A vehicle on a Static body has no body to drive (the W44.3 review's nit 5): body is null.
+			const Result<Json> plinth = setup.Call("physics.vehicleInfo", Json{ { "entity", "/Plinth" } });
+			REQUIRE_MESSAGE(plinth.has_value(), plinth.error().ToString());
+			CHECK((*plinth)["entity"]["name"] == Json("Plinth"));
+			CHECK((*plinth)["body"].is_null());
+			CHECK((*plinth)["created"] == Json(false));
+			CHECK((*plinth)["wheels"].empty());
+			CHECK(invalid.GetMatchCount() >= 1);
+		}
+
+		TEST_CASE("PhysicsMethods: physics.vehicleInfo needs a play session and an entity that is a vehicle or a wheel")
+		{
+			Test::AutomationFixture setup("PhysicsVehicleInfoErrors");
+			REQUIRE(setup.Call("entity.create", ParsePhysicsMethodJson(R"({"name":"Empty"})")).has_value());
+			const Json edit = setup.Request("physics.vehicleInfo", Json{ { "entity", "/Empty" } });
+			CHECK(edit["error"]["data"]["errorCode"] == Json("InvalidState"));
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "mode", "simulate" } }).has_value());
+			const Result<Json> noVehicle = setup.Call("physics.vehicleInfo", Json{ { "entity", "/Empty" } });
+			REQUIRE_FALSE(noVehicle.has_value());
+			CHECK(noVehicle.error().GetCode() == ErrorCode::NotFound);
+			const Json missing = setup.Request("physics.vehicleInfo", Json{ { "entity", "/Nobody" } });
+			CHECK(missing["error"]["code"] == Json(-32001));
+			const Json noEntity = setup.Request("physics.vehicleInfo", Json::object());
+			CHECK(noEntity["error"]["code"] == Json(-32602));
+		}
+
+		TEST_CASE("PhysicsMethods: physics.vehicleInfo is a read-only batchable method of both hosts and no tool")
+		{
+			Test::EditorTestFixture fixture("PhysicsVehicleInfoFlags");
+			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
+			RegisterEditorMethods(methods, {});
+			methods.Freeze();
+			const MethodDescriptor* method = methods.Find("physics.vehicleInfo");
 			REQUIRE(method != nullptr);
 			const MethodSpecification& specification = method->Specification;
 			CHECK_FALSE(specification.Mutates);

@@ -88,19 +88,18 @@ namespace Engine {
 		if (registry.view<ParticleEmitterComponent>().empty())
 			return;
 
-		// The effectively enabled emitters, gathered first so the states added below never run while the canonical order is
-		// being read.
-		m_Emitters.clear();
-		for (const UUID id : scene.GetCanonicalOrder())
+		// The effectively enabled emitters in canonical order (M43: the ParticleEmitter view, counted in EntitiesVisited),
+		// gathered first so the states added below never run while the view is being read.
+		scene.CollectCanonical<ParticleEmitterComponent>(m_Emitters);
+		scene.AddEntitiesVisited(m_Emitters.size());
+		std::erase_if(m_Emitters, [&registry](entt::entity handle)
 		{
-			const Entity entity = scene.FindEntityByID(id);
-			if (entity.IsValid() && entity.HasComponent<ParticleEmitterComponent>() && !entity.HasComponent<HierarchyDisabledTag>())
-				m_Emitters.push_back(id);
-		}
+			return registry.all_of<HierarchyDisabledTag>(handle);
+		});
 
-		for (const UUID id : m_Emitters)
+		for (const entt::entity handle : m_Emitters)
 		{
-			const Entity entity = scene.FindEntityByID(id);
+			const Entity entity(handle, &scene);
 			const ParticleEmitterComponent& emitter = entity.GetComponent<ParticleEmitterComponent>();
 			ParticleStateComponent& state = Utils::EnsureState(entity, emitter);
 			// A state no phase has stepped starts here: one step at this phase (none at tick 0), never the ticks before it.

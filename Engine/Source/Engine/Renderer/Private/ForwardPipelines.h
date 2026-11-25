@@ -109,6 +109,12 @@ namespace Engine {
 		inline constexpr uint32_t PlanarReflectionConstantsRegister = 7;
 		inline constexpr uint32_t PlanarReflectionsRegister = 17;
 		inline constexpr uint32_t PlanarReflectionSlotCount = 4;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's GPU-resident instance records
+		// (GpuResourceCache::GetStaticRecordBuffer) and the view's InstanceIndices (Shared/InstanceRecord.h), which a static
+		// draw's instances read (DrawConstantsStaticInstances): in the prepass, overdraw and forward sets and the Shadow
+		// program's, after their earlier items; the Terrain program declares them unread, since it shares the forward set.
+		inline constexpr uint32_t StaticInstancesRegister = 21;
+		inline constexpr uint32_t InstanceIndicesRegister = 22;
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's WindConstants
 		// (Shared/WindConstants.h) at b8 of set 0 in the prepass, overdraw and forward layouts, as in the Shadow and
 		// SelectionMask programs' (Renderer/ShadowPass.h, Renderer/SelectionPass.h), so Common/Wind.slang declares one register.

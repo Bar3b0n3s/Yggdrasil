@@ -22,6 +22,8 @@
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/ShadowPass.h"
 #include "Engine/Renderer/SkinningPass.h"
+#include "Engine/Renderer/SkyLighting.h"
+#include "Engine/Renderer/SkyPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/TerrainPass.h"
 #include "Engine/Renderer/TextRenderer.h"
@@ -118,11 +120,13 @@ namespace Engine {
 			// DepthNormal, TerrainForward after ForwardOpaque, SSR after Skybox, Particles after Lights2D, TAA before Bloom and
 			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get. M42's four
 			// (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) first in the Forward stage, before
-			// ForwardOpaque: 41.
-			constexpr std::array<std::string_view, 41> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
-				"DepthNormal", "TerrainDepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters",
-				"PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3", "ForwardOpaque", "TerrainForward", "Skybox",
-				"SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA", "Bloom", "Exposure", "Tonemap", "FXAA", "Text",
+			// ForwardOpaque: 41. M45's four (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger):
+			// SkyLuts, SkyIbl and ProbeRelight after LightClusters, and Sky after Skybox: 45.
+			constexpr std::array<std::string_view, 45> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
+				"DepthNormal", "TerrainDepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters", "SkyLuts",
+				"SkyIbl", "ProbeRelight", "PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3", "ForwardOpaque",
+				"TerrainForward", "Skybox", "Sky", "SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA", "Bloom",
+				"Exposure", "Tonemap", "FXAA", "Text",
 				"Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
 				"Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
@@ -144,6 +148,9 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("LightClusters") == LightClusterPass::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("BrdfLut") == BrdfLut::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("Skybox") == SkyboxPass::PipelineCount);
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+			CHECK(GetDeclaredPipelineCountOf("SkyLighting") == SkyLightingPass::PipelineCount);
+			CHECK(GetDeclaredPipelineCountOf("Sky") == SkyPass::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == QuadBatcher::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("Bloom") == BloomPass::PipelineCount);
 			// The tonemap pass and the data views' composite.
@@ -190,7 +197,9 @@ namespace Engine {
 			CHECK((find("TerrainForward") - 1)->Name == "ForwardOpaque");
 			CHECK((find("TerrainForward") + 1)->Name == "Skybox");
 			CHECK(find("Ssr")->Stage == RenderStage::Forward);
-			CHECK((find("Ssr") - 1)->Name == "Skybox");
+			// M45's Sky sits between the Skybox and SSR (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+			CHECK((find("Ssr") - 1)->Name == "Sky");
+			CHECK((find("Ssr") - 2)->Name == "Skybox");
 			CHECK((find("Ssr") + 1)->Name == "ForwardTransparent");
 			CHECK(find("Particles")->Stage == RenderStage::Sprites);
 			CHECK((find("Particles") - 1)->Name == "Lights2D");
@@ -221,7 +230,9 @@ namespace Engine {
 			REQUIRE(found != ScenePassDeclarations.end());
 			CHECK(found->Stage == RenderStage::Forward);
 			CHECK((found - 1)->Stage == RenderStage::Ambient);
-			CHECK((found - 1)->Name == "LightClusters");
+			// M45's SkyLighting ends the Ambient stage after LightClusters (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+			CHECK((found - 1)->Name == "SkyLighting");
+			CHECK((found - 2)->Name == "LightClusters");
 			CHECK((found + 1)->Name == "BrdfLut");
 			CHECK((found + 2)->Name == "ForwardOpaque");
 			REQUIRE(found->StatsRows.size() == 4);
@@ -233,6 +244,37 @@ namespace Engine {
 			CHECK(found->Targets[2] == "PlanarReflectionNormals");
 			CHECK(found->Targets[3] == "PlanarReflectionVelocity");
 			CHECK(found->Targets[4] == "PlanarReflectionRoughness");
+		}
+
+		TEST_CASE("RenderPassDeclarations: the sky's lighting ends the Ambient stage and the Sky follows the Skybox")
+		{
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger).
+			const auto find = [](std::string_view name)
+			{
+				return std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [name](const RenderPassDeclaration& declaration)
+				{
+					return declaration.Name == name;
+				});
+			};
+			const auto lighting = find("SkyLighting");
+			REQUIRE(lighting != ScenePassDeclarations.end());
+			CHECK(lighting->Stage == RenderStage::Ambient);
+			CHECK((lighting - 1)->Name == "LightClusters");
+			CHECK((lighting + 1)->Stage == RenderStage::Forward);
+			REQUIRE(lighting->StatsRows.size() == 3);
+			CHECK(lighting->StatsRows[0] == "SkyLuts");
+			CHECK(lighting->StatsRows[1] == "SkyIbl");
+			CHECK(lighting->StatsRows[2] == "ProbeRelight");
+			CHECK(lighting->Targets.empty());
+			const auto sky = find("Sky");
+			REQUIRE(sky != ScenePassDeclarations.end());
+			CHECK(sky->Stage == RenderStage::Forward);
+			CHECK((sky - 1)->Name == "Skybox");
+			CHECK((sky + 1)->Name == "Ssr");
+			REQUIRE(sky->StatsRows.size() == 1);
+			CHECK(sky->StatsRows[0] == "Sky");
+			REQUIRE(sky->Targets.size() == 1);
+			CHECK(sky->Targets[0] == "SceneColor");
 		}
 
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the Skinning pass's one compute pipeline joins
@@ -248,8 +290,9 @@ namespace Engine {
 			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22); 74 with M32's Ssr classification
 			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14), 77 with M33's Particles pass
 			// (Docs/Decisions/0048-m33-particle-look.md decision 4) and 76 without M26's HdrAdditive, which M33's merge removed
-			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			CHECK(GetDeclaredPipelineCount() == 77);
+			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3); 88
+			// with M45's sky (its lighting 10, its pass 1; Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+			CHECK(GetDeclaredPipelineCount() == 88);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -278,8 +321,9 @@ namespace Engine {
 			CHECK((lights - 1)->Name == "Sprites");
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
 			CHECK(QuadBatcher::PipelineCount == 5);
-			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain.
-			CHECK(GetDeclaredPipelineCount() == 77);
+			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain, 88 with
+			// M45's sky.
+			CHECK(GetDeclaredPipelineCount() == 88);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -312,7 +356,7 @@ namespace Engine {
 			// Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and M33's 3 (the Particles pass,
 			// Docs/Decisions/0048-m33-particle-look.md decision 4), less the QuadBatcher's HdrAdditive, which M33's merge removed
 			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			static_assert(GetDeclaredPipelineCount() == 77);
+			static_assert(GetDeclaredPipelineCount() == 88);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

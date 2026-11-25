@@ -6,6 +6,7 @@
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Scene/ColliderDebugDraw.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
@@ -21,11 +22,13 @@
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiExtraction.h"
+#include "Engine/Scene/VehicleDebugDraw.h"
 
 #include <algorithm>
 #include <cmath>
 #include <format>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -133,6 +136,9 @@ namespace Engine {
 			AppendColliderDebugDraw(BuildCollider2DDebugDraw(scene, layers, physics2D, &assets, { .Alpha = snapshot.Alpha }), debug);
 			// M37 (Docs/Decisions/0054-m37-joints.md decision 11): the joints after the colliders, at the snapshot's alpha.
 			AppendJointDebugDraw(BuildJointDebugDraw(scene, layers, physics, snapshot.Alpha), debug);
+			// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the vehicles' wheels after the joints, at the snapshot's
+			// alpha.
+			AppendVehicleDebugDraw(BuildVehicleDebugDraw(scene, layers, physics, snapshot.Alpha), debug);
 		}
 		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): the baked navigation mesh's polygon edges, after the colliders,
 		// at their own colour: the mesh has no pose, so the snapshot's interpolation alpha does not apply to it.
@@ -170,10 +176,30 @@ namespace Engine {
 		}
 		if (!Utils::IsFiniteAnnotationVector(ambient) || !Utils::IsFiniteAnnotationVector(ambient * environment.Intensity))
 			return MakeError(ErrorCode::InvalidArgument, "environment irradiance must be finite");
-		illumination = illumination || (environment.Intensity > 0 && Utils::HasPositiveComponent(ambient));
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): an enabled Sky lights the scene in the Environment's
+		// place, so beside one only the Sky's Intensity counts (the W45.2 review's finding 3: the Environment, its fallback colour
+		// included, is unused).
+		if (snapshot.Sky.Enabled)
+			illumination = illumination || snapshot.Sky.Intensity > 0.0f;
+		else
+			illumination = illumination || (environment.Intensity > 0 && Utils::HasPositiveComponent(ambient));
 		bool needsLighting = false;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the dynamic items and the static set's.
+		std::vector<const MeshDrawItem*> items;
+		items.reserve(snapshot.Meshes.size());
 		for (const MeshDrawItem& item : snapshot.Meshes)
+			items.push_back(&item);
+		if (snapshot.StaticSet != nullptr)
 		{
+			for (const Ref<const RenderStaticCell>& cell : snapshot.StaticSet->Cells)
+			{
+				for (const MeshDrawItem& item : cell->Items)
+					items.push_back(&item);
+			}
+		}
+		for (const MeshDrawItem* drawn : items)
+		{
+			const MeshDrawItem& item = *drawn;
 			const auto mesh = assets.GetOrPlaceholder<MeshData>(item.Mesh);
 			for (const MeshSubmesh& submesh : mesh->Submeshes)
 			{

@@ -77,6 +77,7 @@ namespace Engine {
 		state.ProbeLimitLogged = released.ProbeLimitLogged;             // M26 (stream Q-B): the dropped probes' once-per-renderer flags
 		state.ProbeFormatLogged = released.ProbeFormatLogged;
 		state.PlanarReflectionLimitLogged = released.PlanarReflectionLimitLogged; // M42: the dropped reflections' once-per-renderer flag
+		state.StaticMorphLogged = std::move(released.StaticMorphLogged);          // M43: the default-morphed static items reported once each
 		// M18 (C18.4, decision 44): the mode a failed debug-view switch falls back to, and its once-per-view log flags.
 		state.RenderedDebugView = released.RenderedDebugView;
 		state.DebugViewFailureLogged = released.DebugViewFailureLogged;

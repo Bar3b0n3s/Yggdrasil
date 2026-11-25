@@ -47,6 +47,20 @@ namespace Engine {
 		// DroppedPlanarReflections).
 		uint32_t PlanarReflections = 0;
 		uint32_t DroppedPlanarReflections = 0;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; ADR 0060's ledger: first of phase 8's members): the
+		// session's last tick's work (PlaySession::GetLastTickWork: TransformsUpdated, the world matrices recomputed;
+		// EntitiesVisited, the entities its per-tick passes visited; StaticCellRebuilds, the static cells its frame phase's
+		// extraction rebuilt or removed, never an editor view's), the static items of its scene's last render extraction's set
+		// (StaticItems; both in every mode, a renderer or not: extraction runs either way), and the static cells the game
+		// view's camera did not cull whole (StaticCellsVisible, RenderStats').
+		uint32_t TransformsUpdated = 0;
+		uint32_t EntitiesVisited = 0;
+		uint32_t StaticCellRebuilds = 0;
+		uint32_t StaticItems = 0;
+		uint32_t StaticCellsVisible = 0;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: after M43's members): 1 when
+		// the frame regenerated its Sky's image-based light, else 0 (RenderStats::SkyUpdates).
+		uint32_t SkyUpdates = 0;
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; ADR 0060's phase-8 ledger: appended after
 		// M45's SkyUpdates): the mesh items the frame drew cross-fading two levels of detail and those it culled by their
 		// RenderDistance's CullDistance (RenderStats' LodCrossFades and DistanceCulledMeshes).

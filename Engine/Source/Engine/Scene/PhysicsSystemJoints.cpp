@@ -16,8 +16,8 @@
 #include <algorithm>
 #include <bit>
 #include <format>
-#include <map>
 #include <utility>
+#include <vector>
 
 // The play session's joints (M37, Docs/Decisions/0054-m37-joints.md; PhysicsSystem.h's M37 paragraph): the joint
 // components' signals, the synchronization after the bodies, the kept frames, the break pass and its dispatch, the flush,
@@ -95,18 +95,6 @@ namespace Engine {
 				.Axis = fields.Axis,
 				.ConnectedAnchor = fields.ConnectedAnchor,
 				.Chain = GetJointChain(entity, plan.Body) };
-		}
-
-		// §9.10: each joint in force solves at its entity's rank in UUID order among them (`joints` is ordered by UUID), so
-		// the solver's order does not depend on the order the joints were made in.
-		static void RankJoints(const std::map<UUID, PhysicsJointEntry>& joints, PhysicsWorld& world)
-		{
-			uint32_t rank = 0;
-			for (const auto& [id, entry] : joints)
-			{
-				if (entry.Handle.IsValid())
-					world.SetJointPriority(entry.Handle, rank++);
-			}
 		}
 
 		static void AppendJointFloat(std::vector<std::byte>& bytes, float value)
@@ -380,8 +368,10 @@ namespace Engine {
 			inForceChanged = true;
 		}
 
+		// §9.10: each joint in force solves at its entity's rank in UUID order among them, so the solver's order does not depend
+		// on the order the joints were made in (M44: the vehicles' ranks follow, PhysicsSystemVehicles.cpp).
 		if (inForceChanged)
-			Utils::RankJoints(Joints, *World);
+			RankConstraints();
 	}
 
 	void PhysicsSystem::State::SynchronizeJointsAfterRebuild(const PhysicsComposition& composition)
@@ -442,7 +432,7 @@ namespace Engine {
 			broke = true;
 		}
 		if (broke)
-			Utils::RankJoints(Joints, *World);
+			RankConstraints();
 	}
 
 	void PhysicsSystem::State::DispatchJointBreaks()
@@ -499,11 +489,19 @@ namespace Engine {
 	{
 		if (!HasKeptJointFrames())
 			return;
-		for (const UUID id : Specification.RuntimeScene->GetCanonicalOrder())
+		// M43: the joints with kept frames, in canonical order of their live entities (Docs/Decisions/0061-m43-static-scenery.md).
+		std::vector<UUID> ids;
+		for (const auto& [id, joint] : Joints)
 		{
+			if (joint.HasFrames)
+				ids.push_back(id);
+		}
+		std::vector<entt::entity> handles;
+		CollectOwnerHandles(ids, handles);
+		for (const entt::entity handle : handles)
+		{
+			const UUID id = Specification.RuntimeScene->GetRegistry().get<IDComponent>(handle).ID;
 			const auto found = Joints.find(id);
-			if (found == Joints.end() || !found->second.HasFrames)
-				continue;
 			const uint64_t value = id.GetValue();
 			for (uint32_t shift = 0; shift < 64; shift += 8)
 				bytes.push_back(static_cast<std::byte>((value >> shift) & 0xffu));

@@ -9,6 +9,7 @@
 #include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/RenderStaticDraws.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/ShadowCascades.h"
 #include "Engine/Renderer/SkinningPass.h"
@@ -18,8 +19,10 @@
 #include <glm/mat4x4.hpp>
 #include <nvrhi/nvrhi.h>
 
+#include <array>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -102,6 +105,86 @@ namespace Engine {
 	// lies wholly outside and no view inside the light's box records it.
 	[[nodiscard]] bool ShadowBoxesOverlap(const ShadowBox& caster, const ShadowBox& light);
 
+	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): what the static casters of one key draw with (RenderStaticDrawKey:
+	// the caster variant, a Mask caster's material or null, the mesh and the submesh): ShadowCasterDraw's members a key
+	// determines, resolved when a static cell is prepared and shared by the cells of the renderer that hold the key.
+	struct StaticShadowKey
+	{
+		RenderStaticDrawKey Key{};
+		nvrhi::BufferHandle Vertices{};
+		nvrhi::BufferHandle Attributes{};
+		nvrhi::BufferHandle Indices{};
+		uint32_t IndexOffset = 0;
+		uint32_t IndexCount = 0;
+		uint32_t Variant = 0;
+		uint32_t ReflectedVariant = 0;
+		nvrhi::BufferHandle MaterialConstants{};
+		nvrhi::TextureHandle BaseColorMap{};
+	};
+
+	// M43: one static caster of a prepared cell: its key (an index into the renderer's StaticShadowKey table), its item's index
+	// in the cell (its record is the cell's first record plus it), its submesh's local bounds, its world matrix, its box
+	// (ComputeShadowCasterBox) and its M29 signature (PrepareCasters' recipe), all fixed for the cell's version.
+	struct StaticShadowCaster
+	{
+		uint32_t Key = 0;
+		uint32_t Item = 0;
+		Aabb Bounds{};
+		glm::mat4 World = glm::mat4(1.0f);
+		ShadowBox Box{};
+		uint64_t Signature = 0;
+	};
+
+	// M43: one static cell as the shadow faces cull it: the box of its casters' boxes (which each face inflates by
+	// InflateStaticCellBox before it classifies it), Unbounded when a caster has empty bounds (which no face culls, so neither
+	// is the cell), its first record in the static record buffer this render (GpuResourceCache::AcquireStaticRecords) and its
+	// casters in item order, borrowed for the render.
+	struct StaticShadowCell
+	{
+		Aabb Box{};
+		bool Unbounded = false;
+		uint32_t FirstRecord = 0;
+		std::span<const StaticShadowCaster> Casters{};
+	};
+
+	// M43: one indexed draw of a face: the face's Count visible static casters of key Key, whose records' indices are
+	// InstanceIndices[First, First + Count).
+	struct StaticShadowDraw
+	{
+		uint32_t Key = 0;
+		uint32_t First = 0;
+		uint32_t Count = 0;
+	};
+
+	// M43: a face's static draws, Draws[FirstDraw, FirstDraw + DrawCount) of its StaticShadowSet, and the signature of its
+	// visible static casters (FinishShadowSignature of their signatures in draw order; 0 without one, and for a cascade, whose
+	// maps M29's cache does not hold), which M29's cache hashes after the face's dynamic draws.
+	struct StaticShadowFace
+	{
+		uint32_t FirstDraw = 0;
+		uint32_t DrawCount = 0;
+		uint64_t Signature = 0;
+	};
+
+	// M43: the static casters' draws of every face of a view's shadow plan (ShadowPass::PrepareStaticFaces): the cascades in
+	// order, the spot tiles in the atlas's order, each planned point light's six faces.
+	struct StaticShadowSet
+	{
+		std::vector<StaticShadowDraw> Draws{};
+		std::array<StaticShadowFace, MaxShadowCascades> Cascades{};
+		std::array<StaticShadowFace, MaxSpotShadowLights> Spots{};
+		std::array<std::array<StaticShadowFace, PointShadowFaceCount>, MaxPointShadowLights> Points{};
+	};
+
+	// M43: ShadowPass::PrepareStaticFaces' working buckets: for each StaticShadowKey, the records and M29 signatures of the
+	// face's visible casters of that key, and the keys the face touched, in the order they first appear. Empty between calls;
+	// the renderer keeps them from render to render, so an unchanged frame's faces reuse their storage.
+	struct StaticShadowBuckets
+	{
+		std::vector<std::vector<std::pair<uint32_t, uint64_t>>> Keys{}; // per key: (record, signature)
+		std::vector<uint32_t> Touched{};
+	};
+
 	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): the static shadow cache, per-view renderer state that
 	// ShadowPass::Record reads and writes: the signature of what each point-shadow layer group of either tier and the spot atlas
 	// hold (0: nothing reusable). A point light's signature hashes its tier, layer group, face size, clip planes and each face's
@@ -153,6 +236,14 @@ namespace Engine {
 		// instance that dissolves (BuiltinAssetHandles::DissolveNoiseTexture's mirror); null binds the pass's own neutral
 		// white texture, under which only an amount of 1 dissolves anything.
 		nvrhi::ITexture* DissolveNoise = nullptr;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the view's static casters per face (PrepareStaticFaces),
+		// their keys, and what their draws read: the static records (t21, GpuResourceCache::GetStaticRecordBuffer) and the
+		// view's InstanceIndices (t22) holding the faces' indices; borrowed for Record only. Null draws no static caster; the
+		// sets bind Instances in a null buffer's place (nothing reads it then).
+		const StaticShadowSet* StaticDraws = nullptr;
+		std::span<const StaticShadowKey> StaticKeys{};
+		nvrhi::IBuffer* StaticInstances = nullptr;
+		nvrhi::IBuffer* InstanceIndices = nullptr;
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's WindConstants, bound at
 		// b8 of both variants' set 0 for the wind casters' displacement; null binds the pass's own calm constants, under which
 		// nothing moves.
@@ -223,7 +314,28 @@ namespace Engine {
 		[[nodiscard]] static Result<ShadowCasterSet> PrepareCasters(GpuResourceCache& cache, std::span<const MeshDrawItem> casters, bool instancing,
 			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {}, const ShadowCasterView& view = {});
 
-		// Culls the prepared casters per face and records shadow passes only. All inputs borrowed for this call;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the caster draws of static item `item` (a finite world
+		// matrix), by PrepareCasters' rule and in its submesh order, appended to `draws` with their keys to `keys`
+		// (RenderStaticDrawKey: the variant, a Mask caster's material or null, the mesh and the submesh) and their M29
+		// signatures, Instance unset: a static cell's casters, prepared once per cell version. Nothing for an item that does not
+		// cast. Main thread (the cache's mirrors).
+		static void AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, std::vector<ShadowCasterDraw>& draws,
+			std::vector<RenderStaticDrawKey>& keys);
+
+		// M43: the static casters' draws of every face of the plan (`cascades`, `spots`, `points`; null for none), `keyCount` the
+		// size of the renderer's StaticShadowKey table. Each face selects the cells, then their casters, exactly as Record
+		// selects the dynamic casters: a spot tile's and a point light's by their boxes (ShadowBoxesOverlap) first, then every
+		// face by its frustum (with the directional maps' pancake when `depthClamp`), a cell whose inflated box is outside
+		// skipped whole and one inside taken whole (ClassifyStaticCellLight, ClassifyStaticCellShadow); its visible casters'
+		// record indices are appended to `indices` grouped by key, in the order the keys first appear in the cells (cell
+		// order, then item order) and, within a key, in cell order then item order: one StaticShadowDraw per key and face. Only
+		// a spot tile's and a point face's signatures are hashed (M29's cache holds no cascade). `buckets` is the caller's
+		// working storage, grown to `keyCount` keys and left empty. Pure but for `buckets` and `indices`.
+		[[nodiscard]] static StaticShadowSet PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
+			const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices);
+
+		// Culls the prepared casters per face and records shadow passes only (M43: each face's dynamic draws as before, then its
+		// static draws, one indexed draw each of DrawConstantsStaticInstances). All inputs borrowed for this call;
 		// commandList open, targets match descriptions and Casters' records are in Instances (asserted). Gpu errors from
 		// bindings; malformed external light/settings data must have been rejected by the pure planning functions.
 		[[nodiscard]] Result<ShadowRenderResult> Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,

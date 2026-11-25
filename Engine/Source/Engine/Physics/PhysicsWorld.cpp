@@ -318,7 +318,9 @@ namespace Engine {
 		if (m_State->System == nullptr)
 			return;
 
-		// Every joint first (M37: a constraint holds raw pointers to its bodies), then every body still in the world.
+		// Every vehicle and joint first (M44, M37: each constraint holds raw pointers to its bodies), then every body still in
+		// the world.
+		m_State->DestroyAllVehicles();
 		m_State->DestroyAllJoints();
 		JPH::BodyIDVector bodies;
 		m_State->System->GetBodies(bodies);
@@ -434,13 +436,17 @@ namespace Engine {
 		const PhysicsShape::State& shape = *description.Shape->m_State;
 		const bool isDynamic = description.MotionType == PhysicsMotionType::Dynamic;
 		JPH::MassProperties dynamicMass;
+		// M44: a Dynamic body with a centre-of-mass offset holds its shape inside an OffsetCenterOfMassShape.
+		JPH::RefConst<JPH::Shape> bodyShape = shape.Shape;
 		if (isDynamic)
 		{
 			if (description.IsSensor)
 				return MakeError(ErrorCode::Validation, "{}: a Dynamic body cannot be a trigger; triggers are Kinematic sensors", PhysicsDynamicTriggerCode);
-			ENGINE_TRY_ASSIGN(dynamicMass, Detail::GetDynamicMassProperties(*shape.Shape, shape.HasMesh, description.Mass, description.AllowedDofs));
+			ENGINE_TRY_ASSIGN(dynamicMass,
+				Detail::GetDynamicMassProperties(*shape.Shape, shape.HasMesh, description.Mass, description.AllowedDofs, description.MassOverride));
 			if (description.SpheresAsDiscs)
 				Detail::AddDiscInertiaAboutZ(*shape.Shape, dynamicMass);
+			ENGINE_TRY_ASSIGN(bodyShape, Detail::MakeDynamicBodyShape(*shape.Shape, description.MassOverride));
 		}
 
 		const uint32_t limit = state.Specification.Limits.MaxBodies;
@@ -452,7 +458,7 @@ namespace Engine {
 			? PhysicsObjectKind::Sensor
 			: (description.MotionType == PhysicsMotionType::Static ? PhysicsObjectKind::Static : PhysicsObjectKind::Moving);
 		JPH::BodyCreationSettings settings;
-		settings.SetShape(shape.Shape.GetPtr());
+		settings.SetShape(bodyShape.GetPtr());
 		settings.mPosition = Detail::ToJolt(description.Pose.Position);
 		settings.mRotation = Detail::ToJoltRotation(description.Pose.Rotation);
 		settings.mMotionType = Utils::ToJoltMotionType(description.MotionType);
@@ -461,7 +467,7 @@ namespace Engine {
 		settings.mIsSensor = description.IsSensor;
 		settings.mCollideKinematicVsNonDynamic = description.CollideKinematicVsNonDynamic;
 		const bool wantsLinearCast = description.MotionQuality == PhysicsMotionQuality::LinearCast;
-		settings.mMotionQuality = Utils::GetMotionQuality(wantsLinearCast, *shape.Shape);
+		settings.mMotionQuality = Utils::GetMotionQuality(wantsLinearCast, *bodyShape);
 		settings.mAllowedDOFs = isDynamic ? static_cast<JPH::EAllowedDOFs>(std::to_underlying(description.AllowedDofs)) : JPH::EAllowedDOFs::All;
 		settings.mEnhancedInternalEdgeRemoval = description.EnhancedInternalEdgeRemoval;
 		// Sensors are kept active so they see sleeping bodies (§9.2 "Triggers").
@@ -518,7 +524,8 @@ namespace Engine {
 			.Collider = shape.ColliderUserData.empty() ? 0 : shape.ColliderUserData.front(),
 			.IsSensor = description.IsSensor,
 			.WantsLinearCast = wantsLinearCast,
-			.SpheresAsDiscs = isDynamic && description.SpheresAsDiscs };
+			.SpheresAsDiscs = isDynamic && description.SpheresAsDiscs,
+			.MassOverride = isDynamic ? description.MassOverride : PhysicsMassOverride{} };
 
 		Utils::WarnWhenNearLimit(state.HasWarnedBodies, state.System->GetNumBodies(), limit, "bodies", "PhysicsWorldLimits::MaxBodies",
 			"no further body is created");
@@ -532,7 +539,8 @@ namespace Engine {
 		if (!live.has_value())
 			return;
 
-		// M37: its joints first, so no constraint is left with a pointer to the destroyed body.
+		// M44 and M37: its vehicle and its joints first, so no constraint is left with a pointer to the destroyed body.
+		state.DestroyVehiclesOf(live->ID);
 		state.DestroyJointsOf(live->ID);
 		JPH::BodyInterface& bodyInterface = state.System->GetBodyInterface();
 		const JPH::AABox bounds = bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds();
@@ -610,6 +618,8 @@ namespace Engine {
 		const bool isDynamic = live->MotionType == JPH::EMotionType::Dynamic;
 		JPH::BodyInterface& bodyInterface = state.System->GetBodyInterface();
 		JPH::MassProperties dynamicMass;
+		// M44: the body's mass override applies to the new shape too (its wrapper made again around it).
+		JPH::RefConst<JPH::Shape> bodyShape = newShape.Shape;
 		if (isDynamic)
 		{
 			PhysicsDofs dofs = PhysicsDofs::None;
@@ -617,19 +627,21 @@ namespace Engine {
 				const JPH::BodyLockRead lock(state.System->GetBodyLockInterface(), live->ID);
 				dofs = static_cast<PhysicsDofs>(std::to_underlying(lock.GetBody().GetMotionProperties()->GetAllowedDOFs()));
 			}
-			ENGINE_TRY_ASSIGN(dynamicMass, Detail::GetDynamicMassProperties(*newShape.Shape, newShape.HasMesh, record.Mass, dofs));
+			ENGINE_TRY_ASSIGN(dynamicMass, Detail::GetDynamicMassProperties(*newShape.Shape, newShape.HasMesh, record.Mass, dofs, record.MassOverride));
 			if (record.SpheresAsDiscs)
 				Detail::AddDiscInertiaAboutZ(*newShape.Shape, dynamicMass);
+			ENGINE_TRY_ASSIGN(bodyShape, Detail::MakeDynamicBodyShape(*newShape.Shape, record.MassOverride));
 		}
 
 		const JPH::AABox oldBounds = bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds();
 		// M37: Jolt keeps the body's origin where it is and moves its centre of mass by the shapes' difference, which the
-		// body's joints (whose frames Jolt holds relative to the centre of mass) are told below.
+		// body's joints (whose frames Jolt holds relative to the centre of mass) are told below. M44: both are the body's own
+		// Jolt shapes, a mass override's wrapper included.
 		const JPH::Vec3 oldCenterOfMass = bodyInterface.GetShape(live->ID)->GetCenterOfMass();
 		// Never the shape's mass properties (a Kinematic body keeps the fixed ones CreateBody gave it, so it may take a
 		// mesh); a Dynamic body keeps its Mass with the new shape's inertia scaled to it.
 		const JPH::EActivation activation = live->MotionType == JPH::EMotionType::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate;
-		bodyInterface.SetShape(live->ID, newShape.Shape.GetPtr(), false, activation);
+		bodyInterface.SetShape(live->ID, bodyShape.GetPtr(), false, activation);
 		if (isDynamic)
 		{
 			const JPH::BodyLockWrite lock(state.System->GetBodyLockInterface(), live->ID);
@@ -640,7 +652,7 @@ namespace Engine {
 		// can cast.
 		bodyInterface.SetCollisionGroup(live->ID, state.CollisionGroups.MakeCollisionGroup(record.CollisionGroup, newShape.HasMesh));
 		if (live->MotionType != JPH::EMotionType::Static)
-			bodyInterface.SetMotionQuality(live->ID, Utils::GetMotionQuality(record.WantsLinearCast, *newShape.Shape));
+			bodyInterface.SetMotionQuality(live->ID, Utils::GetMotionQuality(record.WantsLinearCast, *bodyShape));
 		record.Shape = shape;
 		record.Collider = newShape.ColliderUserData.empty() ? 0 : newShape.ColliderUserData.front();
 		// M36: the surfaces of colliders the new shape no longer has go (SetColliderSurfaces).
@@ -648,7 +660,7 @@ namespace Engine {
 		{
 			return std::find(newShape.ColliderUserData.begin(), newShape.ColliderUserData.end(), surface.Collider) == newShape.ColliderUserData.end();
 		});
-		state.NotifyJointsShapeChanged(live->ID, newShape.Shape->GetCenterOfMass() - oldCenterOfMass);
+		state.NotifyJointsShapeChanged(live->ID, bodyShape->GetCenterOfMass() - oldCenterOfMass);
 
 		JPH::AABox bounds = oldBounds;
 		bounds.Encapsulate(bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds());
@@ -731,6 +743,14 @@ namespace Engine {
 				Utils::WakeBodiesIn(*state.System, JPH::AABox(Detail::ToJolt(bounds->Min), Detail::ToJolt(bounds->Max)));
 		}
 		return {};
+	}
+
+	glm::vec3 PhysicsWorld::GetCenterOfMassPosition(BodyHandle body) const
+	{
+		const std::optional<LiveBody> live = Utils::RequireBody(*m_State->System, body, Utils::AnyBodies, "GetCenterOfMassPosition");
+		if (!live.has_value())
+			return glm::vec3(0.0f);
+		return Detail::ToGlm(m_State->System->GetBodyInterface().GetCenterOfMassPosition(live->ID));
 	}
 
 	PhysicsPose PhysicsWorld::GetPose(BodyHandle body) const

@@ -60,16 +60,21 @@
 #include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/PhysicsComposition.h"
 #include "Engine/Scene/PhysicsJoints.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
+#include "Engine/Scene/PhysicsVehicles.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SkyValidation.h"
 #include "Engine/Scene/SpriteValidation.h"
+#include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Engine/Session/PlayInput.h"
@@ -222,6 +227,21 @@ namespace Engine {
 			// landing order (its ledger: after M41's ANIMATION_ATTACHMENT_INVALID), an array of its own
 			// (PlanarReflectionDiagnosticCodes).
 			RenderReflectionInvalidCode,
+			// M43 (Scene/StaticScenery.h, Docs/Decisions/0061-m43-static-scenery.md decision 3), the first of phase 8's codes in
+			// train order (ADR 0060's ledger: after M42's RENDER_REFLECTION_INVALID), an array of its own
+			// (StaticSceneryDiagnosticCodes).
+			SceneStaticMovesCode,
+			// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), appended in train order
+			// (ADR 0060's phase-8 ledger: after M43's SCENE_STATIC_MOVES), an array of its own (PhysicsMassDiagnosticCodes).
+			PhysicsMassUnusedCode,
+			// M44 (Scene/PhysicsVehicles.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), after its mass code, an array of
+			// its own (PhysicsVehicleDiagnosticCodes).
+			PhysicsVehicleInvalidCode,
+			// M45 (Scene/SkyValidation.h, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), appended in train order (ADR
+			// 0060's phase-8 ledger: after M44's codes), an array of its own (SkyDiagnosticCodes).
+			SkyLightInvalidCode,
+			SkyEnvironmentIgnoredCode,
+			ProbeNotRelightableCode,
 			// M46 (Asset/AssetDiagnostic.h, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I), appended in
 			// train order after M45's codes (ADR 0060's phase-8 ledger), an import diagnostic beside the other ASSET_* codes.
 			AssetLodInvalidCode,
@@ -238,7 +258,7 @@ namespace Engine {
 				"Several cameras of one scene are Primary, but a scene renders through exactly one.",
 				"Clear Primary on all but one camera; the fix keeps the first Primary camera in scene order." },
 			ValidationCodeInfo{ SceneDuplicateUniqueComponentCode, "Error", false,
-				"A scene file holds more than one component that is unique per scene (Environment, PostProcess, Fog, Navigation, Wind).",
+				"A scene file holds more than one component that is unique per scene (Environment, PostProcess, Sky, Fog, Navigation, Wind).",
 				"Open the scene with scene.open {repair: true}, which keeps the first in canonical order, then scene.save." },
 			ValidationCodeInfo{ SceneNonCanonicalOrderCode, "Warning", false,
 				"A scene file lists a child entity before its parent, which is not the canonical order.",
@@ -500,6 +520,39 @@ namespace Engine {
 				"Put the PlanarReflection on the entity whose MeshRenderer draws a flat glass, and set its Normal to the glass's facing axis and "
 				"Offset to its surface (the finding names the axis along which the mesh is thinnest and that face's Offset; the built-in Quad "
 				"faces +Z, the Plane +Y)." },
+			ValidationCodeInfo{ SceneStaticMovesCode, "Warning", false,
+				"A static entity (Static on it or on an ancestor's subtree) has a component that moves it every tick: a Dynamic or Kinematic "
+				"RigidBody, a CharacterController, a BoneAttachment, an Animator whose RootMotion is Apply or a VehicleWheel. It moves correctly, but "
+				"rebuilds its static cell each tick and renders without interpolation.",
+				"Move the moving entity out of the static subtree, or give it (or the root of its moving part) a Static with Scope NotStatic." },
+			ValidationCodeInfo{ PhysicsMassUnusedCode, "Warning", false,
+				"A MassProperties changes no body: its entity's RigidBody makes no Dynamic body (it is Static or Kinematic, its colliders are "
+				"triggers, or the scene creates no body for it), so its centre-of-mass offset and inertia scale are not used.",
+				"Set the RigidBody's Type to Dynamic and give the entity a solid collider, or remove the MassProperties." },
+			ValidationCodeInfo{ PhysicsVehicleInvalidCode, "Error", false,
+				"A WheeledVehicle cannot be made: its RigidBody makes no Dynamic body, it has no VehicleWheel below it or more than sixteen, a wheel "
+				"is on the vehicle's own entity or under another RigidBody or a CharacterController, a solid collider is on or below a wheel, or "
+				"its fields contradict each other (a suspension, the engine's RPM, the gears and shift points, a differential or anti-roll bar "
+				"naming a wheel that is not the vehicle's, torque shares that do not sum to 1, or a curve whose X does not increase); the "
+				"vehicle is not created and its body moves as a plain body.",
+				"Correct what the finding's Subject names: a Dynamic RigidBody with a solid chassis collider (body), a child entity with a "
+				"VehicleWheel per wheel (wheels, wheel), no collider on a wheel (collider), or the field the finding names (suspension, engine, "
+				"transmission, differential, bar, curve)." },
+			ValidationCodeInfo{ SkyLightInvalidCode, "Warning", false,
+				"A Sky's Sun or Moon names no usable light: its Sun names an entity without a DirectionalLight or a disabled one, its Sun is "
+				"null in a scene without an enabled DirectionalLight (the sky then has no sun), or its Moon is its Sun's entity (no moon is "
+				"drawn). A Sun or Moon naming no entity is ENTITY_DANGLING_REFERENCE's.",
+				"Set Sun to the entity of the scene's sun DirectionalLight (or null for the first DirectionalLight in the scene), and Moon to "
+				"a second entity, normally a dim DirectionalLight turned toward the moon (or null for no moon)." },
+			ValidationCodeInfo{ SkyEnvironmentIgnoredCode, "Warning", false,
+				"An Environment is beside a Sky in one scene: the Sky lights the scene and draws its sky, so the Environment is unused.",
+				"Remove the Environment (or disable its entity) to light the scene with the Sky, or remove the Sky to light it with the "
+				"Environment's map." },
+			ValidationCodeInfo{ ProbeNotRelightableCode, "Warning", false,
+				"Under a Sky, an IrradianceVolume was baked without the Sky (its data has no relight block), or a ReflectionProbe lies in no "
+				"relightable IrradianceVolume: the sky does not relight it, so it keeps its bake's light as the sun turns.",
+				"Bake the scene's lighting under its Sky with lighting.bake (the editor's Bake Lighting), with an IrradianceVolume around each "
+				"ReflectionProbe, then save the scene." },
 			ValidationCodeInfo{ AssetLodInvalidCode, "Warning", false,
 				"The glTF importer dropped a level of detail, the import still succeeding: an authored level whose submesh count or materials differ "
 				"from level 0's, a fifth level or later (or one the LodScreenSizes setting gives no switch size), a gap in the <name>_LOD<n> names, a "
@@ -1272,9 +1325,18 @@ namespace Engine {
 			std::vector<PhysicsDiagnostic> surfaces = ValidateSceneSurfaces(*checked.Target, *checked.Layers);
 			found.insert(found.end(), std::make_move_iterator(surfaces.begin()), std::make_move_iterator(surfaces.end()));
 			// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9): PHYSICS_JOINT_INVALID, from the joint
-			// composition over the scene's bodies, as the play session's PhysicsSystem raises it.
-			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, ComposePhysicsBodies(*checked.Target, *checked.Layers));
+			// composition over the scene's bodies, as the play session's PhysicsSystem raises it. The bodies are composed once, for
+			// the joints and (M44) the vehicles.
+			const PhysicsComposition bodies = ComposePhysicsBodies(*checked.Target, *checked.Layers);
+			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, bodies);
 			found.insert(found.end(), std::make_move_iterator(joints.Diagnostics.begin()), std::make_move_iterator(joints.Diagnostics.end()));
+			// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): PHYSICS_MASS_UNUSED.
+			std::vector<PhysicsDiagnostic> masses = ValidateSceneMassProperties(*checked.Target, *checked.Layers);
+			found.insert(found.end(), std::make_move_iterator(masses.begin()), std::make_move_iterator(masses.end()));
+			// M44 (Scene/PhysicsVehicles.h): PHYSICS_VEHICLE_INVALID, from the vehicle composition over the scene's bodies, as the
+			// play session's PhysicsSystem raises it.
+			PhysicsVehicleComposition vehicles = ComposePhysicsVehicles(*checked.Target, bodies);
+			found.insert(found.end(), std::make_move_iterator(vehicles.Diagnostics.begin()), std::make_move_iterator(vehicles.Diagnostics.end()));
 			for (const PhysicsDiagnostic& physics : found)
 			{
 				DiagnosticSite site;
@@ -1313,7 +1375,8 @@ namespace Engine {
 		}
 
 		// The probe checks of §13.7 (M26, Scene/ProbeValidation.h): PROBE_NOT_BAKED on each IrradianceVolume and ReflectionProbe
-		// without data that loads through the editor's asset manager. Not fixable: baking renders (lighting.bake).
+		// without data that loads through the editor's asset manager, and M45's PROBE_NOT_RELIGHTABLE on each a Sky does not
+		// relight. Not fixable: baking renders (lighting.bake).
 		static void CheckProbes(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			AssetManager* assets = editor.GetEngine().GetAssetManager();
@@ -1376,6 +1439,36 @@ namespace Engine {
 			if (assets == nullptr)
 				return;
 			for (PlanarReflectionSceneIssue& issue : FindPlanarReflectionIssues(*checked.Target, *assets))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
+		// The static scenery checks of §13.7 (M43, Scene/StaticScenery.h): SCENE_STATIC_MOVES on each static entity that a
+		// component moves every tick. Not fixable.
+		static void CheckStaticScenery(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			for (StaticSceneryIssue& issue : FindStaticSceneryIssues(*checked.Target))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
+		// The sky checks of §13.7 (M45, Scene/SkyValidation.h): SKY_LIGHT_INVALID on a Sky whose Sun or Moon names no usable
+		// light and SKY_ENVIRONMENT_IGNORED on each Environment beside a Sky. Not fixable.
+		static void CheckSky(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			for (SkySceneIssue& issue : FindSkyIssues(*checked.Target))
 			{
 				DiagnosticSite site;
 				site.File = checked.File;
@@ -1684,6 +1777,9 @@ namespace Engine {
 			CheckTerrain(editor, checked, diagnostics);
 			CheckNavigation(editor, checked, diagnostics);
 			CheckPlanarReflections(editor, checked, diagnostics);
+			CheckStaticScenery(checked, diagnostics);
+			// M45 (ADR 0060's phase-8 ledger: after M43's CheckStaticScenery).
+			CheckSky(checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

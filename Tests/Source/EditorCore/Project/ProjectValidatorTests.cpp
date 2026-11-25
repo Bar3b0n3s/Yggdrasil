@@ -39,17 +39,22 @@
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/PhysicsJoints.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
+#include "Engine/Scene/PhysicsVehicles.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SkyValidation.h"
 #include "Engine/Scene/SpriteValidation.h"
+#include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Support/AssetTestFixture.h"
@@ -69,6 +74,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1382,11 +1388,13 @@ end
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
 			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
-			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes); phase 8's M46 ASSET_LOD_INVALID, an asset
-			// code (Asset/AssetDiagnostic.h) counted in the constant.
+			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes), and phase 8's in train order (M43's
+			// StaticSceneryDiagnosticCodes, then M44's PhysicsMassDiagnosticCodes and PhysicsVehicleDiagnosticCodes, then M45's
+			// SkyDiagnosticCodes); M46's ASSET_LOD_INVALID, an asset code (Asset/AssetDiagnostic.h), counted in the constant.
 			CHECK(codes.size()
 				== 60 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
-					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size());
+					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size() + StaticSceneryDiagnosticCodes.size()
+					+ PhysicsMassDiagnosticCodes.size() + PhysicsVehicleDiagnosticCodes.size() + SkyDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1447,13 +1455,22 @@ end
 			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36. Phase 7's follow (ADR 0058's
 			// ledger): M41's ANIMATION_ATTACHMENT_INVALID (Docs/Decisions/0058-m41-bone-attachments.md decision 3), then M42's
 			// RENDER_REFLECTION_INVALID (Docs/Decisions/0059-m42-planar-reflections.md, its ledger's validation row), which lands after
-			// M41. Phase 8's follow (ADR 0060's ledger): M46's ASSET_LOD_INVALID
-			// (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I) ends the list on its branch.
+			// M41. Phase 8's follow in train order (ADR 0060's ledger): M43's SCENE_STATIC_MOVES
+			// (Docs/Decisions/0061-m43-static-scenery.md decision 3), then M44's PHYSICS_MASS_UNUSED and PHYSICS_VEHICLE_INVALID
+			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), then M45's SKY_LIGHT_INVALID, SKY_ENVIRONMENT_IGNORED and
+			// PROBE_NOT_RELIGHTABLE (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), then M46's ASSET_LOD_INVALID
+			// (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I), the last lander's block ending the list.
 			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
 			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
 			CHECK(position(AnimationAttachmentInvalidCode) + 1 == position(RenderReflectionInvalidCode));
-			CHECK(position(RenderReflectionInvalidCode) + 1 == position(AssetLodInvalidCode));
+			CHECK(position(RenderReflectionInvalidCode) + 1 == position(SceneStaticMovesCode));
+			CHECK(position(SceneStaticMovesCode) + 1 == position(PhysicsMassUnusedCode));
+			CHECK(position(PhysicsMassUnusedCode) + 1 == position(PhysicsVehicleInvalidCode));
+			CHECK(position(PhysicsVehicleInvalidCode) + 1 == position(SkyLightInvalidCode));
+			CHECK(position(SkyLightInvalidCode) + 1 == position(SkyEnvironmentIgnoredCode));
+			CHECK(position(SkyEnvironmentIgnoredCode) + 1 == position(ProbeNotRelightableCode));
+			CHECK(position(ProbeNotRelightableCode) + 1 == position(AssetLodInvalidCode));
 			CHECK(codes.back() == AssetLodInvalidCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
@@ -2353,10 +2370,244 @@ end
 			CHECK_FALSE(joints.contains(editor.GetScene().FindEntityByPath("/Door").GetUUID().ToString()));
 		}
 
+		// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a MassProperties on a Static,
+		// a Kinematic and a trigger body, and on a Dynamic RigidBody that makes no body, is reported once each; a Dynamic body's
+		// and a disabled entity's are not.
+		TEST_CASE("ProjectValidator: PHYSICS_MASS_UNUSED reports MassProperties on a body that is not Dynamic")
+		{
+			Test::EditorTestFixture fixture("ValidatorMassProperties");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto addBody = [&editor](std::string_view name, std::string_view body, std::string_view collider)
+			{
+				Entity entity = editor.GetScene().CreateEntity(name);
+				const Json bodyValue = ParseValidatorJson(body);
+				REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", &bodyValue).has_value());
+				if (!collider.empty())
+				{
+					const Json colliderValue = ParseValidatorJson(collider);
+					REQUIRE(ComponentAccess::AddComponent(entity, "BoxCollider", &colliderValue).has_value());
+				}
+				const Json mass = ParseValidatorJson(R"({"CenterOfMassOffset":[0,-0.25,0]})");
+				REQUIRE(ComponentAccess::AddComponent(entity, "MassProperties", &mass).has_value());
+				return entity;
+			};
+			{
+				SceneEdit edit(editor, "Masses");
+				static_cast<void>(addBody("Buggy", R"({"Type":"Dynamic"})", "{}"));
+				static_cast<void>(addBody("Wall", R"({"Type":"Static"})", "{}"));
+				static_cast<void>(addBody("Lift", R"({"Type":"Kinematic"})", "{}"));
+				static_cast<void>(addBody("Zone", R"({"Type":"Dynamic"})", R"({"IsTrigger":true})"));
+				static_cast<void>(addBody("Bare", R"({"Type":"Dynamic"})", ""));
+				Entity parked = addBody("Parked", R"({"Type":"Static"})", "{}");
+				parked.SetActive(false);
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> masses;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == PhysicsMassUnusedCode)
+					CHECK(masses.emplace(diagnostic.Entity, &diagnostic).second);
+			}
+			const auto reported = [&editor, &masses](std::string_view path)
+			{
+				return masses.contains(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+			};
+			CHECK(masses.size() == 4);
+			CHECK(reported("/Wall"));
+			CHECK(reported("/Lift"));
+			CHECK(reported("/Zone"));
+			CHECK(reported("/Bare"));
+			CHECK_FALSE(reported("/Buggy"));
+			CHECK_FALSE(reported("/Parked"));
+			for (const auto& [entity, diagnostic] : masses)
+			{
+				CHECK(diagnostic->Severity == DiagnosticSeverity::Warning);
+				CHECK_FALSE(diagnostic->AutoFixable);
+				CHECK(diagnostic->Component == "MassProperties");
+				CHECK(diagnostic->File == "Assets/Scenes/Main.scene");
+			}
+		}
+
+		// M44 (Scene/PhysicsVehicles.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a vehicle on a Static body, one
+		// without wheels and one with a collider on a wheel are reported, one each; a valid one and a disabled one are not.
+		TEST_CASE("ProjectValidator: PHYSICS_VEHICLE_INVALID reports a vehicle without a Dynamic body, without wheels or with a collider on a wheel")
+		{
+			Test::EditorTestFixture fixture("ValidatorVehicles");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto addVehicle = [&editor](std::string_view name, std::string_view body, int wheels, bool wheelCollider)
+			{
+				Entity entity = editor.GetScene().CreateEntity(name);
+				const Json bodyValue = ParseValidatorJson(body);
+				REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", &bodyValue).has_value());
+				REQUIRE(ComponentAccess::AddComponent(entity, "BoxCollider", nullptr).has_value());
+				std::vector<std::string> ids;
+				for (int index = 0; index < wheels; ++index)
+				{
+					Entity wheel = editor.GetScene().CreateEntity(std::format("Wheel{}", index), entity);
+					REQUIRE(ComponentAccess::AddComponent(wheel, "VehicleWheel", nullptr).has_value());
+					if (wheelCollider)
+						REQUIRE(ComponentAccess::AddComponent(wheel, "SphereCollider", nullptr).has_value());
+					ids.push_back(wheel.GetUUID().ToString());
+				}
+				// The first two wheels driven through one differential.
+				const Json vehicle = ParseValidatorJson(ids.size() < 2 ? std::string("{}")
+																	   : std::format(R"({{"Differentials":[{{"LeftWheel":"{}","RightWheel":"{}"}}]}})", ids[0], ids[1]));
+				REQUIRE(ComponentAccess::AddComponent(entity, "WheeledVehicle", &vehicle).has_value());
+				return entity;
+			};
+			{
+				SceneEdit edit(editor, "Vehicles");
+				static_cast<void>(addVehicle("Buggy", R"({"Type":"Dynamic"})", 4, false));
+				static_cast<void>(addVehicle("Statue", R"({"Type":"Static"})", 4, false));
+				static_cast<void>(addVehicle("Sled", R"({"Type":"Dynamic"})", 0, false));
+				static_cast<void>(addVehicle("Bumpy", R"({"Type":"Dynamic"})", 4, true));
+				Entity parked = addVehicle("Parked", R"({"Type":"Static"})", 0, false);
+				parked.SetActive(false);
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> vehicles;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == PhysicsVehicleInvalidCode)
+					CHECK(vehicles.emplace(diagnostic.Entity, &diagnostic).second);
+			}
+			// Each reason's Subject is the composition's (PhysicsVehiclesTests.cpp); here, which vehicles are reported.
+			const auto reported = [&editor, &vehicles](std::string_view path)
+			{
+				return vehicles.contains(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+			};
+			CHECK(vehicles.size() == 3);
+			CHECK(reported("/Statue"));
+			CHECK(reported("/Sled"));
+			CHECK(reported("/Bumpy"));
+			CHECK_FALSE(reported("/Buggy"));
+			CHECK_FALSE(reported("/Parked"));
+			for (const auto& [entity, diagnostic] : vehicles)
+			{
+				CHECK(diagnostic->Severity == DiagnosticSeverity::Error);
+				CHECK_FALSE(diagnostic->AutoFixable);
+				CHECK(diagnostic->Component == "WheeledVehicle");
+				CHECK(diagnostic->File == "Assets/Scenes/Main.scene");
+			}
+		}
+
 		// M42 (Scene/PlanarReflectionValidation.h, Docs/Decisions/0059-m42-planar-reflections.md decision 3): a mirror without a
 		// drawn mesh, and one whose plane misses its glass, with the axis the glass is thinnest along and its face's Offset,
 		// which clears the finding; a mesh too thick for any plane is named so; a glass within 5 cm of its plane after the
 		// entity's scale is not reported; a hidden MeshRenderer is checked as a shown one, and a disabled mirror is not.
+		TEST_CASE("ProjectValidator: SCENE_STATIC_MOVES reports a static entity that moves every tick")
+		{
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): one Warning an effectively static entity that a component
+			// moves every tick, naming the first such component; Static bodies, NotStatic parts and entities outside every static
+			// subtree are not reported.
+			Test::EditorTestFixture fixture("ValidatorStaticScenery");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto add = [&editor](std::string_view name, std::string_view parent, std::string_view component, std::string_view value)
+			{
+				const Entity entity = parent.empty() ? editor.GetScene().CreateEntity(name)
+													 : editor.GetScene().CreateEntity(name, editor.GetScene().FindEntityByPath(parent));
+				if (!component.empty())
+				{
+					const Json json = ParseValidatorJson(value);
+					REQUIRE(ComponentAccess::AddComponent(entity, component, &json).has_value());
+				}
+				return entity;
+			};
+			{
+				SceneEdit edit(editor, "Island");
+				add("Island", "", "Static", "{}");
+				add("Rock", "/Island", "RigidBody", R"({"Type":"Static"})");
+				add("Crate", "/Island", "RigidBody", R"({"Type":"Dynamic"})");
+				add("Lift", "/Island", "RigidBody", R"({"Type":"Kinematic"})");
+				add("Walker", "/Island", "CharacterController", "{}");
+				add("Dancer", "/Island", "Animator", R"({"RootMotion":"Apply"})");
+				add("Statue", "/Island", "Animator", R"({"RootMotion":"None"})");
+				// M44's VehicleWheel (appended at its merge): its vehicle's physics writes the wheel's pose every tick it moves.
+				add("Wheel", "/Island", "VehicleWheel", "{}");
+				// The opt-out: a NotStatic mill whose sail is Kinematic is not reported.
+				add("Mill", "/Island", "Static", R"({"Scope":"NotStatic"})");
+				add("Sail", "/Island/Mill", "RigidBody", R"({"Type":"Kinematic"})");
+				// Outside every static subtree.
+				add("Ball", "", "RigidBody", R"({"Type":"Dynamic"})");
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> moving;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == SceneStaticMovesCode)
+					CHECK(moving.emplace(diagnostic.Entity, &diagnostic).second);
+			}
+			CHECK(moving.size() == 5);
+			for (const auto& [path, component, field] : { std::tuple<std::string_view, std::string_view, std::string_view>{ "/Island/Crate", "RigidBody", "Type" },
+					 { "/Island/Lift", "RigidBody", "Type" }, { "/Island/Walker", "CharacterController", "" }, { "/Island/Dancer", "Animator", "RootMotion" },
+					 { "/Island/Wheel", "VehicleWheel", "" } })
+			{
+				CAPTURE(path);
+				const auto found = moving.find(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+				REQUIRE(found != moving.end());
+				const ProjectDiagnostic& diagnostic = *found->second;
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Warning);
+				CHECK_FALSE(diagnostic.AutoFixable);
+				CHECK(diagnostic.Component == component);
+				CHECK(diagnostic.Field == field);
+				CHECK(diagnostic.File == "Assets/Scenes/Main.scene");
+				CHECK_FALSE(diagnostic.Hint.empty());
+			}
+		}
+
+		TEST_CASE("ProjectValidator: SCENE_STATIC_MOVES reads a scene file's NotStatic body as not static")
+		{
+			// M43 (the lead's W43.1 review, finding 1): project.validate loads a scene that is not open into a scratch scene
+			// (CheckSceneFile). The loader added a Static default-constructed and copied its Scope in unseen, so a Dynamic body
+			// that itself holds Static {NotStatic} under a static root, the opt-out SCENE_STATIC_MOVES' hint gives, was still
+			// reported from the file; the same body without the opt-out is.
+			Test::EditorTestFixture fixture("ValidatorStaticSceneryFile");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const Scope<Scene> scene = editor.CreateScene("Island");
+			const Entity island = scene->CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			const Entity crate = scene->CreateEntity("Crate", island);
+			crate.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
+			crate.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::NotStatic });
+			const Entity barrel = scene->CreateEntity("Barrel", island);
+			barrel.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
+			const Result<std::string> text = SceneSerializer::SaveToString(*scene);
+			REQUIRE(text.has_value());
+			const Result<VfsPath> path = VfsPath::Create("project", "Assets/Scenes/Island.scene");
+			REQUIRE(path.has_value());
+			REQUIRE(editor.WriteProjectFile(*path, std::as_bytes(std::span(text->data(), text->size()))).has_value());
+			REQUIRE(editor.GetScenePath() != std::optional<VfsPath>(*path));
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<std::string> reported;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code != SceneStaticMovesCode)
+					continue;
+				CHECK(diagnostic.File == "Assets/Scenes/Island.scene");
+				reported.push_back(diagnostic.Entity);
+			}
+			CHECK(reported == std::vector<std::string>{ barrel.GetUUID().ToString() });
+		}
+
 		TEST_CASE("ProjectValidator: RENDER_REFLECTION_INVALID reports a mirror without a mesh or off its glass, with the glass's axis")
 		{
 			Test::EditorTestFixture fixture("ValidatorPlanarReflections");

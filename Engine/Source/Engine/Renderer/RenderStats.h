@@ -100,6 +100,21 @@ namespace Engine {
 		uint32_t DroppedPlanarReflections = 0;
 		uint32_t CulledPlanarReflections = 0;
 		std::vector<UUID> PlanarReflectionEntities{};
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; ADR 0060's ledger: first of phase 8's rows): the snapshot's
+		// static set the frame rendered (RenderSnapshot::StaticSet: its items and its cells), the cells the camera's view did
+		// not cull (its static work follows them), and the snapshot's dynamic mesh items (RenderSnapshot::Meshes). VisibleMeshes
+		// and CulledSubmeshes count the static items and submeshes as they count the dynamic ones.
+		uint32_t StaticItems = 0;
+		uint32_t StaticCells = 0;
+		uint32_t StaticCellsVisible = 0;
+		uint32_t DynamicItems = 0;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: appended after M43's
+		// rows): SkyUpdates, 1 when the render regenerated its Sky's image-based light (the sky's key changed, SkyLightingKey:
+		// its atmosphere, its Sun's and Moon's directions and authored colours, its cloud layer's coverage, or the clouds' drift
+		// past a SkyCloudLightingStep) and 0 otherwise; RelitIrradianceVolumes, the view's irradiance volumes the render relit by
+		// its sky (Renderer/ProbeRelight.h).
+		uint32_t SkyUpdates = 0;
+		uint32_t RelitIrradianceVolumes = 0;
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; ADR 0060's phase-8 ledger: appended):
 		// the main view's mesh levels of detail (Renderer/MeshLod.h). MeshLodDraws: the submesh draws of each level (0 to
 		// MaxMeshLods - 1), both draws of a cross-fade counted; LodCrossFades: the items drawn inside a fade band (two

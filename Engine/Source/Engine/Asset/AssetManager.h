@@ -168,6 +168,12 @@ namespace Engine {
 		// (§7.2, §7.5). Procedural built-ins are at 1 from their first use.
 		[[nodiscard]] uint64_t GetVersion(AssetHandle handle) const;
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md, the lead's W43.1 review): a counter that moves whenever GetVersion of
+		// any handle may have changed (a load or hot-reload swap, a procedural built-in's first use, a dry run's restore of the
+		// versions), from 0, never backwards. A system that keeps what it built from assets' versions compares those versions
+		// again only after it moved (the physics system's mesh and terrain colliders), so unchanged assets cost it nothing.
+		[[nodiscard]] uint64_t GetVersionRevision() const;
+
 		// Every diagnostic currently recorded, sorted by (Path, Code, Subject); the registry's scan diagnostics included in the
 		// editor. Valid until the next change of the diagnostics.
 		[[nodiscard]] std::span<const AssetDiagnostic> GetDiagnostics() const;

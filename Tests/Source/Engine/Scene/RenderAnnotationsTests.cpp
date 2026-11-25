@@ -17,11 +17,14 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/SkyComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
+#include "Engine/Scene/RenderStaticCache.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
@@ -308,6 +311,78 @@ namespace Engine {
 			other.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
 			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 			other.SetActive(false);
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a static entity's mesh, which the snapshot holds in its
+		// static set rather than its Meshes, still needs lighting when it emits nothing.
+		TEST_CASE("RenderSceneValidation: a static mesh without emission or light needs lighting")
+		{
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Scene& scene = fixture.GetScene();
+			Entity environment = scene.CreateEntity("Environment");
+			environment.AddComponent<EnvironmentComponent>().Intensity = 0;
+			Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			Entity rock = scene.CreateEntity("Rock", island);
+			rock.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			REQUIRE(scene.GetStaticCache() != nullptr);
+			CHECK(scene.GetStaticCache()->HoldsItem(rock.GetHandle()));
+			auto emission = CreateRef<MaterialData>();
+			emission->Emissive = { 1, 0, 0 };
+			emission->EmissiveStrength = 2;
+			assets.Publish(AssetHandle(2002), emission);
+			rock.Patch<MeshRendererComponent>([](MeshRendererComponent& r)
+			{
+				r.Materials.resize(1);
+				r.Materials[0].SetHandle(AssetHandle(2002));
+			});
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+		}
+
+		TEST_CASE("RenderSceneValidation: an enabled Sky of positive Intensity illuminates")
+		{
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a Sky lights the scene in the Environment's place,
+			// while its entity is enabled and its Intensity positive.
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Scene& scene = fixture.GetScene();
+			Entity mesh = scene.CreateEntity("Cube");
+			mesh.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			Entity environment = scene.CreateEntity("Environment");
+			environment.AddComponent<EnvironmentComponent>().Intensity = 0;
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			Entity sky = scene.CreateEntity("Sky");
+			sky.AddComponent<SkyComponent>();
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 0.0f;
+			});
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 1.0f;
+			});
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.SetActive(false);
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			// The W45.2 review's finding 3: beside an enabled Sky the Environment lights nothing, so a scene without an Environment
+			// entity, whose default fallback colour lights it without a Sky, is unlit under a Sky of Intensity 0.
+			scene.DestroyEntity(environment);
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.SetActive(true);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 0.0f;
+			});
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			sky.Patch<SkyComponent>([](SkyComponent& component)
+			{
+				component.Intensity = 1.0f;
+			});
 			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 		}
 

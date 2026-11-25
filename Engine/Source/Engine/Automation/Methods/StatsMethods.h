@@ -84,6 +84,16 @@ namespace Engine {
 		uint32_t DroppedPlanarReflections = 0;
 		uint32_t CulledPlanarReflections = 0;
 		std::vector<std::string> PlanarReflectionEntities{};
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; ADR 0060's ledger: first of phase 8's rows): RenderStats'
+		// StaticItems, StaticCells, StaticCellsVisible and DynamicItems.
+		uint32_t StaticItems = 0;
+		uint32_t StaticCells = 0;
+		uint32_t StaticCellsVisible = 0;
+		uint32_t DynamicItems = 0;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: appended after M43's
+		// rows): RenderStats::SkyUpdates and RelitIrradianceVolumes.
+		uint32_t SkyUpdates = 0;
+		uint32_t RelitIrradianceVolumes = 0;
 		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; ADR 0060's phase-8 ledger: appended after
 		// M43's and M45's fields): RenderStats::MeshLodDraws (one count per level, 0 to MaxMeshLods - 1), LodCrossFades and
 		// DistanceCulledMeshes.
@@ -120,6 +130,13 @@ namespace Engine {
 		// live particles (SessionStatistics); 0 without a session.
 		uint32_t ActiveBodies = 0;
 		uint32_t Particles = 0;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; first of phase 8's top-level fields): the play session's
+		// last tick's work (PlaySession::GetLastTickWork: the world matrices recomputed in it and its frame phase, the
+		// entities its per-tick passes visited, and the static cells its frame phase's extraction rebuilt or removed, never an
+		// editor view's); 0 without a session.
+		uint32_t TransformsUpdated = 0;
+		uint32_t EntitiesVisited = 0;
+		uint32_t StaticCellRebuilds = 0;
 	};
 
 	// Owned diagnostic copy of one displayed renderer's history, preserving both CPU and delayed GPU identities.

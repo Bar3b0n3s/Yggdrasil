@@ -597,6 +597,46 @@
 			]
 		},
 		{
+			"File": "StaticScenery.jsonl",
+			"IdSeed": 4001,
+			"Renderer": "none"
+		},
+		{
+			"File": "StaticSceneryReplay.jsonl",
+			"IdSeed": 4002,
+			"Renderer": "none"
+		},
+		{
+			"File": "Vehicles.jsonl",
+			"IdSeed": 4101,
+			"Renderer": "none"
+		},
+		{
+			"File": "VehiclesReplay.jsonl",
+			"IdSeed": 4102,
+			"Renderer": "none"
+		},
+		{
+			"File": "Sky.jsonl",
+			"IdSeed": 4201,
+			"Renderer": "none"
+		},
+		{
+			"File": "SkyReplay.jsonl",
+			"IdSeed": 4202,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenSky.jsonl",
+			"IdSeed": 4203,
+			"Renderer": "vulkan",
+			"GoldenDirectories": [
+				"Assets/Lighting/Scenes/GoldenSky",
+				"Assets/Materials/GoldenSky",
+				"Assets/Scenes/GoldenSky"
+			]
+		},
+		{
 			"File": "MeshLods.jsonl",
 			"IdSeed": 4301,
 			"Renderer": "none"

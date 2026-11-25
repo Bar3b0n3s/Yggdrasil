@@ -5,6 +5,7 @@
 #include "Engine/Core/Error.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
+#include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/PhysicsComposition.h"
@@ -60,6 +61,31 @@ namespace Engine {
 		[[nodiscard]] inline std::string_view GetDynamicBodyField(const Error& error)
 		{
 			return GetPhysicsDiagnosticCode(error) == PhysicsAllDofsLockedCode ? "LockTranslation" : "Mass";
+		}
+
+		// The component and field a refusal `error` of PhysicsShape::CheckDynamicBody with `massOverride` is about (M44): the
+		// MassProperties' CenterOfMassOffset or InertiaScale when the body passes without its override (the offset's parallel-axis
+		// inertia, or the scale, takes the inertia past the world's limit), with a hint to change it; else the RigidBody's
+		// GetDynamicBodyField and no hint.
+		struct DynamicBodyFault
+		{
+			std::string_view Component{};
+			std::string_view Field{};
+			std::string_view Hint{};
+		};
+
+		[[nodiscard]] inline DynamicBodyFault GetDynamicBodyFault(const PhysicsShape& shape, float mass, PhysicsDofs allowedDofs,
+			const PhysicsMassOverride& massOverride, const Error& error)
+		{
+			if (massOverride != PhysicsMassOverride{} && shape.CheckDynamicBody(mass, allowedDofs).has_value())
+			{
+				const bool offsetFails = !shape.CheckDynamicBody(mass, allowedDofs, PhysicsMassOverride{ .CenterOfMassOffset = massOverride.CenterOfMassOffset }).has_value();
+				return DynamicBodyFault{ .Component = "MassProperties",
+					.Field = offsetFails ? "CenterOfMassOffset" : "InertiaScale",
+					.Hint = offsetFails ? "bring the MassProperties' CenterOfMassOffset closer to the colliders; the play session does not create the body otherwise"
+										: "lower the MassProperties' InertiaScale; the play session does not create the body otherwise" };
+			}
+			return DynamicBodyFault{ .Component = "RigidBody", .Field = GetDynamicBodyField(error) };
 		}
 
 		// The registry name of a collider type's component.

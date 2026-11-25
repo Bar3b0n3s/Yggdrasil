@@ -49,6 +49,14 @@ namespace Engine {
 			stats.DroppedPlanarReflections = 1;
 			stats.CulledPlanarReflections = 6;
 			stats.PlanarReflectionEntities = { UUID(0x2a), UUID(0x17) };
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set, its cells seen, the dynamic items.
+			stats.StaticItems = 20000;
+			stats.StaticCells = 64;
+			stats.StaticCellsVisible = 9;
+			stats.DynamicItems = 31;
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's light regenerated and the volumes relit.
+			stats.SkyUpdates = 1;
+			stats.RelitIrradianceVolumes = 2;
 			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): the draws per level, the cross-fades
 			// and the items culled by distance.
 			stats.MeshLodDraws = { 12, 7, 0, 2, 1 };
@@ -78,6 +86,12 @@ namespace Engine {
 			CHECK(summary.DroppedPlanarReflections == 1);
 			CHECK(summary.CulledPlanarReflections == 6);
 			CHECK(summary.PlanarReflectionEntities == std::vector<std::string>{ UUID(0x2a).ToString(), UUID(0x17).ToString() });
+			CHECK(summary.StaticItems == 20000);
+			CHECK(summary.StaticCells == 64);
+			CHECK(summary.StaticCellsVisible == 9);
+			CHECK(summary.DynamicItems == 31);
+			CHECK(summary.SkyUpdates == 1);
+			CHECK(summary.RelitIrradianceVolumes == 2);
 			CHECK(summary.MeshLodDraws == std::vector<uint32_t>{ 12, 7, 0, 2, 1 });
 			CHECK(summary.LodCrossFades == 4);
 			CHECK(summary.DistanceCulledMeshes == 9);
@@ -113,6 +127,12 @@ namespace Engine {
 			CHECK(unavailable.SkinnedMeshes == 0);
 			CHECK(unavailable.PlanarReflections == 0);
 			CHECK(unavailable.PlanarReflectionEntities.empty());
+			CHECK(unavailable.StaticItems == 0);
+			CHECK(unavailable.StaticCells == 0);
+			CHECK(unavailable.StaticCellsVisible == 0);
+			CHECK(unavailable.DynamicItems == 0);
+			CHECK(unavailable.SkyUpdates == 0);
+			CHECK(unavailable.RelitIrradianceVolumes == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")

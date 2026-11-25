@@ -23,7 +23,9 @@
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/BufferCreationFails.h"
@@ -95,6 +97,18 @@ namespace Engine {
 			.AtlasMin = glm::vec2(0.0f),
 			.AtlasMax = glm::vec2(1.0f) });
 		return CreateRef<FontData>(std::move(font));
+	}
+
+	// M43: a static cell of `count` copies of a built-in cube's item at `position` for entity `entity` (its pick table that
+	// entity's), its version the next of `version`.
+	static Ref<RenderStaticCell> MakeStaticCubeCell(const glm::vec3& position, uint64_t entity, size_t count, uint64_t& version)
+	{
+		Ref<RenderStaticCell> cell = CreateRef<RenderStaticCell>();
+		cell->Version = ++version;
+		const MeshDrawItem item{ .World = glm::translate(glm::mat4(1.0f), position), .Mesh = BuiltinAssetHandles::CubeMesh, .Entity = UUID(entity) };
+		cell->Items.assign(count, item);
+		cell->PickTable.assign(count, UUID(entity));
+		return cell;
 	}
 
 	TEST_SUITE("Renderer")
@@ -2071,6 +2085,99 @@ namespace Engine {
 				CHECK(cache.GetStats().HeightfieldCount == 0);
 			}
 			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the cache's static ranges. A set's cells take ranges once,
+		// a later acquisition of the same cells keeps them, a cell no acquisition used since the last collection frees its range
+		// for the next new cell, a grown buffer holds every kept range's records at its place and the new one's (read back), and
+		// a trim drops the buffer and every range.
+		TEST_CASE("GpuResourceCache: static cells keep their record ranges until a collection after a frame that did not use them"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::InMemoryAssetManager assets;
+				GpuResourceCache cache(device, assets);
+				uint64_t version = 0;
+				Ref<RenderStaticSet> first = CreateRef<RenderStaticSet>();
+				for (uint64_t index = 0; index < 6; ++index)
+					first->Cells.push_back(MakeStaticCubeCell(glm::vec3(40.0f * static_cast<float>(index), 0.0f, 0.0f), index + 1, 1, version));
+				const Result<std::vector<uint32_t>> firsts = cache.AcquireStaticRecords(*first);
+				REQUIRE_MESSAGE(firsts.has_value(), firsts.error().ToString());
+				CHECK(*firsts == std::vector<uint32_t>{ 0, 1, 2, 3, 4, 5 });
+				CHECK(cache.GetStats().StaticCellCount == 6);
+				CHECK(cache.GetStats().StaticRecordCapacity == GpuResourceCache::StaticRecordMinimumCapacity);
+				CHECK(*cache.AcquireStaticRecords(*first) == *firsts);
+
+				// A set that keeps cells 0, 2, 4 and 5 and replaces cell 1 by a three-item cell: the kept ranges stay; after a
+				// collection that follows an acquisition without cell 1 and 3, their places are free and the new cell takes the
+				// first place that holds three records, after the mark.
+				Ref<RenderStaticCell> replaced = CreateRef<RenderStaticCell>(*first->Cells[1]);
+				replaced->Version = ++version;
+				replaced->Items.push_back(replaced->Items.front());
+				replaced->Items.push_back(replaced->Items.front());
+				replaced->PickTable = { UUID(20), UUID(21), UUID(22) };
+				RenderStaticSet second;
+				second.Cells = { first->Cells[0], first->Cells[2], first->Cells[4], first->Cells[5] };
+				// A collection keeps what the frame before it used (every cell) and clears the marks; the next frame acquires
+				// four cells, and the collection after it frees the other two.
+				cache.CollectStale();
+				CHECK(cache.GetStats().StaticCellCount == 6);
+				REQUIRE(cache.AcquireStaticRecords(second).has_value());
+				cache.CollectStale();
+				CHECK(cache.GetStats().StaticCellCount == 4);
+				second.Cells.push_back(replaced);
+				const Result<std::vector<uint32_t>> again = cache.AcquireStaticRecords(second);
+				REQUIRE(again.has_value());
+				CHECK(*again == std::vector<uint32_t>{ 0, 2, 4, 5, 6 });
+				// A one-item cell takes the freed place of cell 1.
+				Ref<RenderStaticCell> single = CreateRef<RenderStaticCell>(*first->Cells[3]);
+				single->Version = ++version;
+				second.Cells.push_back(single);
+				const Result<std::vector<uint32_t>> third = cache.AcquireStaticRecords(second);
+				REQUIRE(third.has_value());
+				CHECK(third->back() == 1);
+
+				// A set beyond the capacity grows the buffer with every kept range at its place.
+				second.Cells.push_back(MakeStaticCubeCell(glm::vec3(0.0f, 5.0f, 0.0f), 30, GpuResourceCache::StaticRecordMinimumCapacity, version));
+				const Result<std::vector<uint32_t>> grown = cache.AcquireStaticRecords(second);
+				REQUIRE(grown.has_value());
+				CHECK(std::vector<uint32_t>(grown->begin(), grown->end() - 1) == *third);
+				CHECK(cache.GetStats().StaticRecordCapacity == 2 * GpuResourceCache::StaticRecordMinimumCapacity);
+				CHECK(cache.GetStats().StaticRecordCount == 4 + 3 + 1 + GpuResourceCache::StaticRecordMinimumCapacity);
+				// The grown buffer was written whole: each cell's range holds its items' records, each record's pick id its
+				// index in the buffer after StaticPickIdBase.
+				nvrhi::IBuffer* records = cache.GetStaticRecordBuffer();
+				REQUIRE(records != nullptr);
+				const Result<std::vector<std::byte>> bytes =
+					Test::ReadBufferBytes(device, *records, uint64_t{ cache.GetStats().StaticRecordCapacity } * sizeof(InstanceRecord));
+				REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+				for (size_t cell = 0; cell < second.Cells.size(); ++cell)
+				{
+					CAPTURE(cell);
+					const RenderStaticCell& expected = *second.Cells[cell];
+					size_t wrong = 0;
+					for (size_t item = 0; item < expected.Items.size(); ++item)
+					{
+						const uint32_t index = (*grown)[cell] + static_cast<uint32_t>(item);
+						InstanceRecord record;
+						std::memcpy(&record, bytes->data() + size_t{ index } * sizeof(InstanceRecord), sizeof(InstanceRecord));
+						if (record.EntityId != StaticPickIdBase + index || std::memcmp(&record.World, &expected.Items[item].World, sizeof(glm::mat4)) != 0)
+							++wrong;
+					}
+					CHECK(wrong == 0);
+				}
+
+				cache.TrimUnused();
+				CHECK(cache.GetStaticRecordBuffer() == nullptr);
+				CHECK(cache.GetStats().StaticCellCount == 0);
+				const Result<std::vector<uint32_t>> rebuilt = cache.AcquireStaticRecords(*first);
+				REQUIRE(rebuilt.has_value());
+				CHECK(*rebuilt == *firsts);
+			}
+			device.RunGarbageCollection();
 		}
 	}
 

@@ -14,6 +14,7 @@
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsComposition.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
@@ -109,21 +110,24 @@ namespace Engine {
 			const RigidBodyComponent* body = owner.IsValid() ? owner.TryGetComponent<RigidBodyComponent>() : nullptr;
 			if (body == nullptr)
 				return std::nullopt;
-			const Status checked = shape.CheckDynamicBody(body->Mass, GetRigidBodyDofs(*body));
+			const Status checked = shape.CheckDynamicBody(body->Mass, GetRigidBodyDofs(*body), GetPhysicsMassOverride(owner));
 			if (checked.has_value())
 				return std::nullopt;
 
 			const std::string_view carried = GetPhysicsDiagnosticCode(checked.error());
 			const std::string_view text = checked.error().GetMessageText();
+			// M44: a refusal that only the MassProperties' override causes names it.
+			const DynamicBodyFault fault = GetDynamicBodyFault(shape, body->Mass, GetRigidBodyDofs(*body), GetPhysicsMassOverride(owner), checked.error());
 			PhysicsDiagnostic diagnostic;
 			diagnostic.Code = std::string(carried.empty() ? PhysicsInvalidShapeCode : carried);
 			diagnostic.Severity = DiagnosticSeverity::Error;
 			diagnostic.Entity = plan.Owner;
-			diagnostic.Component = "RigidBody";
-			diagnostic.Field = std::string(GetDynamicBodyField(checked.error()));
+			diagnostic.Component = std::string(fault.Component);
+			diagnostic.Field = std::string(fault.Field);
 			diagnostic.Message = std::format("the Dynamic body of '{}' cannot be created: {}", scene.GetEntityPath(owner),
 				carried.empty() ? text : text.substr(carried.size() + 2));
-			diagnostic.Hint = carried == PhysicsAllDofsLockedCode
+			diagnostic.Hint = !fault.Hint.empty() ? std::string(fault.Hint)
+				: carried == PhysicsAllDofsLockedCode
 				? std::string("unlock a translation axis, or give the body colliders that can rotate it; the play session does not create the body otherwise")
 				: std::format("lower Mass (at most {} kg) or make the colliders smaller; the play session does not create the body otherwise", MaxPhysicsMass);
 			return diagnostic;

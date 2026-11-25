@@ -1055,6 +1055,62 @@ return Script.Define("ReadOnly", T))"));
 			CHECK(entity.GetName() == "ReadOnly");
 			CHECK(fixture.ExternalMutations.empty());
 		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the lifecycle order is refreshed on the scene's structure
+		// revision, which a sibling move and a reparent move and a rename (a data write) does not, so the teardown follows the
+		// canonical order the moves made.
+		TEST_CASE("ScriptInstanceLifecycle: the lifecycle order follows a sibling move and a reparent, and a rename moves no structure")
+		{
+			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
+			const AssetHandle script(0x20000c);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Lifecycle.luau", std::string(Test::LifecycleSource)));
+			Scene& scene = fixture.GetScene();
+			const Entity first = scene.CreateEntity("First");
+			const Entity second = scene.CreateEntity("Second");
+			const Entity third = scene.CreateEntity("Third");
+			for (const Entity entity : { first, second, third })
+				Test::AttachLifecycleScript(entity, script);
+			REQUIRE(fixture.Start());
+			const size_t started = Test::ScriptLifecycleTrace(scene).size();
+
+			const uint64_t structure = scene.GetStructureRevision();
+			first.SetName("Renamed");
+			CHECK(scene.GetStructureRevision() == structure);
+			// Third to the front of the roots, then First below it: Third, First, Second in canonical order.
+			REQUIRE(scene.SetParent(third, Entity{}, 0u).has_value());
+			REQUIRE(scene.SetParent(first, third).has_value());
+			CHECK(scene.GetStructureRevision() > structure);
+			fixture.GetEngine()->Stop();
+			// Stop tears down in reverse lifecycle order (the labels are the names at OnCreate).
+			const std::vector<std::string> trace = Test::ScriptLifecycleTrace(scene);
+			CHECK(std::vector<std::string>(trace.begin() + static_cast<ptrdiff_t>(started), trace.end())
+				== std::vector<std::string>{ "Second:destroy", "First:destroy", "Third:destroy" });
+			CHECK(fixture.Errors.empty());
+		}
+
+		// M43: a synchronization visits the Script view and the entities with instances, never the rest of the scene, and adds
+		// them to the scene's EntitiesVisited.
+		TEST_CASE("ScriptEngine: a synchronization visits the scripted entities, not the scene")
+		{
+			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
+			const AssetHandle script(0x20000d);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Lifecycle.luau", std::string(Test::LifecycleSource)));
+			Scene& scene = fixture.GetScene();
+			Test::AttachLifecycleScript(scene.CreateEntity("First"), script);
+			Test::AttachLifecycleScript(scene.CreateEntity("Second"), script);
+			REQUIRE(fixture.Start());
+
+			uint64_t visited = scene.GetEntitiesVisited();
+			REQUIRE(fixture.GetEngine()->SynchronizeInstances());
+			const uint64_t scripted = scene.GetEntitiesVisited() - visited;
+			CHECK(scripted > 0);
+			for (int index = 0; index < 32; ++index)
+				static_cast<void>(scene.CreateEntity("Plain"));
+			visited = scene.GetEntitiesVisited();
+			REQUIRE(fixture.GetEngine()->SynchronizeInstances());
+			CHECK(scene.GetEntitiesVisited() - visited == scripted);
+			CHECK(fixture.Errors.empty());
+		}
 	}
 
 }

@@ -7,6 +7,7 @@
 
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace Engine {
 
@@ -37,6 +38,12 @@ namespace Engine {
 		}
 
 		template<typename T>
+		void* AddCopyComponentOp(Entity entity, const void* source)
+		{
+			return &entity.AddComponent<T>(*static_cast<const T*>(source));
+		}
+
+		template<typename T>
 		void RemoveComponentOp(Entity entity)
 		{
 			entity.RemoveComponent<T>();
@@ -51,6 +58,12 @@ namespace Engine {
 			});
 		}
 
+		template<typename T>
+		void CollectCanonicalComponentOp(const Scene& scene, std::vector<entt::entity>& out)
+		{
+			scene.CollectCanonical<T>(out);
+		}
+
 		// The ECS operations of component type T, built on Entity's templates. A constant, not mutable state.
 		template<typename T>
 		inline constexpr ComponentHostOps ComponentHostOpsFor = {
@@ -58,8 +71,10 @@ namespace Engine {
 			.GetConst = &GetConstComponentOp<T>,
 			.Get = &GetComponentOp<T>,
 			.Add = &AddComponentOp<T>,
+			.AddCopy = &AddCopyComponentOp<T>,
 			.Remove = &RemoveComponentOp<T>,
 			.Patch = &PatchComponentOp<T>,
+			.CollectCanonical = &CollectCanonicalComponentOp<T>,
 		};
 
 	}

@@ -39,6 +39,10 @@ class LightingBakeTests(AutomationTestCase):
         self.assertTrue(volume["path"].startswith("Assets/Lighting/Scenes/Main/"), volume["path"])
         self.assertTrue(volume["path"].endswith(".irradiance"))
         self.assertTrue(first["reflectionProbes"][0]["path"].endswith(".hdr"))
+        # M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): without a Sky nothing bakes relightable (a
+        # Sky's relightable bake is test_sky.py's).
+        self.assertFalse(volume["relightable"])
+        self.assertFalse(first["reflectionProbes"][0]["relightable"])
         baked = {probe["path"]: (root / probe["path"]).read_bytes()
                  for probe in first["irradianceVolumes"] + first["reflectionProbes"]}
         data = probe_data(client, "/Volume", "IrradianceVolume")

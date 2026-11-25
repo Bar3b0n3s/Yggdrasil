@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -44,6 +45,10 @@ namespace Engine {
 		struct ScriptEngineAccess
 		{
 			[[nodiscard]] static Sandbox& GetSandbox(ScriptEngine& engine);
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): Scene.FindByName's and FindByTag's index, the live
+			// entities of the host's scene named `name` (with `tags`: tagged `name`) in canonical order, disabled ones included.
+			// The span is valid until the next call.
+			[[nodiscard]] static std::span<const UUID> FindSceneEntities(ScriptEngine& engine, std::string_view name, bool tags);
 			// Each pushes existing instances (a table, or nil for an instance that does not exist or is being torn down),
 			// without creating an instance or running lifecycle callbacks.
 			// The instance an evaluation of `entity` binds as self: the executing owner's slot when the owner is that

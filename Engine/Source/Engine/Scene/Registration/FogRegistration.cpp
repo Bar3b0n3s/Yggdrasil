@@ -58,7 +58,8 @@ namespace Engine {
 				{ .Min = Utils::MinFogHeightFalloff, .Max = Utils::MaxFogHeightFalloff, .Unit = "1/m" })
 			.Field("BaseHeight", &FogComponent::BaseHeight, "The world height, in metres, where the height fog has HeightDensity.", { .Unit = "m" })
 			.Field("SunGlow", &FogComponent::SunGlow,
-				"How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow.",
+				"How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its "
+				"intensity; 0 has no glow.",
 				{ .Min = 0.0, .Max = Utils::MaxFogSunGlow })
 			.Field("SunGlowExponent", &FogComponent::SunGlowExponent, "How tightly the sun glow gathers around the light's direction: higher is tighter.",
 				{ .Min = Utils::MinFogSunGlowExponent, .Max = Utils::MaxFogSunGlowExponent })

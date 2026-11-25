@@ -15,14 +15,19 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/Image.h"
+#include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/ProbeCapture.h"
+#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
+#include "Engine/Scene/Components/SkyComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -34,11 +39,13 @@
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -65,12 +72,18 @@ namespace Engine {
 		{
 			Scope<Scene> scene = editor.CreateScene(std::move(name));
 			const Entity floor = scene->CreateEntity("Floor");
-			floor.GetComponent<TransformComponent>().Scale = glm::vec3(4.0f);
+			floor.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Scale = glm::vec3(4.0f);
+			});
 			floor.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::PlaneMesh);
 			if (sunlit)
 			{
 				const Entity sun = scene->CreateEntity("Sun");
-				sun.GetComponent<TransformComponent>().Rotation = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				sun.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Rotation = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				});
 				sun.AddComponent<DirectionalLightComponent>();
 			}
 			const Entity volume = scene->CreateEntityWithID(RoomVolumeId, "Volume");
@@ -80,7 +93,10 @@ namespace Engine {
 			grid.ProbeCountY = 2;
 			grid.ProbeCountZ = 2;
 			const Entity mirror = scene->CreateEntityWithID(RoomMirrorId, "Mirror");
-			mirror.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 1.0f, 0.0f);
+			mirror.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 1.0f, 0.0f);
+			});
 			mirror.AddComponent<ReflectionProbeComponent>().Resolution = 32;
 			return scene;
 		}
@@ -442,7 +458,10 @@ namespace Engine {
 				for (const float x : { -1.5f, 0.5f, 1.5f })
 				{
 					const Entity mirror = scene.CreateEntity("Mirror");
-					mirror.GetComponent<TransformComponent>().Translation = glm::vec3(x, 0.5f, 0.0f);
+					mirror.Patch<TransformComponent>([x](TransformComponent& transform)
+					{
+						transform.Translation = glm::vec3(x, 0.5f, 0.0f);
+					});
 					mirror.AddComponent<ReflectionProbeComponent>().Resolution = 32;
 				}
 				const Result<LightingBakeResult> larger = BakeLighting(editor, room, {});
@@ -451,6 +470,112 @@ namespace Engine {
 				CHECK(larger->IrradianceVolumes.front().Changed);
 				REQUIRE(larger->ReflectionProbes.size() == 4);
 				CHECK(device.GetMemoryAllocationCount() <= afterFirst);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): under an enabled Sky the room's volume
+		// bakes relightable (version 2 with its relight block, Relightable in the result; its reflection probe as before), two
+		// bakes write the same bytes, and a renderer that relights the baked volume at the bake's own sky shades a white quad
+		// inside it as the baked coefficients do without relighting (the bake's sky is the renderer's image-based light, read
+		// back from the capture's renderer).
+		TEST_CASE("LightingBake: a volume baked under a Sky is relightable, bakes byte-identically twice, and relights to its bake at the bake's sky"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(gpu.GetDevice(), gpu.GetPipelines());
+			REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+			{
+				BakeEditor setup(**baker);
+				EditorContext& editor = setup.GetEditor();
+				// A Sky whose null Sun takes the room's sun, turned 40 degrees from the zenith so the sky has a slope.
+				Scene& scene = editor.GetScene();
+				scene.CreateEntity("Sky").AddComponent<SkyComponent>();
+				const Entity sun = scene.FindEntityByPath("/Sun");
+				REQUIRE(sun.IsValid());
+				sun.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Rotation = glm::angleAxis(glm::radians(-50.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				});
+				const BakeCapture capture(gpu, editor);
+
+				const Result<LightingBakeResult> first = BakeLighting(editor, editor.GetActiveSceneId(), {});
+				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+				REQUIRE(first->IrradianceVolumes.size() == 1);
+				REQUIRE(first->ReflectionProbes.size() == 1);
+				CHECK(first->IrradianceVolumes.front().Relightable);
+				CHECK_FALSE(first->ReflectionProbes.front().Relightable);
+				const std::map<std::string, Buffer> baked = ReadBakedFiles(setup.GetProjectRoot(), *first);
+				const Buffer& source = baked.at(first->IrradianceVolumes.front().Path);
+				REQUIRE(source.size() > 8);
+				CHECK(std::to_integer<uint32_t>(source[4]) == IrradianceVolumeData::FormatVersion);
+				const Result<IrradianceVolumeData> volume = ReadIrradianceVolumeSource(source);
+				REQUIRE_MESSAGE(volume.has_value(), volume.error().ToString());
+				REQUIRE(volume->Relight.size() == volume->Probes.size());
+				// The room has no light of its own, so every probe's local light is dark, and its upper probes see the sky.
+				for (const IrradianceProbeRelight& block : volume->Relight)
+					CHECK(block.Local[0] == glm::vec3(0.0f));
+				CHECK(volume->Relight[GetIrradianceProbeIndex(*volume, 0, 1, 0)].Transfer[0] > 0.1f);
+
+				const Result<LightingBakeResult> second = BakeLighting(editor, editor.GetActiveSceneId(), {});
+				REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+				CHECK_FALSE(second->IrradianceVolumes.front().Changed);
+				CHECK(second->IrradianceVolumes.front().Relightable);
+				CHECK(ReadBakedFiles(setup.GetProjectRoot(), *second) == baked);
+
+				// Relit at the bake's sky, the volume shades as its bake: the scene's Sky and lights, the probes around the
+				// fixture's quad, once relightable and once without the block.
+				const Result<RenderSnapshot> extracted = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+				REQUIRE_MESSAGE(extracted.has_value(), extracted.error().ToString());
+				REQUIRE(extracted->Sky.Enabled);
+				Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+				constexpr AssetHandle Relit{ 0x9c01 };
+				constexpr AssetHandle Plain{ 0x9c02 };
+				fixture.Assets().Publish(Relit, CreateRef<IrradianceVolumeData>(*volume));
+				IrradianceVolumeData plain = *volume;
+				plain.Relight.clear();
+				fixture.Assets().Publish(Plain, CreateRef<IrradianceVolumeData>(std::move(plain)));
+				const auto shade = [&gpu, &fixture, &extracted](AssetHandle data, uint64_t frame)
+				{
+					RenderSnapshot snapshot = fixture.Snapshot();
+					snapshot.Lights = extracted->Lights;
+					snapshot.Sky = extracted->Sky;
+					snapshot.Camera.ClearToSkybox = true;
+					snapshot.FrameIndex = frame;
+					snapshot.IrradianceVolumes.push_back(IrradianceVolumeItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)),
+						.Size = glm::vec3(4.0f),
+						.Data = data,
+						.BlendDistance = 0.0f,
+						.Entity = UUID(31) });
+					fixture.Submit(snapshot);
+					Readback readback(gpu.GetDevice());
+					Result<Image> image = readback.ReadTexture(*fixture.Renderer().GetSceneColorTexture());
+					REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+					return std::move(*image);
+				};
+				const Image relit = shade(Relit, 40);
+				CHECK(fixture.Renderer().GetRenderStats().RelitIrradianceVolumes == 1U);
+				const Image plainImage = shade(Plain, 41);
+				CHECK(fixture.Renderer().GetRenderStats().RelitIrradianceVolumes == 0U);
+				// SceneColor's binary16 green over the quad's centre square, relit against baked.
+				double relitSum = 0.0;
+				double plainSum = 0.0;
+				for (uint32_t y = 12; y < 20; ++y)
+				{
+					for (uint32_t x = 12; x < 20; ++x)
+					{
+						uint16_t relitGreen = 0;
+						uint16_t plainGreen = 0;
+						std::memcpy(&relitGreen, relit.GetRow(y).data() + static_cast<size_t>(x) * 8 + 2, sizeof(relitGreen));
+						std::memcpy(&plainGreen, plainImage.GetRow(y).data() + static_cast<size_t>(x) * 8 + 2, sizeof(plainGreen));
+						relitSum += Test::HalfToDouble(relitGreen);
+						plainSum += Test::HalfToDouble(plainGreen);
+					}
+				}
+				INFO("relit " << relitSum << ", baked " << plainSum);
+				CHECK(plainSum > 0.0);
+				CHECK(relitSum == doctest::Approx(plainSum).epsilon(0.005));
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

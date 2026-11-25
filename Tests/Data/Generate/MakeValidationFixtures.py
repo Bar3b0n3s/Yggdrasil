@@ -75,17 +75,19 @@ PLANE_MESH = "0000000000000103"
 
 # The registry's canonical component order (BuiltinComponents, then the validator test components).
 COMPONENT_ORDER = [
-    "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
-    "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
-    "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface", "AudioSource",
-    "AudioListener",
+    "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "Static", "MeshRenderer",
+    "Camera", "DirectionalLight", "PointLight", "SpotLight", "Environment", "Sky", "PostProcess", "Text", "RigidBody",
+    "BoxCollider", "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface",
+    "MassProperties",
+    "AudioSource", "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
     "Animator", "SkinnedMesh", "BoneAttachment", "ParticleEmitter", "ParticleLook", "IrradianceVolume",
     "ReflectionProbe", "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation",
     "NavModifier",
-    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "RenderDistance", "Wind", "ValidatorTarget",
+    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "WheeledVehicle", "VehicleWheel", "RenderDistance", "Wind",
+    "ValidatorTarget",
     "ValidatorFollower",
 ]
 
@@ -378,6 +380,14 @@ def heightfield(resolution: int) -> bytes:
     """A flat `.heightfield` source of `resolution` x `resolution` samples (Asset/HeightfieldData.h): the magic "EHFD",
     the uint32 version 1, then the payload, the uint32 resolution and the uint16 samples, little-endian."""
     return b"EHFD" + struct.pack("<II", 1, resolution) + bytes(2 * resolution * resolution)
+
+
+def irradiance_volume() -> bytes:
+    """A version 1 `.irradiance` source of a 2 x 2 x 2 volume of 1 m whose probes are zero
+    (Asset/IrradianceVolumeData.h): the magic "EIRV", the uint32 version 1, then the payload, three uint32 counts, three
+    f32 sides and eight probes of nine f32x3 coefficients, little-endian; version 1 has no relight block (M45's format 2
+    adds it)."""
+    return b"EIRV" + struct.pack("<IIII3f", 1, 2, 2, 2, 1.0, 1.0, 1.0) + bytes(8 * 9 * 3 * 4)
 
 
 def navmesh(input_hash: int) -> bytes:
@@ -1073,6 +1083,45 @@ return Script.Define("Jumper", Jumper)
     item = fixture("RENDER_REFLECTION_INVALID")
     item.entities.append(entity("e000000000000042", "Mirror", {
         "Transform": transform(0, 0, -20), "MeshRenderer": {"Mesh": CUBE_MESH}, "PlanarReflection": {}}))
+
+    # M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a Dynamic body under a Static scenery root.
+    item = fixture("SCENE_STATIC_MOVES")
+    item.entities.append(entity("e000000000000043", "Scenery", {"Transform": transform(0, 0, -20), "Static": {}}))
+    item.entities.append(body("e000000000000044", "Crate", 0, "Dynamic", parent="e000000000000043"))
+
+    # M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a lowered centre of mass on a Static wall, which no
+    # Dynamic body uses.
+    item = fixture("PHYSICS_MASS_UNUSED")
+    wall = body("e000000000000042", "Wall", 0, "Static")
+    wall["Components"]["MassProperties"] = {"CenterOfMassOffset": [0, -0.25, 0], "InertiaScale": [1, 1, 1]}
+    wall["Components"] = {key: wall["Components"][key] for key in COMPONENT_ORDER if key in wall["Components"]}
+    item.entities.append(wall)
+
+    # M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a sled, a Dynamic body with a WheeledVehicle and no
+    # VehicleWheel below it.
+    item = fixture("PHYSICS_VEHICLE_INVALID")
+    sled = body("e000000000000042", "Sled", 0, "Dynamic")
+    sled["Components"]["WheeledVehicle"] = {}
+    sled["Components"] = {key: sled["Components"][key] for key in COMPONENT_ORDER if key in sled["Components"]}
+    item.entities.append(sled)
+
+    # M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a Sky whose Sun names the camera, which holds no
+    # DirectionalLight; and a Sky (its Sun the baseline's light) beside an Environment, which it leaves unused.
+    item = fixture("SKY_LIGHT_INVALID")
+    item.entities.append(entity("e000000000000042", "Sky", {
+        "Transform": transform(), "Sky": {"Sun": "e000000000000001"}}))
+    item = fixture("SKY_ENVIRONMENT_IGNORED")
+    item.entities.append(entity("e000000000000042", "Sky", {"Transform": transform(), "Sky": {}}))
+    item.entities.append(entity("e000000000000043", "Environment", {"Transform": transform(), "Environment": {}}))
+    # W45.3: a Sky beside an irradiance volume baked without one (a version 1 file, no relight block), which it cannot
+    # relight.
+    item = fixture("PROBE_NOT_RELIGHTABLE")
+    item.add("Project/Assets/Lighting/Volume.irradiance", irradiance_volume())
+    item.add_json("Project/Assets/Lighting/Volume.irradiance.meta",
+                  meta("7e45000000000045", "IrradianceVolume", "IrradianceVolume"))
+    item.entities.append(entity("e000000000000042", "Sky", {"Transform": transform(), "Sky": {}}))
+    item.entities.append(entity("e000000000000043", "Volume", {
+        "Transform": transform(), "IrradianceVolume": {"Data": "7e45000000000045"}}))
 
     return fixtures
 

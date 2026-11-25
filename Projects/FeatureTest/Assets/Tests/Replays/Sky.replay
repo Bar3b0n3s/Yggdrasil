@@ -1,0 +1,139 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "f892cb4ce45baf17",
+		"Path": "Assets/Scenes/Sky.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.8.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "3cf1cc6fda287a0c",
+				"Path": "/Ground",
+				"Hash": "8b49165f391a3c54",
+				"Components": {
+					"Transform": "c91c1128867f628f",
+					"MeshRenderer": "52efc41770294866"
+				}
+			},
+			{
+				"Id": "4f882662c3a8d9da",
+				"Path": "/Hut",
+				"Hash": "6d0dd68edc121e48",
+				"Components": {
+					"Transform": "9742962f50f20f51",
+					"MeshRenderer": "71517c8c0566e6b2"
+				}
+			},
+			{
+				"Id": "6d0ad9f8466e39cc",
+				"Path": "/Sun",
+				"Hash": "99fde1a6b451fecb",
+				"Components": {
+					"Transform": "f7c88299c2867420",
+					"DirectionalLight": "b7e043fb0718ca34",
+					"Script": "31ef715dedb4afdf"
+				}
+			},
+			{
+				"Id": "75ec15cb6e786c27",
+				"Path": "/Camera",
+				"Hash": "073bfdcdc688ff5b",
+				"Components": {
+					"Transform": "0487e7d7f8e82cb6",
+					"Camera": "06bc5d3b8e2a9794"
+				}
+			},
+			{
+				"Id": "a4bac9d8af802999",
+				"Path": "/Rendering",
+				"Hash": "6d933eb951c84631",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PostProcess": "04f3d7d5d3972996"
+				}
+			},
+			{
+				"Id": "f17bfd88f57ddd7b",
+				"Path": "/Sky",
+				"Hash": "4716a91fde939ded",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Sky": "63c6147b39e3f5c2"
+				}
+			},
+			{
+				"Id": "fefcda223cba0d4a",
+				"Path": "/Moon",
+				"Hash": "8495b811cfaa2e1a",
+				"Components": {
+					"Transform": "da289a4a0a76f951",
+					"DirectionalLight": "155efee0042b044d"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "a3f9d55839416de7",
+				"Path": "Assets/Materials/Sky/Ground.material",
+				"Type": "Material",
+				"Hash": "9fa8fc47c6fab429"
+			},
+			{
+				"Handle": "cc2723c3d96b44cc",
+				"Path": "Assets/Scripts/Sky/SunTurner.luau",
+				"Type": "Script",
+				"Hash": "6cd9a08b1e47f8fe"
+			},
+			{
+				"Handle": "f5dd4869409d0341",
+				"Path": "Assets/Materials/Sky/Hut.material",
+				"Type": "Material",
+				"Hash": "8577f089ed7b7bcc"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 10,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "F"
+		},
+		{
+			"Tick": 70,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "F"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 5,
+			"Luau": "return Scene.FindByName(\"Sun\"):GetScript(\"SunTurner\").Turned == 0"
+		},
+		{
+			"Tick": 40,
+			"Luau": "local turned = Scene.FindByName(\"Sun\"):GetScript(\"SunTurner\").Turned\nreturn turned >= 25 and turned <= 31"
+		},
+		{
+			"Tick": 90,
+			"Luau": "local turned = Scene.FindByName(\"Sun\"):GetScript(\"SunTurner\").Turned\nreturn turned >= 58 and turned <= 61"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "cd5379e360f7b000"
+		}
+	],
+	"FinalTick": 90,
+	"FinalStateHash": "ab6271bf394058b2"
+}

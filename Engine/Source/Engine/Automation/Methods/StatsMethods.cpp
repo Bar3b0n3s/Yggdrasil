@@ -36,6 +36,10 @@ namespace Engine {
 			result.Bodies = counters.Bodies;
 			result.ActiveBodies = counters.ActiveBodies;
 			result.Particles = counters.Particles;
+			// M43: the last tick's work and the last extraction's static cell rebuilds.
+			result.TransformsUpdated = counters.TransformsUpdated;
+			result.EntitiesVisited = counters.EntitiesVisited;
+			result.StaticCellRebuilds = counters.StaticCellRebuilds;
 		}
 		if (const PlaySession* session = context.GetPlaySession(); session != nullptr && session->GetScripts() != nullptr)
 		{
@@ -106,6 +110,12 @@ namespace Engine {
 		result.CulledPlanarReflections = stats.CulledPlanarReflections;
 		for (const UUID& entity : stats.PlanarReflectionEntities)
 			result.PlanarReflectionEntities.push_back(entity.ToString());
+		result.StaticItems = stats.StaticItems;
+		result.StaticCells = stats.StaticCells;
+		result.StaticCellsVisible = stats.StaticCellsVisible;
+		result.DynamicItems = stats.DynamicItems;
+		result.SkyUpdates = stats.SkyUpdates;
+		result.RelitIrradianceVolumes = stats.RelitIrradianceVolumes;
 		result.MeshLodDraws.assign(stats.MeshLodDraws.begin(), stats.MeshLodDraws.end());
 		result.LodCrossFades = stats.LodCrossFades;
 		result.DistanceCulledMeshes = stats.DistanceCulledMeshes;
@@ -193,6 +203,22 @@ namespace Engine {
 				"none (a debug view or the wireframe); they cost nothing.")
 			.Field("planarReflectionEntities", &StatsViewSummary::PlanarReflectionEntities,
 				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.")
+			.Field("staticItems", &StatsViewSummary::StaticItems,
+				"Mesh items of the frame's static set: the MeshRenderers of entities a Static makes static scenery (skinned, mirrored-glass "
+				"and scrolling items stay dynamic), which render extraction does not visit and the renderer prepares once per cell.")
+			.Field("staticCells", &StatsViewSummary::StaticCells, "Cells of the frame's static set: 32 m squares on the XZ plane, each holding the static items whose origin lies in it.")
+			.Field("staticCellsVisible", &StatsViewSummary::StaticCellsVisible,
+				"Static cells the view's camera did not cull whole: the view's static work follows them, testing only their items.")
+			.Field("dynamicItems", &StatsViewSummary::DynamicItems, "Mesh items render extraction visited for the frame: every MeshRenderer that is not static scenery.")
+			.Field("skyUpdates", &StatsViewSummary::SkyUpdates,
+				"1 when the frame regenerated its Sky's image-based light (its cube, specular prefilter and irradiance) because what it is "
+				"made of changed: the atmosphere (Haze, Overcast, GroundAlbedo), the Sun light's direction, colour or intensity, the Moon "
+				"light's, or the cloud layer's coverage or its drift past a 1 s step; else 0, and 0 without a Sky. Its cost is in the pass "
+				"row SkyIbl.")
+			.Field("relitIrradianceVolumes", &StatsViewSummary::RelitIrradianceVolumes,
+				"The irradiance volumes baked under a Sky (relightable) that the frame relit by its sky, because the sky's image-based "
+				"light was regenerated, its Intensity changed or the volumes' data was copied to the view again; 0 otherwise. Its cost is in "
+				"the pass row ProbeRelight.")
 			.Field("meshLodDraws", &StatsViewSummary::MeshLodDraws,
 				"The frame's mesh draws per level of detail, levels 0 to 4 (5 counts): one per submesh and level drawn, a mesh without "
 				"levels counting at level 0 and an item inside a fade band once at each of its two levels.")
@@ -231,7 +257,20 @@ namespace Engine {
 			.Field("deviceLosses", &StatsGetResult::DeviceLosses,
 				"The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none.")
 			.Field("activeBodies", &StatsGetResult::ActiveBodies, "Awake physics bodies of the play session, the 3D world's and the 2D world's together; 0 without a session.")
-			.Field("particles", &StatsGetResult::Particles, "Live particles of the play session after its last Particles phase; 0 without a session.");
+			.Field("particles", &StatsGetResult::Particles, "Live particles of the play session after its last Particles phase; 0 without a session.")
+			.Field("transformsUpdated", &StatsGetResult::TransformsUpdated,
+				"World matrices the play session's last tick and the frame phase after it recomputed: the subtrees of the transforms written "
+				"since the previous update, physics' write-back of every awake or parented dynamic body and every character included; 0 for a "
+				"tick that writes no transform; 0 without a session.")
+			.Field("entitiesVisited", &StatsGetResult::EntitiesVisited,
+				"Entities the per-tick passes of the play session's last tick visited, summed: the owners of kinematic, dynamic and "
+				"character bodies, the bodies whose transforms were written, scripted entities, audio sources, animators, skinned meshes, "
+				"emitters, sprite animators, bone attachments and UI canvas trees. Static scenery adds none, so the count does not grow "
+				"with the static entities; 0 without a session.")
+			.Field("staticCellRebuilds", &StatsGetResult::StaticCellRebuilds,
+				"Static cells the play session's last tick's frame-phase extraction rebuilt or removed (a write to a static entity rebuilds "
+				"its cell there); 0 when that frame phase did not extract; an editor view's, a capture's or a query's extraction never "
+				"counts; 0 without a session.");
 	}
 
 	void RegisterStatsMethods(MethodRegistry& methods)

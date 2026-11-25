@@ -288,6 +288,19 @@ return true
 				{ "DistanceJoint.GetForce", "holders.DistanceJoint.DistanceJoint:GetForce()" },
 				{ "FixedJoint.GetForce", "holders.FixedJoint.FixedJoint:GetForce()" },
 				{ "FixedJoint.GetTorque", "holders.FixedJoint.FixedJoint:GetTorque()" },
+				// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the vehicles' readings of the physics.
+				{ "WheeledVehicle.GetSpeed", "holders.WheeledVehicle.WheeledVehicle:GetSpeed()" },
+				{ "WheeledVehicle.GetEngineRpm", "holders.WheeledVehicle.WheeledVehicle:GetEngineRpm()" },
+				{ "WheeledVehicle.GetGear", "holders.WheeledVehicle.WheeledVehicle:GetGear()" },
+				{ "WheeledVehicle.IsShifting", "holders.WheeledVehicle.WheeledVehicle:IsShifting()" },
+				{ "VehicleWheel.IsTouching", "holders.VehicleWheel.VehicleWheel:IsTouching()" },
+				{ "VehicleWheel.GetContact", "holders.VehicleWheel.VehicleWheel:GetContact()" },
+				{ "VehicleWheel.GetSuspensionLength", "holders.VehicleWheel.VehicleWheel:GetSuspensionLength()" },
+				{ "VehicleWheel.GetSuspensionForce", "holders.VehicleWheel.VehicleWheel:GetSuspensionForce()" },
+				{ "VehicleWheel.GetRotation", "holders.VehicleWheel.VehicleWheel:GetRotation()" },
+				{ "VehicleWheel.GetSteerAngle", "holders.VehicleWheel.VehicleWheel:GetSteerAngle()" },
+				{ "VehicleWheel.GetAngularVelocity", "holders.VehicleWheel.VehicleWheel:GetAngularVelocity()" },
+				{ "VehicleWheel.GetSlip", "holders.VehicleWheel.VehicleWheel:GetSlip()" },
 			};
 			// Mutating members, and the setters of the properties that have one.
 			const std::vector<MemberCheck> writes = {

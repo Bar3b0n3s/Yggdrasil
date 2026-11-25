@@ -16,8 +16,8 @@
 
 namespace Engine {
 
-	// Defined by the module that hosts components: Scene/ComponentHostOps.h (Has/GetConst/Get/Add/Remove/Patch on an
-	// entity).
+	// Defined by the module that hosts components: Scene/ComponentHostOps.h (Has/GetConst/Get/Add/AddCopy/Remove/Patch on
+	// an entity, CollectCanonical over a scene).
 	// Reflection stores the pointer and never dereferences it, because it cannot include EnTT or Scene (§3, ADR 0006).
 	struct ComponentHostOps;
 

@@ -2,6 +2,7 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
 #include "Engine/Physics/CharacterController.h"
+#include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentRegistration.h"
@@ -161,6 +162,23 @@ namespace Engine {
 				"InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write "
 				"takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick.",
 				{ .Min = -static_cast<double>(MaxCharacterSpeed), .Max = static_cast<double>(MaxCharacterSpeed), .Unit = "m/s" });
+
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): appended after ColliderSurface.
+		RegisterComponent<MassPropertiesComponent>(registry, "MassProperties",
+			"Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with "
+			"a lowered centre of mass stays upright.")
+			.Category("Physics")
+			.Version(1)
+			.Requires<TransformComponent>()
+			.Requires<RigidBodyComponent>()
+			.Field("CenterOfMassOffset", &MassPropertiesComponent::CenterOfMassOffset,
+				"Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); "
+				"the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it.",
+				{ .Min = -static_cast<double>(PhysicsShape::MaxColliderSize), .Max = static_cast<double>(PhysicsShape::MaxColliderSize), .Unit = "m" })
+			.Field("InertiaScale", &MassPropertiesComponent::InertiaScale,
+				"Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily "
+				"about that axis, above 1 less.",
+				{ .Min = static_cast<double>(MinPhysicsInertiaScale), .Max = static_cast<double>(MaxPhysicsInertiaScale) });
 	}
 
 }

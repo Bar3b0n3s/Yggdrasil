@@ -29,6 +29,7 @@ namespace Engine {
 		RegisterFogComponents(registry);
 		RegisterNavigationComponents(registry);
 		RegisterJointsComponents(registry);
+		RegisterVehiclesComponents(registry);
 		RegisterRenderDistanceComponents(registry);
 		RegisterWindComponents(registry);
 

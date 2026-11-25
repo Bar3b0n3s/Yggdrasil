@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Sky.scene"}}
+{"method": "play.step", "params": {"ticks": 90, "render": "None", "input": [{"tick": 10, "type": "Key", "key": "F", "state": "Down"}, {"tick": 70, "type": "Key", "key": "F", "state": "Up"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Sky.replay", "expect": [{"tick": 5, "luau": "return Scene.FindByName(\"Sun\"):GetScript(\"SunTurner\").Turned == 0"}, {"tick": 40, "luau": "local turned = Scene.FindByName(\"Sun\"):GetScript(\"SunTurner\").Turned\nreturn turned >= 25 and turned <= 31"}, {"tick": 90, "luau": "local turned = Scene.FindByName(\"Sun\"):GetScript(\"SunTurner\").Turned\nreturn turned >= 58 and turned <= 61"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

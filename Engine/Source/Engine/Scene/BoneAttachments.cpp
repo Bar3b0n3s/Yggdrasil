@@ -340,8 +340,10 @@ namespace Engine {
 			m_Skeletons.clear();
 			return;
 		}
-		const std::span<const UUID> current = scene.GetCanonicalOrder();
-		const std::vector<UUID> order(current.begin(), current.end());
+		// M43: the BoneAttachment view in canonical order, counted in EntitiesVisited. Attaching writes Transforms and adds
+		// attachment states, never a BoneAttachment or an entity, so the list taken first is the whole-scene walk's.
+		scene.CollectCanonical<BoneAttachmentComponent>(m_Attachments);
+		scene.AddEntitiesVisited(m_Attachments.size());
 		// Past the AnimationSystem's MaxAnimationSystemDiagnostics nothing more is kept or logged, so nothing more is built or
 		// remembered either: a script that spawns broken attachments every tick cannot grow the set.
 		const auto report = [this, &findings](ConstEntity entity, Utils::AttachmentFault fault, const Utils::AttachmentContext& context)
@@ -349,11 +351,12 @@ namespace Engine {
 			if (m_Reported.size() < MaxAnimationSystemDiagnostics && m_Reported.insert(entity.GetUUID()).second)
 				findings.push_back(Utils::MakeIssue(entity, fault, context));
 		};
-		for (const UUID id : order)
+		for (const entt::entity handle : m_Attachments)
 		{
-			const Entity entity = scene.FindEntityByID(id);
+			const Entity entity(handle, &scene);
 			if (!entity.IsValid() || !entity.HasComponent<BoneAttachmentComponent>() || entity.HasComponent<HierarchyDisabledTag>())
 				continue;
+			const UUID id = entity.GetUUID();
 			const BoneAttachmentComponent attachment = entity.GetComponent<BoneAttachmentComponent>();
 			Utils::AttachmentContext context{ .Bone = attachment.Bone };
 			context.Animator = FindDrivingAnimator(entity.GetParent());

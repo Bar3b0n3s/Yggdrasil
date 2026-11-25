@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/StaticScenery.scene"}}
+{"method": "play.step", "params": {"ticks": 240, "render": "None", "input": [{"tick": 20, "type": "Key", "key": "F", "state": "Tap"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/StaticScenery.replay", "expect": [{"tick": 10, "luau": "local director = Scene.FindByName(\"Director\"):GetScript()\nreturn director.Pushes == 0 and director.Lifts == 0"}, {"tick": 120, "luau": "local director = Scene.FindByName(\"Director\"):GetScript()\nlocal lift = Scene.FindByPath(\"/Scenery/Lift\").Transform.Translation\nlocal ball = Scene.FindByPath(\"/Ball\").Transform.WorldPosition\nreturn director.Pushes == 1 and director.Lifts == 6 and math.abs(lift.y - 2) < 1e-4 and ball.z < 0"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/Value.h"
@@ -162,6 +163,41 @@ namespace Engine {
 			REQUIRE(motion != nullptr);
 			CHECK(motion->FindByName("LinearCast") != nullptr);
 			CHECK(registry->FindComponent("RigidBody")->FindField("MotionQuality")->GetType().GetEnum() == motion);
+		}
+
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3).
+		TEST_CASE("PhysicsRegistration: MassProperties requires a RigidBody and bounds its offset and inertia scale")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo* mass = registry->FindComponent("MassProperties");
+			REQUIRE(mass != nullptr);
+			CHECK(mass->GetCategory() == "Physics");
+			REQUIRE(mass->GetRequires().size() == 2);
+			CHECK(mass->GetRequires()[0] == registry->FindComponent("Transform"));
+			CHECK(mass->GetRequires()[1] == registry->FindComponent("RigidBody"));
+
+			const FieldMeta& offset = FindPhysicsMeta(*registry, "MassProperties", "CenterOfMassOffset");
+			CHECK(offset.Min == -static_cast<double>(PhysicsShape::MaxColliderSize));
+			CHECK(offset.Max == static_cast<double>(PhysicsShape::MaxColliderSize));
+			const FieldMeta& scale = FindPhysicsMeta(*registry, "MassProperties", "InertiaScale");
+			CHECK(scale.Min == static_cast<double>(MinPhysicsInertiaScale));
+			CHECK(scale.Max == static_cast<double>(MaxPhysicsInertiaScale));
+
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity entity = scene.CreateEntity("Buggy");
+			// Without a RigidBody it cannot be added.
+			CHECK_FALSE(ComponentAccess::AddComponent(entity, "MassProperties", nullptr).has_value());
+			REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", nullptr).has_value());
+			REQUIRE(ComponentAccess::AddComponent(entity, "MassProperties", nullptr).has_value());
+			REQUIRE(ComponentAccess::SetFieldValue(entity, "MassProperties", "InertiaScale", Value::FromVec3(glm::vec3(MaxPhysicsInertiaScale))).has_value());
+			const Status refused = ComponentAccess::SetFieldValue(entity, "MassProperties", "InertiaScale", Value::FromVec3(glm::vec3(1.0f, 0.001f, 1.0f)));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			const Status far = ComponentAccess::SetFieldValue(entity, "MassProperties", "CenterOfMassOffset",
+				Value::FromVec3(glm::vec3(0.0f, -2.0f * PhysicsShape::MaxColliderSize, 0.0f)));
+			REQUIRE_FALSE(far.has_value());
+			CHECK(far.error().GetCode() == ErrorCode::Validation);
 		}
 	}
 

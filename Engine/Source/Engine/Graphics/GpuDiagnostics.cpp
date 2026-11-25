@@ -281,6 +281,17 @@ namespace Engine {
 		return GpuTestHooksEnabled && m_BindingSetFault && m_BindingSetFault(desc, layout);
 	}
 
+	void GpuDiagnostics::SetTextureCreationFault(TextureFaultSelector selector)
+	{
+		ENGINE_CORE_ASSERT(GpuTestHooksEnabled || !selector, "the texture fault does not exist in Dist");
+		m_TextureFault = std::move(selector);
+	}
+
+	bool GpuDiagnostics::ShouldFailSelectedTextureCreation(const nvrhi::TextureDesc& desc) const
+	{
+		return GpuTestHooksEnabled && m_TextureFault && m_TextureFault(desc);
+	}
+
 	bool GpuDiagnostics::TakeArmedFault(GpuFault onceFault, GpuFault persistentFault)
 	{
 		if (m_InjectedFault != onceFault && m_InjectedFault != persistentFault)

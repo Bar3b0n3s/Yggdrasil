@@ -989,6 +989,7 @@ The render thread and GPU-driven rendering stay cut (ADR 0028 decision 2; ADR 00
   - The readout's `TransformsUpdated`, `EntitiesVisited`, `StaticCellRebuilds`, `StaticItems` and `StaticCellsVisible`.
   - Perf.py's `staticScenery/20000Entities/cpuMs` (budget 2.0 ms) and `stateHash/20000Entities/ms`, warning-only, in a new capture part `staticScenery`.
 - **Validation.** `SCENE_STATIC_MOVES` (Warning): a static entity with a Dynamic or Kinematic body, a CharacterController, a BoneAttachment or root motion applied.
+- **Accepted limits** (`Docs/Decisions/0061-m43-static-scenery.md` decision 1 and the W43.2 record; `Docs/Backlog.md` §2 and §6): a static entity that moves renders at its current pose without interpolation and rebuilds its cell; skinned, mirrored-glass and scrolling items stay dynamic; an item whose mesh morphs by its default weights draws undeformed, the renderer warning once per entity.
 
 **Acceptance**
 - "TransformSystem: an incremental update equals the full recompute bit for bit after any sequence of edits"
@@ -1146,7 +1147,7 @@ Its milestone end is phase 8's batch gate: `CI.py --require-clang-cl`.
 - "ProbeRelight: a reflection probe inside a relit volume dims with it"
 - "ProbeValidation: a volume without a relight block under a Sky is reported"
 - `Golden: SkyDay`, `Golden: SkyOvercast` and `Golden: SkyProbes`, with every existing golden byte-identical.
-- `test_sky.py` passes.
+- `test_sky.py`: entity updates of the Sky, Scene-view screenshots that differ between dawn and noon, `stats.get`'s `skyUpdates` (1 while the sun turns, 0 when it stands still), `lighting.bake`'s `relightable`, `SKY_ENVIRONMENT_IGNORED` from `project.validate`.
 - The `Sky` suite passes in the editor, Release and Dist; `Sky.replay` verifies at one hash in Debug, Release and Dist and fails without its input.
 - The frozen-layout cases: `RenderPassDeclarationTests`' rows (45), the pipeline count (88), "Shaders: SharedStructsMatchReflection" with `SkyConstants`, and the existing `IrradianceVolumeData` fuzz case on its new seed.
 - Perf.py's `sky/Static/gpuMs` is within 0.3 ms and `sky/Turning/gpuMs` within 0.6 ms (warning-only).

@@ -1,0 +1,1206 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Vehicles",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"ColliderSurface": 1,
+		"MassProperties": 1,
+		"Script": 2,
+		"Terrain": 1,
+		"TerrainCollider": 1,
+		"WheeledVehicle": 1,
+		"VehicleWheel": 1
+	},
+	"Entities": [
+		{
+			"ID": "6a7457693d589939",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [12, 9, 16],
+					"Rotation": [-0.18197778, 0.29518098, 0.057377372, 0.9361945],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.42, 0.55, 0.72]
+				}
+			}
+		},
+		{
+			"ID": "c397adca5f214d86",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4082179, 0.23456971, 0.10938165, 0.8754261],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "3b5dbffc2b33c0d5",
+			"Name": "Track",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "caaf8cd0315ad2b6",
+			"Name": "Ground",
+			"Parent": "3b5dbffc2b33c0d5",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.5, -200],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"BoxCollider": {
+					"HalfExtents": [60, 0.5, 250],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "4626f77aeead90ab",
+			"Name": "Ledge",
+			"Parent": "3b5dbffc2b33c0d5",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"BoxCollider": {
+					"HalfExtents": [8, 1, 15],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "6eb95cadb02b1e81",
+			"Name": "Slick",
+			"Parent": "3b5dbffc2b33c0d5",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-66, -0.5, -40],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"BoxCollider": {
+					"HalfExtents": [6, 0.5, 90],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"ColliderSurface": {
+					"Friction": 0.3,
+					"Restitution": 0,
+					"SurfaceVelocity": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "151ef48ae0a90f10",
+			"Name": "Rough",
+			"Parent": "3b5dbffc2b33c0d5",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-78, -0.5, -40],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"BoxCollider": {
+					"HalfExtents": [6, 0.5, 90],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"ColliderSurface": {
+					"Friction": 1,
+					"Restitution": 0,
+					"SurfaceVelocity": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "52acdd57823e8cf4",
+			"Name": "Hill",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [64, 0, -16],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Terrain": {
+					"Heightfield": "4565fe6c6b485421",
+					"Size": [32, 32],
+					"HeightScale": 6,
+					"Layers": [
+						{
+							"BaseColorMap": "0000000000000184",
+							"NormalMap": null,
+							"Tint": [0.55, 0.47, 0.38],
+							"Tiling": 4,
+							"Roughness": 0.9,
+							"Metallic": 0
+						}
+					],
+					"SplatMap": null,
+					"ReceiveShadows": true,
+					"LodBias": 1
+				},
+				"TerrainCollider": {
+					"Layer": "Default",
+					"Friction": 0.9,
+					"Restitution": 0
+				}
+			}
+		},
+		{
+			"ID": "4e9d9f4f94cb50ca",
+			"Name": "Buggy",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2.72, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1000,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.9, 0.3, 1.8],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"MassProperties": {
+					"CenterOfMassOffset": [0, -0.6, 0],
+					"InertiaScale": [1.1, 1, 1.1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "7f470cb14293e378",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"WheeledVehicle": {
+					"Throttle": 0,
+					"Steering": 0,
+					"Brake": 0,
+					"HandBrake": 0,
+					"Gear": 0,
+					"Clutch": 1,
+					"MaxTorque": 2000,
+					"MinRpm": 500,
+					"MaxRpm": 3000,
+					"EngineInertia": 0.5,
+					"EngineDamping": 0.2,
+					"TorqueCurve": [
+						{
+							"X": 0,
+							"Y": 0.8
+						},
+						{
+							"X": 0.66,
+							"Y": 1
+						},
+						{
+							"X": 0.9,
+							"Y": 1
+						},
+						{
+							"X": 1,
+							"Y": 0
+						}
+					],
+					"Transmission": "Auto",
+					"GearRatios": [2, 1],
+					"ReverseGearRatios": [-2.9],
+					"SwitchTime": 0.3,
+					"ClutchReleaseTime": 0.2,
+					"SwitchLatency": 0.4,
+					"ShiftUpRpm": 2500,
+					"ShiftDownRpm": 1000,
+					"ClutchStrength": 10,
+					"Differentials": [
+						{
+							"LeftWheel": "83dfb643e285d7cf",
+							"RightWheel": "ab75750cd9a9f453",
+							"Ratio": 5,
+							"LeftRightSplit": 0.5,
+							"LimitedSlipRatio": 1.4,
+							"EngineTorqueRatio": 0.5
+						},
+						{
+							"LeftWheel": "e66cfcc52e19d5f6",
+							"RightWheel": "3b719222ad4823ce",
+							"Ratio": 5,
+							"LeftRightSplit": 0.5,
+							"LimitedSlipRatio": 2,
+							"EngineTorqueRatio": 0.5
+						}
+					],
+					"DifferentialLimitedSlipRatio": 1.6,
+					"AntiRollBars": [
+						{
+							"LeftWheel": "83dfb643e285d7cf",
+							"RightWheel": "ab75750cd9a9f453",
+							"Stiffness": 2000
+						},
+						{
+							"LeftWheel": "e66cfcc52e19d5f6",
+							"RightWheel": "3b719222ad4823ce",
+							"Stiffness": 1500
+						}
+					],
+					"MaxPitchRollAngle": 180,
+					"WheelCast": "Cylinder"
+				}
+			}
+		},
+		{
+			"ID": "83dfb643e285d7cf",
+			"Name": "FL",
+			"Parent": "4e9d9f4f94cb50ca",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.9, -0.35, -1.3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.35,
+					"Width": 0.25,
+					"SuspensionMinLength": 0.15,
+					"SuspensionMaxLength": 0.45,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 2,
+					"SpringDamping": 0.6,
+					"MaxSteerAngle": 35,
+					"MaxBrakeTorque": 2500,
+					"MaxHandBrakeTorque": 0,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "ab75750cd9a9f453",
+			"Name": "FR",
+			"Parent": "4e9d9f4f94cb50ca",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.9, -0.35, -1.3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.35,
+					"Width": 0.25,
+					"SuspensionMinLength": 0.15,
+					"SuspensionMaxLength": 0.45,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 2,
+					"SpringDamping": 0.6,
+					"MaxSteerAngle": 35,
+					"MaxBrakeTorque": 2500,
+					"MaxHandBrakeTorque": 0,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "e66cfcc52e19d5f6",
+			"Name": "RL",
+			"Parent": "4e9d9f4f94cb50ca",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.9, -0.35, 1.3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.35,
+					"Width": 0.25,
+					"SuspensionMinLength": 0.15,
+					"SuspensionMaxLength": 0.45,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 2,
+					"SpringDamping": 0.6,
+					"MaxSteerAngle": 0,
+					"MaxBrakeTorque": 2500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "3b719222ad4823ce",
+			"Name": "RR",
+			"Parent": "4e9d9f4f94cb50ca",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.9, -0.35, 1.3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.35,
+					"Width": 0.25,
+					"SuspensionMinLength": 0.15,
+					"SuspensionMaxLength": 0.45,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 2,
+					"SpringDamping": 0.6,
+					"MaxSteerAngle": 0,
+					"MaxBrakeTorque": 2500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "a51be1aa16e54f27",
+			"Name": "Cart",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-20, 0.62, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 400,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.6, 0.2, 1],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"WheeledVehicle": {
+					"Throttle": 0.5,
+					"Steering": 0,
+					"Brake": 0,
+					"HandBrake": 0,
+					"Gear": 1,
+					"Clutch": 0,
+					"MaxTorque": 500,
+					"MinRpm": 1000,
+					"MaxRpm": 6000,
+					"EngineInertia": 0.8,
+					"EngineDamping": 0.3,
+					"TorqueCurve": [
+						{
+							"X": 0,
+							"Y": 0.8
+						},
+						{
+							"X": 0.66,
+							"Y": 1
+						},
+						{
+							"X": 1,
+							"Y": 0.8
+						}
+					],
+					"Transmission": "Manual",
+					"GearRatios": [2.66, 1.78, 1.3, 1, 0.74],
+					"ReverseGearRatios": [-3.2, -1.6],
+					"SwitchTime": 0.5,
+					"ClutchReleaseTime": 0.3,
+					"SwitchLatency": 0.5,
+					"ShiftUpRpm": 4000,
+					"ShiftDownRpm": 2000,
+					"ClutchStrength": 12,
+					"Differentials": [
+						{
+							"LeftWheel": "77ab9799851f9e14",
+							"RightWheel": "971b7b5f6e9838de",
+							"Ratio": 4,
+							"LeftRightSplit": 0.45,
+							"LimitedSlipRatio": 0,
+							"EngineTorqueRatio": 1
+						}
+					],
+					"DifferentialLimitedSlipRatio": 1.4,
+					"AntiRollBars": [],
+					"MaxPitchRollAngle": 180,
+					"WheelCast": "Ray"
+				}
+			}
+		},
+		{
+			"ID": "21374cfc5755c2ce",
+			"Name": "FL",
+			"Parent": "a51be1aa16e54f27",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.6, -0.3, -0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.3,
+					"Width": 0.1,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 30,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 1.2,
+					"AngularDamping": 0.3,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "122a4138802aa1a3",
+			"Name": "FR",
+			"Parent": "a51be1aa16e54f27",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.6, -0.3, -0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.3,
+					"Width": 0.1,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 30,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 1.2,
+					"AngularDamping": 0.3,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "77ab9799851f9e14",
+			"Name": "RL",
+			"Parent": "a51be1aa16e54f27",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.6, -0.3, 0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.3,
+					"Width": 0.1,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 0,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 1.2,
+					"AngularDamping": 0.3,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "971b7b5f6e9838de",
+			"Name": "RR",
+			"Parent": "a51be1aa16e54f27",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.6, -0.3, 0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.3,
+					"Width": 0.1,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 0,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 1.2,
+					"AngularDamping": 0.3,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.06,
+							"Y": 1.2
+						},
+						{
+							"X": 0.2,
+							"Y": 1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 3,
+							"Y": 1.2
+						},
+						{
+							"X": 20,
+							"Y": 1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "520be0376fcfe761",
+			"Name": "Rig",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [80, 3.92, 0],
+					"Rotation": [0, 0.70710677, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 800,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.8, 0.3, 1.4],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"WheeledVehicle": {
+					"Throttle": 0,
+					"Steering": -0.5,
+					"Brake": 1,
+					"HandBrake": 1,
+					"Gear": 0,
+					"Clutch": 1,
+					"MaxTorque": 500,
+					"MinRpm": 1000,
+					"MaxRpm": 6000,
+					"EngineInertia": 0.5,
+					"EngineDamping": 0.2,
+					"TorqueCurve": [
+						{
+							"X": 0,
+							"Y": 0.8
+						},
+						{
+							"X": 0.66,
+							"Y": 1
+						},
+						{
+							"X": 1,
+							"Y": 0.8
+						}
+					],
+					"Transmission": "Auto",
+					"GearRatios": [2.66, 1.78, 1.3, 1, 0.74],
+					"ReverseGearRatios": [-2.9],
+					"SwitchTime": 0.5,
+					"ClutchReleaseTime": 0.3,
+					"SwitchLatency": 0.5,
+					"ShiftUpRpm": 4000,
+					"ShiftDownRpm": 2000,
+					"ClutchStrength": 10,
+					"Differentials": [
+						{
+							"LeftWheel": "22006b2abbe05d83",
+							"RightWheel": "3ea66ee7353ffd16",
+							"Ratio": 3.42,
+							"LeftRightSplit": 0.5,
+							"LimitedSlipRatio": 1.4,
+							"EngineTorqueRatio": 1
+						}
+					],
+					"DifferentialLimitedSlipRatio": 1.4,
+					"AntiRollBars": [],
+					"MaxPitchRollAngle": 60,
+					"WheelCast": "Sphere"
+				}
+			}
+		},
+		{
+			"ID": "ea8ba82923526dc9",
+			"Name": "FL",
+			"Parent": "520be0376fcfe761",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, -0.35, -1.1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.4,
+					"Width": 0.2,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0.05,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 30,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 0,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.08,
+							"Y": 1.3
+						},
+						{
+							"X": 0.3,
+							"Y": 1.1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 4,
+							"Y": 1.3
+						},
+						{
+							"X": 25,
+							"Y": 1.1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "b2225fd448d32754",
+			"Name": "FR",
+			"Parent": "520be0376fcfe761",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, -0.35, -1.1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.4,
+					"Width": 0.2,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0.05,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 30,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 0,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.08,
+							"Y": 1.3
+						},
+						{
+							"X": 0.3,
+							"Y": 1.1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 4,
+							"Y": 1.3
+						},
+						{
+							"X": 25,
+							"Y": 1.1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "22006b2abbe05d83",
+			"Name": "RL",
+			"Parent": "520be0376fcfe761",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, -0.35, 1.1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.4,
+					"Width": 0.2,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0.05,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 0,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.08,
+							"Y": 1.3
+						},
+						{
+							"X": 0.3,
+							"Y": 1.1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 4,
+							"Y": 1.3
+						},
+						{
+							"X": 25,
+							"Y": 1.1
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "3ea66ee7353ffd16",
+			"Name": "RR",
+			"Parent": "520be0376fcfe761",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, -0.35, 1.1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"VehicleWheel": {
+					"Radius": 0.4,
+					"Width": 0.2,
+					"SuspensionMinLength": 0.3,
+					"SuspensionMaxLength": 0.5,
+					"SuspensionPreload": 0.05,
+					"SpringFrequency": 1.5,
+					"SpringDamping": 0.5,
+					"MaxSteerAngle": 0,
+					"MaxBrakeTorque": 1500,
+					"MaxHandBrakeTorque": 4000,
+					"Inertia": 0.9,
+					"AngularDamping": 0.2,
+					"LongitudinalFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 0.08,
+							"Y": 1.3
+						},
+						{
+							"X": 0.3,
+							"Y": 1.1
+						}
+					],
+					"LateralFriction": [
+						{
+							"X": 0,
+							"Y": 0
+						},
+						{
+							"X": 4,
+							"Y": 1.3
+						},
+						{
+							"X": 25,
+							"Y": 1.1
+						}
+					]
+				}
+			}
+		}
+	]
+}

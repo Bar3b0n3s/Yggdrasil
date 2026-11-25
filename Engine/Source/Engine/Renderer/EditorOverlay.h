@@ -35,7 +35,8 @@ namespace Engine {
 	// No camera, non-Lit or Wireframe off: no output. M23 (C23.3): a deformed item (a skin its JointPalette covers, or a
 	// resolved morph weight that is not 0, MeshDrawItem's rule) shows the edges of its deformation (Asset/MeshDeform.h's
 	// DeformMeshVertices), culled by its deformed bounds (ComputeDeformedBounds); InvalidArgument for a palette or morph
-	// weight that is not finite.
+	// weight that is not finite. M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the snapshot's Meshes, then
+	// its static set's items cell by cell, with the same culling and checks.
 	[[nodiscard]] Status AppendWireframeOverlay(const RenderSnapshot& snapshot, AssetManager& assets, DebugDrawList& output);
 
 }

@@ -200,6 +200,178 @@ class PerfTests(unittest.TestCase):
         self.assertEqual(len(dropped.warnings), 1)
         self.assertIn("drew 2 of the 3", dropped.warnings[0])
 
+    def test_the_static_scenery_is_20000_static_entities_in_49_cells_in_bounded_batches(self) -> None:
+        # M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3 and its W43.3 record): a Static root over 10,000
+        # pairs of a root and its built-in mesh child on a 2 m grid, each child made after its parent, in edit.batch
+        # calls of at most 1,000 ops; budget 2 ms for the frame, none for the state hash.
+        ops = Perf.static_scenery_ops()
+        self.assertEqual(len(ops), 3 + 2 * Perf.STATIC_PAIRS)
+        self.assertEqual(Perf.STATIC_PAIRS, 10000)
+        self.assertEqual(ops[0]["params"], {"name": "Scenery", "components": {"Static": {}}})
+        made = {"/Scenery"}
+        meshes: list[dict[str, Any]] = []
+        for op in ops[3:]:
+            params = op["params"]
+            self.assertIn(params["parent"], made)
+            made.add(f"{params['parent']}/{params['name']}")
+            if "MeshRenderer" in params["components"]:
+                meshes.append(params)
+        self.assertEqual(len(made), 1 + 2 * Perf.STATIC_PAIRS)
+        self.assertEqual(len(meshes), Perf.STATIC_PAIRS)
+        self.assertEqual({params["components"]["MeshRenderer"]["Mesh"] for params in meshes},
+                         {Perf.BUILTIN_CUBE_MESH, "engine://Meshes/Sphere"})
+        places = [op["params"]["components"]["Transform"]["Translation"] for op in ops[3::2]]
+        cells = {(math.floor(x / 32.0), math.floor(z / 32.0)) for x, _, z in places}
+        self.assertEqual(len(cells), 49)
+        batches = Perf.static_scenery_batches()
+        self.assertTrue(all(0 < len(batch) <= Perf.EDIT_BATCH_OPS for batch in batches))
+        self.assertEqual([op for batch in batches for op in batch], ops)
+        self.assertEqual(perf.BUDGETS[Perf.STATIC_METRIC], 2.0)
+        self.assertNotIn(Perf.STATE_HASH_METRIC, perf.BUDGETS)
+        self.assertEqual(Perf.CAPTURE_PARTS[-1], "staticScenery")
+
+    def test_the_static_scenery_is_captured_only_when_the_game_view_drew_its_static_set_alone(self) -> None:
+        # The frame per rendered tick of the generated scene, and its play.state round trip less the median of an empty
+        # scene's; the scene just saved is played as the active scene (the editor refuses to open it again), the empty
+        # one is opened. The editor stands in a fake client here, the timings in fixed samples.
+        class FakeEditor:
+            def __init__(self, view: dict[str, Any], rebuilds: int) -> None:
+                self.active = ""
+                self.calls: list[str] = []
+                self.stats = {"staticCellRebuilds": rebuilds, "views": [{"name": "scene"}, {"name": "game", **view}]}
+
+            def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+                self.calls.append(method)
+                if method in ("scene.new", "scene.open"):
+                    if method == "scene.open" and params["path"] == self.active:
+                        raise engine_client.EngineError(method, -32000, "already open as the active scene", {})
+                    self.active = params["path"]
+                return self.stats if method == "stats.get" else {}
+
+        class FixedSamples(Perf.Capture):
+            hashes: list[list[float]] = []  # the static scene's round trips, then the empty one's
+
+            def step_chunks(self, client: Any, render: str) -> list[float]:
+                return [7.0, 6.9, 7.1] if render == "None" else []  # per tick, each call's one hash included
+
+            def extraction_ms(self, client: Any) -> float:
+                return 0.05
+
+            def state_round_trips(self, client: Any) -> list[float]:
+                return self.hashes.pop(0)
+
+        drawn = {"available": True, "cpuMilliseconds": 0.5, "staticItems": Perf.STATIC_PAIRS, "dynamicItems": 0,
+                 "staticCells": 49, "staticCellsVisible": 49, "shadowDraws": 4,
+                 "passes": [{"name": "ForwardOpaque", "drawCalls": 2}]}
+        capture = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        capture.hashes = [[210.0, 207.0, 205.0], [1.0, 1.0, 2.0]]
+        editor = FakeEditor(drawn, 0)
+        capture.static_scenery(editor)
+        self.assertEqual(capture.warnings, [])
+        self.assertEqual([metric.name for metric in capture.metrics], [Perf.STATIC_METRIC, Perf.STATE_HASH_METRIC])
+        # The tick less its call's hash (207 ms over 30 ticks: 6.9), the view's recording and an extraction.
+        self.assertAlmostEqual(capture.metrics[0].median, 0.1 + 0.5 + 0.05)
+        self.assertEqual(capture.metrics[0].budget, 2.0)
+        self.assertEqual(capture.metrics[1].median, 206.0)  # 207 less the empty scene's median of 1
+        self.assertIsNone(capture.metrics[1].budget)
+        batches = len(Perf.static_scenery_batches())
+        self.assertEqual(editor.calls, ["project.setSettings", "scene.new", "scene.save", "scene.new"]
+                         + ["edit.batch"] * batches
+                         + ["scene.save", "play.start", "play.step"] + ["play.step", "stats.get"] * Perf.SCENE_CHUNKS
+                         + ["play.stop", "scene.open", "play.start", "play.stop"])
+        self.assertEqual(editor.active, Perf.STATIC_EMPTY_SCENE)
+        for view, rebuilds in (({**drawn, "staticItems": Perf.STATIC_PAIRS - 1}, 0), ({**drawn, "dynamicItems": 1}, 0),
+                               (drawn, 1)):
+            with self.subTest(view=view, rebuilds=rebuilds):
+                dropped = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+                dropped.hashes = [[207.0], [1.0]]
+                dropped.static_scenery(FakeEditor(view, rebuilds))
+                self.assertEqual(dropped.metrics, [])
+                self.assertEqual(len(dropped.warnings), 1)
+                self.assertIn("not captured", dropped.warnings[0])
+
+    def test_a_profiler_traces_zone_has_its_mean_duration(self) -> None:
+        # M43: the static scenery's extraction part, from a profiler.capture trace (Chrome trace JSON, durations in us).
+        events = [{"ph": "X", "name": "ExtractRenderSnapshot", "dur": 40.0},
+                  {"ph": "X", "name": "ExtractRenderSnapshot", "dur": 60},
+                  {"ph": "X", "name": "Stage:Prepare", "dur": 900}, {"ph": "B", "name": "ExtractRenderSnapshot"}]
+        with tempfile.TemporaryDirectory(prefix="Perf-") as directory:
+            trace = Path(directory) / "trace.json"
+            trace.write_text(json.dumps({"traceEvents": events}), encoding="utf-8")
+            self.assertAlmostEqual(Perf.mean_zone_ms(trace, "ExtractRenderSnapshot"), 0.05)
+            with self.assertRaises(ValueError):
+                Perf.mean_zone_ms(trace, "FrameLoop::Render")
+            with self.assertRaises(ValueError):
+                Perf.mean_zone_ms(Path(directory) / "missing.json", "ExtractRenderSnapshot")
+
+    def test_the_sky_costs_sum_the_sky_rows_of_a_cove_with_a_relightable_volume(self) -> None:
+        # M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): sky/Static/gpuMs sums the SkyLuts, SkyIbl and
+        # Sky rows of a still sky, sky/Turning/gpuMs those and ProbeRelight with the sun turned every tick; budgets 0.3
+        # and 0.6 ms.
+        stats = {"views": [{"name": "game", "gpuAvailable": True, "passes": [
+            {"name": "SkyLuts", "gpuAvailable": True, "gpuMilliseconds": 0.0625},
+            {"name": "SkyIbl", "gpuAvailable": True, "gpuMilliseconds": 0.25},
+            {"name": "ProbeRelight", "gpuAvailable": True, "gpuMilliseconds": 0.125},
+            {"name": "Sky", "gpuAvailable": True, "gpuMilliseconds": 0.03125},
+            {"name": "ForwardOpaque", "gpuAvailable": True, "gpuMilliseconds": 3.0}]}]}
+        view = Perf.game_view(stats)
+        self.assertEqual(Perf.summed_gpu_time(view, Perf.SKY_STATIC_PASSES), 0.34375)
+        self.assertEqual(Perf.summed_gpu_time(view, Perf.SKY_TURNING_PASSES), 0.46875)
+        components = {op["params"]["name"]: op["params"]["components"] for op in Perf.sky_cove_ops()}
+        self.assertEqual(components["Sky"]["Sky"]["Sun"], "/Sun")
+        self.assertEqual(components["Sky"]["Sky"]["Moon"], "/Moon")
+        self.assertIn("DirectionalLight", components["Sun"])
+        self.assertIn("DirectionalLight", components["Moon"])
+        volume = components["Volume"]["IrradianceVolume"]
+        self.assertEqual((volume["ProbeCountX"], volume["ProbeCountY"], volume["ProbeCountZ"]), (8, 4, 8))
+        self.assertNotIn("Environment", components["Rendering"])
+        self.assertIn("Rotate", Perf.SKY_TURNER_SOURCE)
+        self.assertEqual(perf.BUDGETS[Perf.SKY_STATIC_METRIC], 0.3)
+        self.assertEqual(perf.BUDGETS[Perf.SKY_TURNING_METRIC], 0.6)
+
+    def test_the_sky_costs_are_captured_only_from_a_relightable_bake_a_still_sky_and_a_relit_turning_one(self) -> None:
+        class FakeEditor:
+            def __init__(self, relightable: bool) -> None:
+                self.relightable = relightable
+                self.calls: list[str] = []
+
+            def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+                self.calls.append(method)
+                if method == "lighting.bake":
+                    return {"irradianceVolumes": [{"relightable": self.relightable}], "reflectionProbes": []}
+                return {}
+
+        class FixedSamples(Perf.Capture):
+            still_updates = 0
+            relit = 1
+
+            def play_samples(self, client: Any, passes: tuple[str, ...]) -> tuple[list[float], dict[str, Any]]:
+                if "ProbeRelight" in passes:
+                    return [0.5, 0.375, 0.25], {"skyUpdates": 1, "relitIrradianceVolumes": self.relit}
+                return [0.25, 0.125, 0.0625], {"skyUpdates": self.still_updates, "relitIrradianceVolumes": 0}
+
+        capture = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        editor = FakeEditor(True)
+        capture.sky_cost(editor)
+        self.assertEqual(capture.warnings, [])
+        self.assertEqual(editor.calls, ["script.write", "scene.new", "edit.batch", "scene.save", "lighting.bake",
+                                        "scene.save", "entity.update"])
+        self.assertEqual([(metric.name, metric.median) for metric in capture.metrics],
+                         [(Perf.SKY_STATIC_METRIC, 0.125), (Perf.SKY_TURNING_METRIC, 0.375)])
+        unbaked = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        unbaked.sky_cost(FakeEditor(False))
+        self.assertEqual(unbaked.metrics, [])
+        self.assertEqual(len(unbaked.warnings), 1)
+        self.assertIn("did not bake relightable", unbaked.warnings[0])
+        moving = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        moving.still_updates = 1
+        moving.relit = 0
+        moving.sky_cost(FakeEditor(True))
+        self.assertEqual(moving.metrics, [])
+        self.assertEqual(len(moving.warnings), 2)
+        self.assertIn("still sky's light was regenerated", moving.warnings[0])
+        self.assertIn("relit", moving.warnings[1])
+
     def test_the_forest_cost_sums_the_depth_shadow_and_forward_rows_of_a_forest_with_levels(self) -> None:
         # M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): lod/Forest/gpuMs sums the
         # DepthNormal row, the Shadows pass's rows and the ForwardOpaque row over a generated forest of 2,000 trees with

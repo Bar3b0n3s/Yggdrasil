@@ -2,9 +2,11 @@
 
 #include "Engine/Scene/Scene.h"
 
+#include "Engine/Core/Random.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/TransformSystem.h"
@@ -31,6 +33,21 @@ namespace Engine {
 		return std::vector<UUID>(scene.GetCanonicalOrder().begin(), scene.GetCanonicalOrder().end());
 	}
 
+	// M43: the canonical order walked afresh from the root list (the order before segments), as handles.
+	static std::vector<entt::entity> ReferenceCanonicalHandles(const Scene& scene)
+	{
+		std::vector<entt::entity> order;
+		std::vector<UUID> stack(scene.GetRootEntities().rbegin(), scene.GetRootEntities().rend());
+		while (!stack.empty())
+		{
+			const ConstEntity entity = scene.FindEntityByID(stack.back());
+			stack.pop_back();
+			order.push_back(entity.GetHandle());
+			stack.insert(stack.end(), entity.GetChildren().rbegin(), entity.GetChildren().rend());
+		}
+		return order;
+	}
+
 	ENGINE_DEATH_TEST("Scene/CreateEntityWithUsedIDAsserts")
 	{
 		Test::SceneTestFixture fixture;
@@ -53,6 +70,27 @@ namespace Engine {
 		specification.IdGenerator = &generator;
 		static_cast<void>(Scene::Create(specification));
 	}
+
+#if defined(ENGINE_DEBUG)
+	// M43 (the lead's W43.1 review): a Static written past the scene's change hooks fails the next transform update's
+	// static-tag check.
+	ENGINE_DEATH_TEST("Scene/StaticWrittenPastChangeHooks")
+	{
+		Test::SceneTestFixture fixture;
+		Scene& scene = fixture.GetScene();
+		const Entity island = scene.CreateEntity("Island");
+		island.AddComponent<StaticComponent>();
+		static_cast<void>(scene.CreateEntity("Mill", island));
+		TransformSystem::Update(scene);
+		// Deliberately past the hooks: EnTT's patch fires on_update, which the scene does not follow; only Entity's component
+		// templates refresh the tags.
+		scene.GetRegistry().patch<StaticComponent>(island.GetHandle(), [](StaticComponent& component)
+		{
+			component.Scope = StaticScope::EntityOnly;
+		});
+		TransformSystem::Update(scene);
+	}
+#endif
 
 	TEST_SUITE("Scene")
 	{
@@ -649,6 +687,241 @@ namespace Engine {
 		TEST_CASE("Scene: construction asserts a frozen registry")
 		{
 			ENGINE_CHECK_DEATH("Scene/UnfrozenRegistryAsserts", "frozen type registry");
+		}
+
+		TEST_CASE("Scene: the structure revision moves with structural changes only")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			uint64_t structure = scene.GetStructureRevision();
+			const auto moved = [&scene, &structure]()
+			{
+				const bool changed = scene.GetStructureRevision() != structure;
+				structure = scene.GetStructureRevision();
+				return changed;
+			};
+
+			const Entity parent = scene.CreateEntity("Parent");
+			CHECK(moved());
+			const Entity child = scene.CreateEntity("Child", parent);
+			const Entity second = scene.CreateEntity("Second", parent);
+			CHECK(moved());
+
+			// Data writes move the revision, never the structure revision.
+			const uint64_t revision = scene.GetRevision();
+			child.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.x = 1.0f;
+			});
+			child.SetName("Renamed");
+			child.AddTag("Tagged");
+			child.AddComponent<StaticComponent>();
+			child.Patch<StaticComponent>([](StaticComponent& component)
+			{
+				component.Scope = StaticScope::EntityOnly;
+			});
+			child.RemoveComponent<StaticComponent>();
+			TransformSystem::Update(scene);
+			CHECK(scene.GetRevision() != revision);
+			CHECK_FALSE(moved());
+
+			// Enable and disable, sibling order, reparenting, destruction and Clear do.
+			child.SetActive(false);
+			CHECK(moved());
+			child.SetActive(true);
+			CHECK(moved());
+			REQUIRE(scene.SetParent(second, parent, 0u).has_value());
+			CHECK(moved());
+			REQUIRE(scene.SetParent(second, parent, 0u).has_value()); // already there: no change
+			CHECK_FALSE(moved());
+			REQUIRE(scene.SetParent(child, Entity{}).has_value());
+			CHECK(moved());
+			scene.DestroyEntity(child);
+			CHECK(moved());
+			scene.Clear();
+			CHECK(moved());
+		}
+
+		TEST_CASE("Scene: canonical segments equal the full canonical order after any structural edit")
+		{
+			// M43: random creations, destructions (pending in a runtime scene, then flushed), reparenting to and from the
+			// roots and sibling moves; after each edit the segments' order, keys and component collections match a fresh walk
+			// of the hierarchy.
+			for (const bool runtime : { false, true })
+			{
+				CAPTURE(runtime);
+				Test::SceneTestFixture fixture(3, runtime);
+				Scene& scene = fixture.GetScene();
+				Random random(0x5e6du + (runtime ? 1u : 0u));
+				std::vector<UUID> ids;
+				const auto pick = [&random, &ids, &scene]() -> Entity
+				{
+					while (!ids.empty())
+					{
+						const auto index = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(ids.size()) - 1));
+						if (const Entity entity = scene.FindEntityByID(ids[index]); entity.IsValid())
+							return entity;
+						ids[index] = ids.back();
+						ids.pop_back();
+					}
+					return Entity{};
+				};
+				for (int edit = 0; edit < 1500; ++edit)
+				{
+					CAPTURE(edit);
+					const Entity entity = pick();
+					const int64_t kind = entity.IsValid() ? random.RangeInt(0, 5) : 0;
+					if (kind <= 1)
+					{
+						const Entity parent = random.NextBool(0.75) ? pick() : Entity{};
+						const Entity created = parent.IsValid() ? scene.CreateEntity("Node", parent) : scene.CreateEntity("Node");
+						if (random.NextBool(0.1))
+							created.AddComponent<StaticComponent>();
+						ids.push_back(created.GetUUID());
+					}
+					else if (kind == 2)
+					{
+						if (random.NextBool(0.25))
+							scene.DestroyEntity(entity);
+					}
+					else if (kind == 3)
+					{
+						const Entity parent = random.NextBool(0.6) ? pick() : Entity{};
+						static_cast<void>(scene.SetParent(entity, parent, static_cast<uint32_t>(random.RangeInt(0, 4)), random.NextBool()));
+					}
+					else if (kind == 4)
+					{
+						static_cast<void>(scene.SetParent(entity, entity.GetParent(), static_cast<uint32_t>(random.RangeInt(0, 4))));
+					}
+					else
+					{
+						entity.SetActive(!entity.IsActiveSelf());
+					}
+					if (runtime && edit % 50 == 49)
+						scene.FlushPendingDestroys();
+					if (edit % 10 != 9)
+						continue;
+
+					const std::vector<entt::entity> expected = ReferenceCanonicalHandles(scene);
+					std::vector<entt::entity> order;
+					for (const UUID id : scene.GetCanonicalOrder())
+						order.push_back(scene.FindEntityByID(id).GetHandle());
+					CHECK(order == expected);
+					for (size_t index = 1; index < order.size(); ++index)
+						CHECK(scene.GetCanonicalKey(Entity(order[index - 1], &scene)) < scene.GetCanonicalKey(Entity(order[index], &scene)));
+					std::vector<entt::entity> collected;
+					scene.CollectCanonical<TransformComponent>(collected);
+					CHECK(collected == expected);
+					std::vector<entt::entity> shuffled = expected;
+					for (size_t index = shuffled.size(); index > 1; --index)
+						std::swap(shuffled[index - 1], shuffled[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(index) - 1))]);
+					scene.SortCanonical(shuffled);
+					CHECK(shuffled == expected);
+					std::vector<entt::entity> statics;
+					scene.CollectCanonical<StaticComponent>(statics);
+					std::vector<entt::entity> expectedStatics;
+					for (const entt::entity handle : expected)
+					{
+						if (scene.GetRegistry().all_of<StaticComponent>(handle))
+							expectedStatics.push_back(handle);
+					}
+					CHECK(statics == expectedStatics);
+				}
+				CHECK(scene.GetEntityCount() > 100);
+			}
+		}
+
+		TEST_CASE("Scene: Static marks its subtree, its entity alone, or no part of a subtree")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const auto withStatic = [](Entity entity, StaticScope scope)
+			{
+				entity.AddComponent<StaticComponent>(StaticComponent{ .Scope = scope });
+				return entity;
+			};
+			const auto isStatic = [](Entity entity)
+			{
+				return entity.HasComponent<HierarchyStaticTag>();
+			};
+			// Island (Subtree): Rocks and Rock under it; Mill (NotStatic) and Sail under it; Hut (EntityOnly) and Door under it.
+			const Entity island = withStatic(scene.CreateEntity("Island"), StaticScope::Subtree);
+			const Entity rocks = scene.CreateEntity("Rocks", island);
+			const Entity rock = scene.CreateEntity("Rock", rocks);
+			const Entity mill = withStatic(scene.CreateEntity("Mill", island), StaticScope::NotStatic);
+			const Entity sail = scene.CreateEntity("Sail", mill);
+			const Entity hut = withStatic(scene.CreateEntity("Hut", island), StaticScope::EntityOnly);
+			const Entity door = scene.CreateEntity("Door", hut);
+			// Crate (EntityOnly) as a root, its Lid not static; Boat without Static.
+			const Entity crate = withStatic(scene.CreateEntity("Crate"), StaticScope::EntityOnly);
+			const Entity lid = scene.CreateEntity("Lid", crate);
+			const Entity boat = scene.CreateEntity("Boat");
+
+			CHECK(isStatic(island));
+			CHECK(isStatic(rocks));
+			CHECK(isStatic(rock));
+			CHECK_FALSE(isStatic(mill));
+			CHECK_FALSE(isStatic(sail));
+			CHECK(isStatic(hut));
+			CHECK(isStatic(door)); // EntityOnly is passed by: the Island's Subtree decides
+			CHECK(isStatic(crate));
+			CHECK_FALSE(isStatic(lid));
+			CHECK_FALSE(isStatic(boat));
+
+			// A Scope write, a removal and reparenting refresh the subtree.
+			island.Patch<StaticComponent>([](StaticComponent& component)
+			{
+				component.Scope = StaticScope::EntityOnly;
+			});
+			CHECK(isStatic(island));
+			CHECK_FALSE(isStatic(rocks));
+			CHECK_FALSE(isStatic(door));
+			island.Patch<StaticComponent>([](StaticComponent& component)
+			{
+				component.Scope = StaticScope::Subtree;
+			});
+			CHECK(isStatic(rock));
+			REQUIRE(scene.SetParent(rock, mill).has_value());
+			CHECK_FALSE(isStatic(rock));
+			REQUIRE(scene.SetParent(boat, rocks).has_value());
+			CHECK(isStatic(boat));
+			const Entity pebble = scene.CreateEntity("Pebble", boat);
+			CHECK(isStatic(pebble));
+			mill.RemoveComponent<StaticComponent>();
+			CHECK(isStatic(mill));
+			CHECK(isStatic(sail));
+			CHECK(isStatic(rock));
+			island.RemoveComponent<StaticComponent>();
+			hut.RemoveComponent<StaticComponent>();
+			crate.RemoveComponent<StaticComponent>();
+			CHECK(scene.GetRegistry().view<HierarchyStaticTag>().empty());
+		}
+
+		TEST_CASE("Scene: a Static written past the scene's change hooks fails the Debug static-tag check")
+		{
+#if defined(ENGINE_DEBUG)
+			ENGINE_CHECK_DEATH("Scene/StaticWrittenPastChangeHooks", "Stale static tag of entity '/Island/Mill'");
+#else
+			// Without the check (Release, Dist) the tags keep the rule of the Scope the scene last saw, until a write through
+			// Entity's templates refreshes them, which is why Debug runs check every update.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			const Entity mill = scene.CreateEntity("Mill", island);
+			TransformSystem::Update(scene);
+			scene.GetRegistry().patch<StaticComponent>(island.GetHandle(), [](StaticComponent& component)
+			{
+				component.Scope = StaticScope::EntityOnly;
+			});
+			TransformSystem::Update(scene);
+			CHECK(mill.HasComponent<HierarchyStaticTag>());
+			island.Patch<StaticComponent>([](StaticComponent& component)
+			{
+				component.Scope = StaticScope::EntityOnly;
+			});
+			CHECK_FALSE(mill.HasComponent<HierarchyStaticTag>());
+#endif
 		}
 	}
 

@@ -188,6 +188,18 @@ namespace Engine {
 		// Whether the creation of a binding set of `desc` for `layout` must fail as if out of device memory: the selector's
 		// answer (SetBindingSetCreationFault), false without one. Main thread.
 		[[nodiscard]] bool ShouldFailBindingSetCreation(const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& layout) const;
+
+		// M45 (W45.2, Docs/Decisions/0063-m45-sky-and-time-of-day.md): a test's out-of-memory textures. While a selector is set,
+		// GraphicsDevice::CreateTexture fails with Gpu, without calling NVRHI, every creation whose description it selects. The
+		// fault sits before NVRHI, as the binding sets' does, because a failed vkCreateImage below it trips NVRHI's own
+		// assertion in a Debug build (ASSERT_VK_OK in createTexture). Set and cleared (an empty selector) on the main thread,
+		// which creates every texture a test selects; never in Dist (GpuTestHooksEnabled, asserted), where
+		// ShouldFailSelectedTextureCreation is always false.
+		using TextureFaultSelector = std::function<bool(const nvrhi::TextureDesc& desc)>;
+		void SetTextureCreationFault(TextureFaultSelector selector);
+		// Whether the creation of a texture of `desc` must fail as if out of device memory: the selector's answer
+		// (SetTextureCreationFault), false without one. Main thread.
+		[[nodiscard]] bool ShouldFailSelectedTextureCreation(const nvrhi::TextureDesc& desc) const;
 	private:
 		// M18 (C18.4): the shared rule of the Take functions: whether a fault of `onceFault` or `persistentFault` strikes now,
 		// once armed (ArmInjectedFault), the once fault only at its first call.
@@ -207,6 +219,8 @@ namespace Engine {
 		std::atomic<uint8_t> m_InjectedFaultArming{ 0 };
 		// M42: SetBindingSetCreationFault's selector (main thread).
 		BindingSetFaultSelector m_BindingSetFault{};
+		// M45: SetTextureCreationFault's selector (main thread).
+		TextureFaultSelector m_TextureFault{};
 	};
 
 	// The fatal error a failed Vulkan result becomes (§4.6 item 2, §8.14 item 6): VK_ERROR_DEVICE_LOST is DeviceLost,

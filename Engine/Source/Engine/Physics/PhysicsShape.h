@@ -29,7 +29,8 @@
 // shapes are created only through JPH::ShapeSettings::Create (a ShapeResult error becomes PHYSICS_INVALID_SHAPE with Jolt's
 // message) and scales are checked with Shape::IsValidScale before they are applied.
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 5).
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 5). M44 appends CheckDynamicBody's overload with
+// a mass override (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), reviewed as a change to a frozen interface.
 
 namespace Engine {
 
@@ -192,6 +193,14 @@ namespace Engine {
 		// shape without volume, or one whose inertia at `mass` exceeds 1e18 kg m^2 (beyond it Jolt's float decomposition of
 		// the inertia overflows: a box of MaxPhysicsMass about 75 km across).
 		[[nodiscard]] Status CheckDynamicBody(float mass, PhysicsDofs allowedDofs) const;
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): CheckDynamicBody for a body whose
+		// BodyDescription::MassOverride is `massOverride`, the check PhysicsWorld::CreateBody and SetShape make of it (its mass
+		// properties translated by the centre-of-mass offset before they are scaled to `mass`, its inertia then scaled by
+		// InertiaScale), so the edit-time validation refuses the same bodies. The identity override gives exactly the
+		// two-argument result. Errors: the two-argument function's, and InvalidArgument for an offset component that is not
+		// finite or above MaxColliderSize in magnitude, or an InertiaScale component that is not finite or outside
+		// [MinPhysicsInertiaScale, MaxPhysicsInertiaScale].
+		[[nodiscard]] Status CheckDynamicBody(float mass, PhysicsDofs allowedDofs, const PhysicsMassOverride& massOverride) const;
 
 		// The bounds of the whole shape in body space.
 		[[nodiscard]] Aabb GetLocalBounds() const;

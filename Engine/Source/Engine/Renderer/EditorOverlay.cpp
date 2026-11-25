@@ -7,6 +7,7 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/MeshDeform.h"
 #include "Engine/Renderer/RenderPrepare.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 
 #include <algorithm>
 #include <array>
@@ -335,8 +336,22 @@ namespace Engine {
 		ENGINE_TRY(Utils::OverlayValidateCamera(snapshot.Camera));
 		DebugDrawList pending = output;
 		const glm::dvec3 towardCamera = glm::dvec3(glm::inverse(glm::dmat4(snapshot.Camera.View))[2]);
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the dynamic items, then the static set's, cell by cell.
+		std::vector<const MeshDrawItem*> items;
+		items.reserve(snapshot.Meshes.size());
 		for (const MeshDrawItem& item : snapshot.Meshes)
+			items.push_back(&item);
+		if (snapshot.StaticSet != nullptr)
 		{
+			for (const Ref<const RenderStaticCell>& cell : snapshot.StaticSet->Cells)
+			{
+				for (const MeshDrawItem& item : cell->Items)
+					items.push_back(&item);
+			}
+		}
+		for (const MeshDrawItem* drawn : items)
+		{
+			const MeshDrawItem& item = *drawn;
 			if (!Utils::OverlayFiniteMatrix(item.World) || item.World[0][3] != 0.0f || item.World[1][3] != 0.0f || item.World[2][3] != 0.0f || item.World[3][3] != 1.0f)
 				return MakeError(ErrorCode::InvalidArgument, "Wireframe transforms must be finite and affine");
 			if (!item.Mesh.IsValid())

@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_MASS_UNUSED"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

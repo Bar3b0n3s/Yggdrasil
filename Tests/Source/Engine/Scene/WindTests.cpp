@@ -2,10 +2,16 @@
 
 #include "Engine/Scene/Wind.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/WindComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Support/SceneTestFixture.h"
 
 #include <array>
@@ -17,7 +23,9 @@
 
 // The scene's wind (M46; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3F): SampleWind in double
 // precision with IEEE-exact operations, floor and sqrt, so its bits are committed and the Debug and Release unit runs both
-// check them (decision 6), and FindSceneWind.
+// check them (decision 6), and FindSceneWind. Render extraction's case of M46's data (a MeshRenderer's RenderDistance and
+// the scene's Wind) is here too: RenderExtractionTests.cpp reached MSVC's section limit at phase 8's landing (C1128 in
+// Debug), so each later milestone's extraction case lives in its own unit's file.
 
 namespace Engine {
 
@@ -39,6 +47,14 @@ namespace Engine {
 		{
 			return std::format("{:#018x} {:#018x} {:#018x}", std::bit_cast<uint64_t>(value.x), std::bit_cast<uint64_t>(value.y),
 				std::bit_cast<uint64_t>(value.z));
+		}
+
+		// A MeshRenderer drawing `mesh` with its default materials.
+		MeshRendererComponent MakeMeshRenderer(AssetHandle mesh)
+		{
+			MeshRendererComponent renderer;
+			renderer.Mesh = TypedAssetHandle<AssetType::Mesh>(mesh);
+			return renderer;
 		}
 
 	}
@@ -140,6 +156,45 @@ namespace Engine {
 			early.AddComponent<WindComponent>(again);
 			REQUIRE(FindSceneWind(scene) != nullptr);
 			CHECK(FindSceneWind(scene)->Strength == 2.0f);
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3G): a MeshRenderer's RenderDistance
+		// rides on its item (the defaults without one), and the effectively enabled Wind reaches the snapshot with the request's
+		// SimulationTime as its Time (none without one).
+		TEST_CASE("RenderExtraction: a mesh's RenderDistance and the scene's Wind reach the snapshot at the request's time")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity plain = scene.CreateEntity("Plain");
+			plain.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			Entity distant = scene.CreateEntity("Distant");
+			distant.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			distant.AddComponent<RenderDistanceComponent>(RenderDistanceComponent{ .CullDistance = 250.0f, .LodBias = 2.5f, .ShadowLodOffset = 3, .FadeWidth = 0.2f });
+			TransformSystem::Update(scene);
+			Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 2);
+			CHECK(snapshot->Meshes[0].Distance == MeshDrawDistance{});
+			CHECK(snapshot->Meshes[1].Distance == MeshDrawDistance{ .CullDistance = 250.0f, .LodBias = 2.5f, .ShadowLodOffset = 3, .FadeWidth = 0.2f });
+			CHECK_FALSE(snapshot->Wind.Enabled);
+			CHECK(snapshot->Wind == RenderWind{});
+
+			Entity weather = scene.CreateEntity("Weather");
+			weather.AddComponent<WindComponent>(WindComponent{ .Direction = glm::vec3(0.0f, 0.0f, -3.0f), .Strength = 18.0f, .GustStrength = 6.0f, .GustFrequency = 0.4f, .Turbulence = 0.7f });
+			TransformSystem::Update(scene);
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			CHECK(snapshot->Wind == RenderWind{ .Enabled = true, .Direction = glm::vec3(0.0f, 0.0f, -3.0f), .Strength = 18.0f, .GustStrength = 6.0f, .GustFrequency = 0.4f, .Turbulence = 0.7f, .Time = 12.5 });
+			// An edit-time request (time 0) shows the wind without its sway's progress; a disabled Wind does not blow.
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE(snapshot.has_value());
+			CHECK(snapshot->Wind.Enabled);
+			CHECK(snapshot->Wind.Time == 0.0);
+			weather.SetActive(false);
+			TransformSystem::Update(scene);
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
+			REQUIRE(snapshot.has_value());
+			CHECK_FALSE(snapshot->Wind.Enabled);
 		}
 	}
 

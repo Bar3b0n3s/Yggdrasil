@@ -130,7 +130,10 @@ namespace Engine {
 			Entity AddSource(std::string_view name, AssetHandle clip, const glm::vec3& position, bool playOnStart = true, bool spatial = true)
 			{
 				Entity entity = GetScene().CreateEntity(name);
-				entity.GetComponent<TransformComponent>().Translation = position;
+				entity.Patch<TransformComponent>([&position](TransformComponent& transform)
+				{
+					transform.Translation = position;
+				});
 				AudioSourceComponent source;
 				source.Clip.SetHandle(clip);
 				source.PlayOnStart = playOnStart;
@@ -247,7 +250,10 @@ namespace Engine {
 				fixture.GetEngine().StartCapture();
 				for (int frame = 0; frame < 120; ++frame)
 				{
-					moving.GetComponent<TransformComponent>().Translation.x += 0.1f;
+					moving.Patch<TransformComponent>([](TransformComponent& transform)
+					{
+						transform.Translation.x += 0.1f;
+					});
 					fixture.Frame(system);
 					if (frame == 60)
 						CHECK(system.PlayOneShot(effect, glm::vec3(2.0f, 0.0f, 0.0f), 0.5f).has_value());
@@ -792,7 +798,10 @@ namespace Engine {
 			system.Start();
 			fixture.Frame(system);
 			CHECK(fixture.GetEngine().GetVoices().front().Transform.Velocity == glm::vec3(0.0f));
-			source.GetComponent<TransformComponent>().Translation = glm::vec3(1.0f, 0.0f, 0.0f);
+			source.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 0.0f, 0.0f);
+			});
 			fixture.Frame(system);
 			// One metre in 1/60 s.
 			CHECK(fixture.GetEngine().GetVoices().front().Transform.Velocity.x == doctest::Approx(60.0f));
@@ -814,20 +823,32 @@ namespace Engine {
 			system.Start();
 			fixture.Frame(system);
 			// 5 m in 1/60 s is 300 m/s: motion.
-			source.GetComponent<TransformComponent>().Translation = glm::vec3(5.0f, 0.0f, 0.0f);
+			source.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(5.0f, 0.0f, 0.0f);
+			});
 			fixture.Frame(system);
 			CHECK(fixture.GetEngine().GetVoices().front().Transform.Velocity.x == doctest::Approx(300.0f));
 			// 10 m more in 1/60 s is 600 m/s: a jump.
-			source.GetComponent<TransformComponent>().Translation = glm::vec3(15.0f, 0.0f, 0.0f);
+			source.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(15.0f, 0.0f, 0.0f);
+			});
 			fixture.Frame(system);
 			CHECK(fixture.GetEngine().GetVoices().front().Transform.Velocity == glm::vec3(0.0f));
 			// The listener is held to the same rule: 100 m in one frame.
-			listener.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 100.0f);
+			listener.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 100.0f);
+			});
 			fixture.Frame(system);
 			CHECK(fixture.GetEngine().GetListener().Position == glm::vec3(0.0f, 0.0f, 100.0f));
 			CHECK(fixture.GetEngine().GetListener().Velocity == glm::vec3(0.0f));
 			// The frame after a jump measures from the new position.
-			listener.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 101.0f);
+			listener.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 101.0f);
+			});
 			fixture.Frame(system);
 			CHECK(fixture.GetEngine().GetListener().Velocity.z == doctest::Approx(60.0f));
 		}
@@ -850,7 +871,10 @@ namespace Engine {
 			// A fixed step moved the body from x = 0 (the interpolation snapshot's previous pose) to x = 1; the frame's alpha
 			// is 0.25, so it is drawn at x = 0.25, a quarter metre on in 1/60 s.
 			source.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = glm::mat4(1.0f) });
-			source.GetComponent<TransformComponent>().Translation = glm::vec3(1.0f, 0.0f, 0.0f);
+			source.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 0.0f, 0.0f);
+			});
 			scene.SetInterpolationAlpha(0.25f);
 			fixture.Frame(system);
 			AudioVoiceInfo voice = fixture.GetEngine().GetVoices().front();
@@ -865,14 +889,20 @@ namespace Engine {
 
 			// Teleported (InterpolationResetTag, PlaySession::MarkTeleported): drawn and heard at its current pose, with no
 			// velocity, although 2.5 m in 1/60 s is slower than sound.
-			source.GetComponent<TransformComponent>().Translation = glm::vec3(3.0f, 0.0f, 0.0f);
+			source.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.0f, 0.0f, 0.0f);
+			});
 			source.AddComponent<InterpolationResetTag>();
 			fixture.Frame(system);
 			voice = fixture.GetEngine().GetVoices().front();
 			CHECK(voice.Transform.Position.x == doctest::Approx(3.0f));
 			CHECK(voice.Transform.Velocity == glm::vec3(0.0f));
 			// Written outside the fixed steps on the next frame as well (a script's OnUpdate): a pose that stays reset moves.
-			source.GetComponent<TransformComponent>().Translation = glm::vec3(3.5f, 0.0f, 0.0f);
+			source.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.5f, 0.0f, 0.0f);
+			});
 			fixture.Frame(system);
 			voice = fixture.GetEngine().GetVoices().front();
 			CHECK(voice.Transform.Position.x == doctest::Approx(3.5f));
@@ -893,7 +923,10 @@ namespace Engine {
 			// A fixed step moved the rig from z = 0 to z = 2; at alpha 0.5 the ear is drawn at z = 1, a metre on in 1/60 s.
 			rig.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = glm::mat4(1.0f) });
 			ear.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = glm::mat4(1.0f) });
-			rig.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 2.0f);
+			rig.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 2.0f);
+			});
 			scene.SetInterpolationAlpha(0.5f);
 			fixture.Frame(system);
 			AudioListenerPose pose = fixture.GetEngine().GetListener();
@@ -906,7 +939,10 @@ namespace Engine {
 			CHECK(pose.Velocity.z == doctest::Approx(30.0f));
 
 			// The rig is teleported 2.5 m on: the ear's pose stops interpolating with its ancestor's and has no velocity.
-			rig.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 4.0f);
+			rig.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 4.0f);
+			});
 			rig.AddComponent<InterpolationResetTag>();
 			fixture.Frame(system);
 			pose = fixture.GetEngine().GetListener();
@@ -1088,7 +1124,10 @@ namespace Engine {
 			AudioSceneFixture fixture;
 			Entity camera = fixture.GetScene().CreateEntity("Camera");
 			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
-			camera.GetComponent<TransformComponent>().Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			});
 			TransformSystem::Update(fixture.GetScene());
 			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
 			system.Start();
@@ -1101,8 +1140,11 @@ namespace Engine {
 			CHECK(pose.Velocity == glm::vec3(0.0f));
 
 			// Half a metre along +X in 1/60 s; a quarter turn about +Y looks down -X.
-			camera.GetComponent<TransformComponent>().Translation.x += 0.5f;
-			camera.GetComponent<TransformComponent>().Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(0.0f, 90.0f, 0.0f));
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.x += 0.5f;
+				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(0.0f, 90.0f, 0.0f));
+			});
 			fixture.Frame(system);
 			pose = fixture.GetEngine().GetListener();
 			CHECK(pose.Position == glm::vec3(1.5f, 2.0f, 3.0f));
@@ -1138,6 +1180,95 @@ namespace Engine {
 				CHECK(MeasureAudioLevels(fixture.Frame(system)).Peak == 0.0f);
 			}
 			CHECK(warned.GetMatchCount() == 1);
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): Start and Update walk the AudioSource view in canonical
+		// order, so voices start in canonical order whatever order the components were added in, and an update visits the
+		// sources only (the scene's EntitiesVisited).
+		TEST_CASE("AudioSystem: sources start in canonical order whatever order their components were added in, and an update visits only them")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			Scene& scene = fixture.GetScene();
+			Entity first = scene.CreateEntity("First");
+			Entity second = scene.CreateEntity("Second");
+			Entity third = scene.CreateEntity("Third");
+			for (int index = 0; index < 8; ++index)
+				static_cast<void>(scene.CreateEntity("Prop"));
+			AudioSourceComponent source;
+			source.Clip.SetHandle(clip);
+			source.PlayOnStart = true;
+			source.Loop = true;
+			third.AddComponent<AudioSourceComponent>(source);
+			first.AddComponent<AudioSourceComponent>(source);
+			second.AddComponent<AudioSourceComponent>(source);
+			TransformSystem::Update(scene);
+			AudioSystem system(scene, fixture.GetSpecification());
+			system.Start();
+			std::vector<AudioVoiceInfo> voices = fixture.GetEngine().GetVoices();
+			REQUIRE(voices.size() == 3);
+			CHECK(voices[0].Owner == first.GetUUID().GetValue());
+			CHECK(voices[1].Owner == second.GetUUID().GetValue());
+			CHECK(voices[2].Owner == third.GetUUID().GetValue());
+
+			TransformSystem::Update(scene);
+			const uint64_t visited = scene.GetEntitiesVisited();
+			system.Update(1.0 / 60.0);
+			CHECK(scene.GetEntitiesVisited() - visited == 3);
+
+			// Sources added during play start at the next update, in canonical order too: Late before Later, the reverse of the
+			// order their components were added in.
+			Entity late = scene.CreateEntity("Late");
+			Entity later = scene.CreateEntity("Later");
+			later.AddComponent<AudioSourceComponent>(source);
+			late.AddComponent<AudioSourceComponent>(source);
+			fixture.Frame(system);
+			voices = fixture.GetEngine().GetVoices();
+			REQUIRE(voices.size() == 5);
+			CHECK(voices[3].Owner == late.GetUUID().GetValue());
+			CHECK(voices[4].Owner == later.GetUUID().GetValue());
+		}
+
+		// M43: the listener rule and the audio checks read the AudioListener and AudioSource views in canonical order, so a
+		// reparent that changes the order changes which listener is first, whatever order the components were added in.
+		TEST_CASE("AudioSystem: the first primary listener and the extra listeners follow canonical order after a reparent")
+		{
+			Test::SceneTestFixture fixture(1, false);
+			Scene& scene = fixture.GetScene();
+			Entity first = scene.CreateEntity("First");
+			Entity second = scene.CreateEntity("Second");
+			second.AddComponent<AudioListenerComponent>();
+			first.AddComponent<AudioListenerComponent>();
+			AudioListenerSelection selection = SelectAudioListener(scene);
+			CHECK(selection.Entity == first.GetUUID());
+			CHECK(selection.PrimaryListenerCount == 2);
+			std::vector<AudioSceneIssue> issues = FindAudioSceneIssues(scene);
+			REQUIRE(issues.size() == 1);
+			CHECK(issues[0].Entity == second.GetUUID());
+
+			// Second to the front of the roots, then First below it: Second comes first.
+			REQUIRE(scene.SetParent(second, Entity{}, 0u).has_value());
+			REQUIRE(scene.SetParent(first, second).has_value());
+			selection = SelectAudioListener(scene);
+			CHECK(selection.Entity == second.GetUUID());
+			issues = FindAudioSceneIssues(scene);
+			REQUIRE(issues.size() == 1);
+			CHECK(issues[0].Entity == first.GetUUID());
+
+			// Spatial sources without any listener or camera: AUDIO_NO_LISTENER names the first in canonical order.
+			Test::SceneTestFixture silent(1, false);
+			Scene& unheard = silent.GetScene();
+			Entity early = unheard.CreateEntity("Early");
+			Entity tail = unheard.CreateEntity("Tail");
+			AudioSourceComponent spatial;
+			spatial.Spatial = true;
+			tail.AddComponent<AudioSourceComponent>(spatial);
+			early.AddComponent<AudioSourceComponent>(spatial);
+			issues = FindAudioSceneIssues(unheard);
+			REQUIRE(issues.size() == 1);
+			CHECK(issues[0].Code == AudioNoListenerCode);
+			CHECK(issues[0].Entity == early.GetUUID());
 		}
 	}
 

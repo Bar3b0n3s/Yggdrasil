@@ -492,7 +492,10 @@ namespace Engine {
 			REQUIRE(ComponentAccess::SetFieldValue(parent, "Transform", "Translation", Value::FromVec3({ 5.0f, 0.0f, 0.0f })));
 			// An unrelated entity that no scene copy can serialize: a non-finite position written past validation.
 			const Entity unrelated = scene.CreateEntity("Unrelated");
-			unrelated.GetComponent<TransformComponent>().Translation.x = std::numeric_limits<float>::quiet_NaN();
+			unrelated.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.x = std::numeric_limits<float>::quiet_NaN();
+			});
 			REQUIRE_FALSE(SceneSerializer::ToJson(scene));
 			ReflectedEditController edits(editor);
 			REQUIRE(edits.Begin({ .Entities = { child.GetUUID() }, .Component = "Transform", .FieldPath = "WorldPosition" }));
@@ -504,7 +507,11 @@ namespace Engine {
 			REQUIRE_FALSE(blocked);
 			CHECK(child.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
 			CHECK(editor.GetHistory().GetUndoCount() == 0);
-			unrelated.GetComponent<TransformComponent>().Translation.x = 0.0f;
+			// Repaired as a runtime system writes, through the registry: the scene revision the edit began at stays.
+			scene.GetRegistry().patch<TransformComponent>(unrelated.GetHandle(), [](TransformComponent& transform)
+			{
+				transform.Translation.x = 0.0f;
+			});
 			REQUIRE(edits.Commit());
 			CHECK(child.GetComponent<TransformComponent>().Translation.x == doctest::Approx(2.0f));
 			CHECK(editor.GetHistory().GetUndoCount() == 1);

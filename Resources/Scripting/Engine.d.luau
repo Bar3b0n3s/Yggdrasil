@@ -206,6 +206,9 @@ export type Space = "Local" | "World"
 -- The sample count of screen-space ambient occlusion (GTAO).
 export type SsaoQuality = "Low" | "Medium" | "High"
 
+-- The part of the hierarchy a Static component covers.
+export type StaticScope = "Subtree" | "EntityOnly" | "NotStatic"
+
 -- What a terrain stroke does.
 export type TerrainTool = "Raise" | "Lower" | "Smooth" | "Flatten" | "Paint"
 
@@ -269,6 +272,12 @@ export type UiWidgetKind = "Canvas" | "Panel" | "Image" | "Text" | "Button" | "T
 -- What project.validate checks.
 export type ValidationScope = "Project" | "Scene"
 
+-- Whether a WheeledVehicle's gears change by themselves.
+export type VehicleTransmissionMode = "Auto" | "Manual"
+
+-- How a WheeledVehicle's wheels find the ground under them.
+export type VehicleWheelCast = "Ray" | "Sphere" | "Cylinder"
+
 -- Which view viewport.screenshot renders.
 export type ViewportView = "Scene" | "Game"
 
@@ -303,7 +312,7 @@ export type MusicState = {Clip: AssetRef, Intro: AssetRef?, Volume: number, Loop
 export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
 
 -- The performance readout of Application.GetStats: frame-paced observations, never simulation state.
-export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, LodCrossFades: number, DistanceCulledMeshes: number}
+export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number, TransformsUpdated: number, EntitiesVisited: number, StaticCellRebuilds: number, StaticItems: number, StaticCellsVisible: number, SkyUpdates: number, LodCrossFades: number, DistanceCulledMeshes: number}
 
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
@@ -715,12 +724,14 @@ declare extern type Entity with
 	GetChildren: (self: Entity) -> {Entity}
 	-- Get a component proxy, or nil when absent. [All modes; Runtime|Test; pure/read]
 	function GetComponent(self, name: "Transform"): Transform?
+	function GetComponent(self, name: "Static"): Static?
 	function GetComponent(self, name: "MeshRenderer"): MeshRenderer?
 	function GetComponent(self, name: "Camera"): Camera?
 	function GetComponent(self, name: "DirectionalLight"): DirectionalLight?
 	function GetComponent(self, name: "PointLight"): PointLight?
 	function GetComponent(self, name: "SpotLight"): SpotLight?
 	function GetComponent(self, name: "Environment"): Environment?
+	function GetComponent(self, name: "Sky"): Sky?
 	function GetComponent(self, name: "PostProcess"): PostProcess?
 	function GetComponent(self, name: "Text"): Text?
 	function GetComponent(self, name: "RigidBody"): RigidBody?
@@ -730,6 +741,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "MeshCollider"): MeshCollider?
 	function GetComponent(self, name: "CharacterController"): CharacterController?
 	function GetComponent(self, name: "ColliderSurface"): ColliderSurface?
+	function GetComponent(self, name: "MassProperties"): MassProperties?
 	function GetComponent(self, name: "AudioSource"): AudioSource?
 	function GetComponent(self, name: "AudioListener"): AudioListener?
 	function GetComponent(self, name: "Script"): Script?
@@ -770,6 +782,8 @@ declare extern type Entity with
 	function GetComponent(self, name: "SliderJoint"): SliderJoint?
 	function GetComponent(self, name: "DistanceJoint"): DistanceJoint?
 	function GetComponent(self, name: "FixedJoint"): FixedJoint?
+	function GetComponent(self, name: "WheeledVehicle"): WheeledVehicle?
+	function GetComponent(self, name: "VehicleWheel"): VehicleWheel?
 	function GetComponent(self, name: "RenderDistance"): RenderDistance?
 	function GetComponent(self, name: "Wind"): Wind?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
@@ -800,6 +814,8 @@ declare extern type Entity with
 	IsValid: (self: Entity) -> boolean
 	-- The entity's Light2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Light2D: Light2D?
+	-- The entity's MassProperties component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	MassProperties: MassProperties?
 	-- The entity's MaterialParameters component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	MaterialParameters: MaterialParameters?
 	-- The entity's MeshCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -840,6 +856,8 @@ declare extern type Entity with
 	SetParent: (self: Entity, parent: Entity?, keepWorld: boolean?) -> ()
 	-- The entity's SkinnedMesh component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SkinnedMesh: SkinnedMesh?
+	-- The entity's Sky component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Sky: Sky?
 	-- The entity's SliderJoint component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SliderJoint: SliderJoint?
 	-- The entity's SphereCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -850,6 +868,8 @@ declare extern type Entity with
 	SpriteAnimator: SpriteAnimator?
 	-- The entity's SpriteRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SpriteRenderer: SpriteRenderer?
+	-- The entity's Static component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Static: Static?
 	-- The entity's Terrain component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Terrain: Terrain?
 	-- The entity's TerrainCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -884,6 +904,10 @@ declare extern type Entity with
 	UiTextInput: UiTextInput?
 	-- The entity's UiToggle component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiToggle: UiToggle?
+	-- The entity's VehicleWheel component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	VehicleWheel: VehicleWheel?
+	-- The entity's WheeledVehicle component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	WheeledVehicle: WheeledVehicle?
 	-- The entity's Wind component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Wind: Wind?
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
@@ -950,7 +974,7 @@ declare extern type Fog with
 	MaxOpacity: number
 	-- The view depth, in metres, where fog begins. [All modes; Runtime|Test; pure/read; setter mutates]
 	StartDistance: number
-	-- How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow. [All modes; Runtime|Test; pure/read; setter mutates]
 	SunGlow: number
 	-- How tightly the sun glow gathers around the light's direction: higher is tighter. [All modes; Runtime|Test; pure/read; setter mutates]
 	SunGlowExponent: number
@@ -1032,6 +1056,14 @@ declare extern type Light2D with
 	Radius: number
 	-- Whether the light is a point light around the entity or a global light of the whole view. [All modes; Runtime|Test; pure/read; setter mutates]
 	Type: Light2DType
+end
+
+-- Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright.
+declare extern type MassProperties with
+	-- Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it. [All modes; Runtime|Test; pure/read; setter mutates]
+	CenterOfMassOffset: vector
+	-- Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less. [All modes; Runtime|Test; pure/read; setter mutates]
+	InertiaScale: vector
 end
 
 -- Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes.
@@ -1490,6 +1522,38 @@ declare extern type SkinnedMesh with
 	SetMorphWeight: (self: SkinnedMesh, target: string, weight: number) -> ()
 end
 
+-- The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud layer; it lights the scene in the Environment's place.
+declare extern type Sky with
+	-- How fast the cloud layer drifts, in metres per second of simulation time along world X and Z. [All modes; Runtime|Test; pure/read; setter mutates]
+	CloudSpeed: vector
+	-- The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows. [All modes; Runtime|Test; pure/read; setter mutates]
+	Clouds: number
+	-- Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read. [All modes; Runtime|Test; pure/read; setter mutates]
+	DriveLights: boolean
+	-- The linear albedo of the atmosphere's ground, which brightens the sky above it. [All modes; Runtime|Test; pure/read; setter mutates]
+	GroundAlbedo: Color
+	-- The density of the atmosphere's aerosols, a multiple of a clear day's (1). [All modes; Runtime|Test; pure/read; setter mutates]
+	Haze: number
+	-- The unitless strength of the sky's radiance and of the image-based light it gives. [All modes; Runtime|Test; pure/read; setter mutates]
+	Intensity: number
+	-- The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun. [All modes; Runtime|Test; pure/read; setter mutates]
+	Latitude: number
+	-- The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: no moon. [All modes; Runtime|Test; pure/read; setter mutates]
+	Moon: Entity?
+	-- The angular diameter of the moon's disc, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
+	MoonSize: number
+	-- The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above). [All modes; Runtime|Test; pure/read; setter mutates]
+	NorthAngle: number
+	-- How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, with DriveLights, the sun. [All modes; Runtime|Test; pure/read; setter mutates]
+	Overcast: number
+	-- The brightness of the stars, faded by the sky's own brightness; 0 draws none. [All modes; Runtime|Test; pure/read; setter mutates]
+	Stars: number
+	-- The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon. [All modes; Runtime|Test; pure/read; setter mutates]
+	Sun: Entity?
+	-- The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its size is the Sun light's LightAngle; 0 draws no disc. [All modes; Runtime|Test; pure/read; setter mutates]
+	SunDisc: number
+end
+
 -- Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking.
 declare extern type SliderJoint with
 	-- The joint's point in this entity's space, in metres (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1604,6 +1668,12 @@ declare extern type SpriteRenderer with
 	SortingLayer: string
 	-- The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. [All modes; Runtime|Test; pure/read; setter mutates]
 	Texture: AssetRef?
+end
+
+-- Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.
+declare extern type Static with
+	-- What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree). [All modes; Runtime|Test; pure/read; setter mutates]
+	Scope: StaticScope
 end
 
 -- An opaque coroutine handle owned by one script VM.
@@ -1934,6 +2004,118 @@ declare extern type UiToggle with
 	IsOn: boolean
 end
 
+-- Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.
+declare extern type VehicleWheel with
+	-- How quickly the wheel's spin slows down by itself, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	AngularDamping: number
+	-- The wheel's spin speed about its axle in degrees per second after the last physics step, positive rolling forward. [All modes; Runtime|Test; pure/read]
+	GetAngularVelocity: (self: VehicleWheel) -> number
+	-- Where the wheel touched the ground in the last physics step: the world point, the ground's normal and the collider entity (nil when that collider or its body's owner is disabled or destroyed); three nils while the wheel is in the air. Physics.GetSurface reads that collider's friction. [All modes; Runtime|Test; pure/read]
+	GetContact: (self: VehicleWheel) -> (vector?, vector?, Entity?)
+	-- The wheel's spin about its axle in degrees, in [0, 360), after the last physics step. [All modes; Runtime|Test; pure/read]
+	GetRotation: (self: VehicleWheel) -> number
+	-- The tyre's slip in the last physics step, 0 and 0 in the air: the longitudinal slip ratio (how far the tread's speed differs from the ground's, relative to it: 0 rolling freely, larger as the wheel spins or locks) and the lateral slip angle in degrees, in [0, 90], which LongitudinalFriction and LateralFriction turn into grip. [All modes; Runtime|Test; pure/read]
+	GetSlip: (self: VehicleWheel) -> (number, number)
+	-- The wheel's steer angle in degrees after the last physics step, positive to the right as Steering is (Steering times MaxSteerAngle). [All modes; Runtime|Test; pure/read]
+	GetSteerAngle: (self: VehicleWheel) -> number
+	-- The force the suspension pushed the body with in the last physics step, in newtons (0 in the air). [All modes; Runtime|Test; pure/read]
+	GetSuspensionForce: (self: VehicleWheel) -> number
+	-- The suspension's length in metres after the last physics step, from its attachment point to the wheel's centre: SuspensionMaxLength in the air, shorter as the spring compresses, never below SuspensionMinLength. [All modes; Runtime|Test; pure/read]
+	GetSuspensionLength: (self: VehicleWheel) -> number
+	-- The wheel's moment of inertia about its axle. [All modes; Runtime|Test; pure/read; setter mutates]
+	Inertia: number
+	-- Whether the wheel's cast found ground within its suspension in the last physics step. [All modes; Runtime|Test; pure/read]
+	IsTouching: (self: VehicleWheel) -> boolean
+	-- The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys. [All modes; Runtime|Test; pure/read; setter mutates]
+	LateralFriction: {{X: number, Y: number}}
+	-- The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys. [All modes; Runtime|Test; pure/read; setter mutates]
+	LongitudinalFriction: {{X: number, Y: number}}
+	-- The brake's torque at a full Brake, in newton metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxBrakeTorque: number
+	-- The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxHandBrakeTorque: number
+	-- The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxSteerAngle: number
+	-- The wheel's radius, in metres (never scaled). [All modes; Runtime|Test; pure/read; setter mutates]
+	Radius: number
+	-- The suspension's damping ratio: 0 bounces, 1 is critically damped. [All modes; Runtime|Test; pure/read; setter mutates]
+	SpringDamping: number
+	-- The suspension spring's natural frequency, in hertz, above 0: higher is stiffer. [All modes; Runtime|Test; pure/read; setter mutates]
+	SpringFrequency: number
+	-- The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length. [All modes; Runtime|Test; pure/read; setter mutates]
+	SuspensionMaxLength: number
+	-- The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength. [All modes; Runtime|Test; pure/read; setter mutates]
+	SuspensionMinLength: number
+	-- How far the spring is compressed at full droop, in metres, so it pushes already there. [All modes; Runtime|Test; pure/read; setter mutates]
+	SuspensionPreload: number
+	-- The wheel's width, in metres (never scaled); a Cylinder cast uses it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Width: number
+end
+
+-- Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.
+declare extern type WheeledVehicle with
+	-- The anti-roll bars between pairs of wheels, at most eight. [All modes; Runtime|Test; pure/read; setter mutates]
+	AntiRollBars: {{LeftWheel: Entity?, RightWheel: Entity?, Stiffness: number}}
+	-- The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque. [All modes; Runtime|Test; pure/read; setter mutates]
+	Brake: number
+	-- Manual only: the clutch, from 0 (released) to 1 (engaged). [All modes; Runtime|Test; pure/read; setter mutates]
+	Clutch: number
+	-- Auto: how long the clutch takes to engage after a gear change. [All modes; Runtime|Test; pure/read; setter mutates]
+	ClutchReleaseTime: number
+	-- How strongly the engaged clutch couples the engine to the wheels, above 0. [All modes; Runtime|Test; pure/read; setter mutates]
+	ClutchStrength: number
+	-- Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's. [All modes; Runtime|Test; pure/read; setter mutates]
+	DifferentialLimitedSlipRatio: number
+	-- The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0. [All modes; Runtime|Test; pure/read; setter mutates]
+	Differentials: {{LeftWheel: Entity?, RightWheel: Entity?, Ratio: number, LeftRightSplit: number, LimitedSlipRatio: number, EngineTorqueRatio: number}}
+	-- How quickly the engine slows down by itself, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	EngineDamping: number
+	-- The moment of inertia of the engine's turning parts. [All modes; Runtime|Test; pure/read; setter mutates]
+	EngineInertia: number
+	-- Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has. [All modes; Runtime|Test; pure/read; setter mutates]
+	Gear: number
+	-- The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears. [All modes; Runtime|Test; pure/read; setter mutates]
+	GearRatios: {number}
+	-- The engine's revolutions per minute after the last physics step, between MinRpm and MaxRpm. [All modes; Runtime|Test; pure/read]
+	GetEngineRpm: (self: WheeledVehicle) -> number
+	-- The gear the transmission is in after the last physics step: 1 and up forward, -1 and down reverse, 0 neutral. In Manual it follows Gear (clamped to the ratios); in Auto the transmission chooses it. [All modes; Runtime|Test; pure/read]
+	GetGear: (self: WheeledVehicle) -> number
+	-- The body's speed along its forward (local -Z) in metres per second after the last physics step, negative while it rolls backward. [All modes; Runtime|Test; pure/read]
+	GetSpeed: (self: WheeledVehicle) -> number
+	-- The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque. [All modes; Runtime|Test; pure/read; setter mutates]
+	HandBrake: number
+	-- Whether a gear change is in progress after the last physics step (an Auto shift's SwitchTime and ClutchReleaseTime). [All modes; Runtime|Test; pure/read]
+	IsShifting: (self: WheeledVehicle) -> boolean
+	-- How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxPitchRollAngle: number
+	-- The engine's largest RPM, which it never exceeds. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxRpm: number
+	-- The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxTorque: number
+	-- The engine's idle RPM, the least it turns at; at most MaxRpm. [All modes; Runtime|Test; pure/read; setter mutates]
+	MinRpm: number
+	-- The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReverseGearRatios: {number}
+	-- Auto: the RPM below which it shifts down; above 0. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShiftDownRpm: number
+	-- Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShiftUpRpm: number
+	-- The steering, from -1 (full left lock) to 1 (full right lock). [All modes; Runtime|Test; pure/read; setter mutates]
+	Steering: number
+	-- Auto: the least time between two gear changes, in seconds. [All modes; Runtime|Test; pure/read; setter mutates]
+	SwitchLatency: number
+	-- Auto: how long a gear change takes, in seconds. [All modes; Runtime|Test; pure/read; setter mutates]
+	SwitchTime: number
+	-- The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step. [All modes; Runtime|Test; pure/read; setter mutates]
+	Throttle: number
+	-- The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear. [All modes; Runtime|Test; pure/read; setter mutates]
+	TorqueCurve: {{X: number, Y: number}}
+	-- Whether the gears change by themselves (Auto) or as Gear says (Manual). [All modes; Runtime|Test; pure/read; setter mutates]
+	Transmission: VehicleTransmissionMode
+	-- How the wheels find the ground under them. [All modes; Runtime|Test; pure/read; setter mutates]
+	WheelCast: VehicleWheelCast
+end
+
 -- The scene's wind (one per scene): it bends, sways and flutters the meshes whose material has wind enabled, and scripts read it with Wind:Sample.
 declare extern type Wind with
 	-- Where the wind blows, in world axes; only its horizontal part (X and Z) counts, normalized, and it must not be zero. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1958,7 +2140,7 @@ declare Application: {
 	GetDisplaySettings: () -> DisplaySettings,
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
 	GetPlatform: () -> string,
-	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; and LodCrossFades, the mesh items it drew cross-fading two levels of detail, DistanceCulledMeshes those beyond their RenderDistance's CullDistance), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
+	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created; SkyUpdates, 1 when it regenerated its Sky's image-based light, else 0; and LodCrossFades, the mesh items it drew cross-fading two levels of detail, DistanceCulledMeshes those beyond their RenderDistance's CullDistance), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
 	GetStats: () -> PerformanceStats,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,

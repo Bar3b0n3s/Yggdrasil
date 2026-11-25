@@ -16,6 +16,7 @@
 #include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Engine/Renderer/SkyAtmosphere.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/TerrainPass.h"
 #include "Shared/DrawConstants.h"
@@ -127,7 +128,8 @@ namespace Engine {
 			{
 				for (const Detail::SceneRendererDraw& draw : draws)
 				{
-					if (draw.Entity != item.Entity)
+					// M43: a static draw is never a mirror's glass (the static set holds no PlanarReflection's entity).
+					if (draw.StaticInstances != 0 || draw.Entity != item.Entity)
 						continue;
 					const std::optional<PlanarReflectionScreenRect> drawn = ComputePlanarReflectionScreenRect(draw.Bounds, snapshot.Meshes[draw.SnapshotIndex].World,
 						frame.Camera);
@@ -190,6 +192,8 @@ namespace Engine {
 		{
 			for (const Detail::SceneRendererDraw& draw : draws)
 			{
+				if (draw.StaticInstances != 0)
+					continue; // M43: a static draw's record is the static set's, and never a glass's
 				for (uint32_t slot = 0; slot < drawn; ++slot)
 				{
 					if (draw.Entity != ReflectionSlots[slot].Entity)
@@ -248,7 +252,7 @@ namespace Engine {
 		slot.View.ReflectionView = 1;
 		slot.View.ClipPlane = clipPlane;
 		slot.View.CascadeDepthPlane = ComputeCascadeDepthPlane(frame.Camera);
-		slot.Fog = MakeFogConstants(snapshot.Fog, slot.Camera, snapshot.Lights, frame.Environment, frame.Fog.Enabled != 0);
+		slot.Fog = MakeFogConstants(snapshot.Fog, slot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), frame.Environment, frame.Fog.Enabled != 0);
 		slot.Fog.SkyIsClearColor = frame.Fog.SkyIsClearColor;
 		return {};
 	}
@@ -369,10 +373,13 @@ namespace Engine {
 				nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+				// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static records and the view's indices into them.
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::StaticInstancesRegister, GetStaticInstancesBinding(frame)),
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstanceIndicesRegister, InstanceIndexBuffer),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 			};
 			auto prepassSet = ViewBindings.GetOrCreate(*Device, prepassDesc, *Pipelines->Layouts.PrepassView);
 			if (prepassSet)
@@ -438,8 +445,20 @@ namespace Engine {
 				RecordMeshPass(commandList, Detail::SceneRendererMeshPass::ForwardOpaque, slot.OpaqueDraws, **forwardSet, frame.DebugView, counters, &forwardTarget);
 				if (!slot.TerrainResources.Draws.empty())
 					Pipelines->Terrain->RecordForward(commandList, slot.TerrainResources, *slot.ForwardFramebuffer, **forwardSet, counters, slot.Scissor);
-				const bool fogsClearSky = !frame.DrawsSkybox && slot.Fog.Enabled != 0 && slot.Fog.FogSkybox != 0;
-				if (frame.DrawsSkybox || fogsClearSky)
+				// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the Sky in the skybox's place, with the slot's
+				// scissor and fog, sampling the main view's sky-view LUT (world directions).
+				const bool fogsClearSky = !frame.DrawsSkybox && !frame.DrawsSky && slot.Fog.Enabled != 0 && slot.Fog.FogSkybox != 0;
+				if (frame.DrawsSky)
+				{
+					const Status sky = RecordSky(commandList, *slot.ForwardFramebuffer, *slot.ViewConstantsBuffer, *slot.FogConstantsBuffer, slot.Scissor);
+					if (sky)
+					{
+						++counters.DrawCalls;
+						++counters.Triangles;
+					}
+					frame.KeepFirstError(sky);
+				}
+				else if (frame.DrawsSkybox || fogsClearSky)
 				{
 					const Status sky = Pipelines->Skybox->Record(commandList, SkyboxBindings,
 						{ .Framebuffer = slot.ForwardFramebuffer,

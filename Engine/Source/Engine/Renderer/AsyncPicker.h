@@ -16,6 +16,7 @@
 namespace Engine {
 
 	class GraphicsDevice;
+	struct RenderStaticCell;
 
 	struct PickRequest
 	{
@@ -25,6 +26,15 @@ namespace Engine {
 		uint64_t SceneRevision = 0;  // opaque host revision, echoed; renderer never interprets it
 		uint64_t Sequence = 0;       // opaque host click sequence, echoed so a later click can supersede this one
 		uint64_t ViewGeneration = 0; // clicked image generation, must match Request's nonzero viewGeneration
+	};
+
+	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): one static cell of the picked image: the record of its first
+	// item in the static record buffer the image drew with (GpuResourceCache::AcquireStaticRecords) and the cell, whose
+	// PickTable its items' static pick ids resolve against: StaticPickIdBase + First + i is the cell's item i.
+	struct StaticPickRange
+	{
+		uint32_t First = 0;
+		Ref<const RenderStaticCell> Cell{};
 	};
 
 	struct PickTicket
@@ -57,12 +67,14 @@ namespace Engine {
 		AsyncPicker& operator=(const AsyncPicker&) = delete;
 
 		// Call AFTER submitting the rendering command list. Copies one R32_UINT pixel into an owned staging slot,
-		// submits that copy, and records its submission id/event query. Copies pickTable now (PickId - 1 -> UUID).
+		// submits that copy, and records its submission id/event query. Copies pickTable now (PickId - 1 -> UUID), and (M43)
+		// `staticTable`, the image's static cells (an id from StaticPickIdBase on is a static record's, resolved against them;
+		// they hold disjoint record ranges).
 		// Does not keep the source texture beyond the submitted command's lifetime. A table change cannot remap a result.
 		// InvalidArgument: non-R32_UINT/non-2D/multisampled target, out-of-range pixel, generation 0/mismatch, invalid table
 		// (duplicate/invalid UUID, too many entries). Conflict: all slots outstanding. Gpu: resource creation failure.
 		[[nodiscard]] Result<PickTicket> Request(nvrhi::ITexture& entityIds, std::span<const UUID> pickTable,
-			uint64_t viewGeneration, const PickRequest& request);
+			uint64_t viewGeneration, const PickRequest& request, std::span<const StaticPickRange> staticTable = {});
 
 		// nullopt until both two host frames have elapsed and the copy's query/submission completed. Never maps an
 		// unfinished slot. Once ready, returns and consumes the result. NotFound: unknown/consumed ticket.

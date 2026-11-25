@@ -205,6 +205,17 @@
 			},
 			"additionalProperties": false
 		},
+		"Static": {
+			"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+			"type": "object",
+			"properties": {
+				"Scope": {
+					"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+					"enum": ["Subtree", "EntityOnly", "NotStatic"]
+				}
+			},
+			"additionalProperties": false
+		},
 		"MeshRenderer": {
 			"description": "Draws a mesh asset with one material per submesh.",
 			"type": "object",
@@ -536,6 +547,122 @@
 					],
 					"minItems": 3,
 					"maxItems": 3
+				}
+			},
+			"additionalProperties": false
+		},
+		"Sky": {
+			"description": "The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud layer; it lights the scene in the Environment's place.",
+			"type": "object",
+			"properties": {
+				"Sun": {
+					"description": "The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Moon": {
+					"description": "The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: no moon.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Intensity": {
+					"description": "The unitless strength of the sky's radiance and of the image-based light it gives.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 65504
+				},
+				"DriveLights": {
+					"description": "Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read.",
+					"type": "boolean"
+				},
+				"Haze": {
+					"description": "The density of the atmosphere's aerosols, a multiple of a clear day's (1).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"Overcast": {
+					"description": "How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, with DriveLights, the sun.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"GroundAlbedo": {
+					"description": "The linear albedo of the atmosphere's ground, which brightens the sky above it.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"SunDisc": {
+					"description": "The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its size is the Sun light's LightAngle; 0 draws no disc.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"MoonSize": {
+					"description": "The angular diameter of the moon's disc, in degrees.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 10
+				},
+				"Stars": {
+					"description": "The brightness of the stars, faded by the sky's own brightness; 0 draws none.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"Latitude": {
+					"description": "The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun.",
+					"type": "number",
+					"minimum": -90,
+					"maximum": 90
+				},
+				"NorthAngle": {
+					"description": "The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above).",
+					"type": "number",
+					"minimum": -360,
+					"maximum": 360
+				},
+				"Clouds": {
+					"description": "The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"CloudSpeed": {
+					"description": "How fast the cloud layer drifts, in metres per second of simulation time along world X and Z.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
 				}
 			},
 			"additionalProperties": false
@@ -1167,6 +1294,59 @@
 							"type": "number",
 							"minimum": -500,
 							"maximum": 500
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				}
+			},
+			"additionalProperties": false
+		},
+		"MassProperties": {
+			"description": "Moves the centre of mass of the entity's Dynamic RigidBody away from its colliders' and scales its inertia, so a vehicle or a boat with a lowered centre of mass stays upright.",
+			"type": "object",
+			"properties": {
+				"CenterOfMassOffset": {
+					"description": "Added to the centre of mass the colliders give the body, in metres along the entity's own axes (its rotation, never its scale); the colliders and the entity stay where they are. A negative Y lowers it. Only a Dynamic RigidBody uses it.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -100000,
+							"maximum": 100000
+						},
+						{
+							"type": "number",
+							"minimum": -100000,
+							"maximum": 100000
+						},
+						{
+							"type": "number",
+							"minimum": -100000,
+							"maximum": 100000
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"InertiaScale": {
+					"description": "Scales the body's inertia about each of the entity's own axes, after the centre of mass moved: below 1 the body turns more readily about that axis, above 1 less.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0.01,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": 0.01,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": 0.01,
+							"maximum": 100
 						}
 					],
 					"minItems": 3,
@@ -3220,7 +3400,7 @@
 					"type": "number"
 				},
 				"SunGlow": {
-					"description": "How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow.",
+					"description": "How strongly the fog glows toward the first directional light, or an enabled Sky's Sun, as a multiple of that light's colour times its intensity; 0 has no glow.",
 					"type": "number",
 					"minimum": 0,
 					"maximum": 100
@@ -3717,6 +3897,263 @@
 				"Broken": {
 					"description": "Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.",
 					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"WheeledVehicle": {
+			"description": "Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.",
+			"type": "object",
+			"properties": {
+				"Throttle": {
+					"description": "The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step.",
+					"type": "number",
+					"minimum": -1,
+					"maximum": 1
+				},
+				"Steering": {
+					"description": "The steering, from -1 (full left lock) to 1 (full right lock).",
+					"type": "number",
+					"minimum": -1,
+					"maximum": 1
+				},
+				"Brake": {
+					"description": "The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"HandBrake": {
+					"description": "The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Gear": {
+					"description": "Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has.",
+					"type": "integer",
+					"minimum": -8,
+					"maximum": 8
+				},
+				"Clutch": {
+					"description": "Manual only: the clutch, from 0 (released) to 1 (engaged).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"MaxTorque": {
+					"description": "The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"MinRpm": {
+					"description": "The engine's idle RPM, the least it turns at; at most MaxRpm.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100000
+				},
+				"MaxRpm": {
+					"description": "The engine's largest RPM, which it never exceeds.",
+					"type": "number",
+					"minimum": 1,
+					"maximum": 100000
+				},
+				"EngineInertia": {
+					"description": "The moment of inertia of the engine's turning parts.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000000
+				},
+				"EngineDamping": {
+					"description": "How quickly the engine slows down by itself, per second.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"TorqueCurve": {
+					"description": "The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/VehicleCurveKey"
+					}
+				},
+				"Transmission": {
+					"description": "Whether the gears change by themselves (Auto) or as Gear says (Manual).",
+					"enum": ["Auto", "Manual"]
+				},
+				"GearRatios": {
+					"description": "The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears.",
+					"type": "array",
+					"items": {
+						"type": "number"
+					}
+				},
+				"ReverseGearRatios": {
+					"description": "The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses.",
+					"type": "array",
+					"items": {
+						"type": "number"
+					}
+				},
+				"SwitchTime": {
+					"description": "Auto: how long a gear change takes, in seconds.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"ClutchReleaseTime": {
+					"description": "Auto: how long the clutch takes to engage after a gear change.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"SwitchLatency": {
+					"description": "Auto: the least time between two gear changes, in seconds.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"ShiftUpRpm": {
+					"description": "Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100000
+				},
+				"ShiftDownRpm": {
+					"description": "Auto: the RPM below which it shifts down; above 0.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100000
+				},
+				"ClutchStrength": {
+					"description": "How strongly the engaged clutch couples the engine to the wheels, above 0.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"Differentials": {
+					"description": "The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/VehicleDifferential"
+					}
+				},
+				"DifferentialLimitedSlipRatio": {
+					"description": "Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"AntiRollBars": {
+					"description": "The anti-roll bars between pairs of wheels, at most eight.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/VehicleAntiRollBar"
+					}
+				},
+				"MaxPitchRollAngle": {
+					"description": "How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 180
+				},
+				"WheelCast": {
+					"description": "How the wheels find the ground under them.",
+					"enum": ["Ray", "Sphere", "Cylinder"]
+				}
+			},
+			"additionalProperties": false
+		},
+		"VehicleWheel": {
+			"description": "Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.",
+			"type": "object",
+			"properties": {
+				"Radius": {
+					"description": "The wheel's radius, in metres (never scaled).",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 100
+				},
+				"Width": {
+					"description": "The wheel's width, in metres (never scaled); a Cylinder cast uses it.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"SuspensionMinLength": {
+					"description": "The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"SuspensionMaxLength": {
+					"description": "The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"SuspensionPreload": {
+					"description": "How far the spring is compressed at full droop, in metres, so it pushes already there.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"SpringFrequency": {
+					"description": "The suspension spring's natural frequency, in hertz, above 0: higher is stiffer.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"SpringDamping": {
+					"description": "The suspension's damping ratio: 0 bounces, 1 is critically damped.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"MaxSteerAngle": {
+					"description": "The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 90
+				},
+				"MaxBrakeTorque": {
+					"description": "The brake's torque at a full Brake, in newton metres.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"MaxHandBrakeTorque": {
+					"description": "The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"Inertia": {
+					"description": "The wheel's moment of inertia about its axle.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000000
+				},
+				"AngularDamping": {
+					"description": "How quickly the wheel's spin slows down by itself, per second.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"LongitudinalFriction": {
+					"description": "The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/VehicleCurveKey"
+					}
+				},
+				"LateralFriction": {
+					"description": "The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/VehicleCurveKey"
+					}
 				}
 			},
 			"additionalProperties": false
@@ -4222,6 +4659,89 @@
 			},
 			"additionalProperties": false
 		},
+		"VehicleCurveKey": {
+			"description": "One key of a vehicle's curve: Y at X, linear between keys and constant beyond the ends.",
+			"type": "object",
+			"properties": {
+				"X": {
+					"description": "Where the key is on the curve; a curve's keys have strictly increasing X.",
+					"type": "number",
+					"minimum": -1000,
+					"maximum": 1000
+				},
+				"Y": {
+					"description": "The curve's value at X.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				}
+			},
+			"additionalProperties": false
+		},
+		"VehicleDifferential": {
+			"description": "A differential through which a WheeledVehicle's engine drives two of its wheels.",
+			"type": "object",
+			"properties": {
+				"LeftWheel": {
+					"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"RightWheel": {
+					"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Ratio": {
+					"description": "The gear box's rotation over the wheels' (the final drive), above 0.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"LeftRightSplit": {
+					"description": "The engine torque's share of the right wheel: 0 all left, 1 all right.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"LimitedSlipRatio": {
+					"description": "0 for an open differential, else above 1: the largest ratio of the faster side's speed to the slower's before the torque goes to the slower one.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"EngineTorqueRatio": {
+					"description": "This differential's share of the engine torque; the shares of a vehicle's differentials that name a wheel sum to 1.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				}
+			},
+			"additionalProperties": false
+		},
+		"VehicleAntiRollBar": {
+			"description": "An anti-roll bar between two wheels of a WheeledVehicle, which keeps it from leaning.",
+			"type": "object",
+			"properties": {
+				"LeftWheel": {
+					"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"RightWheel": {
+					"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Stiffness": {
+					"description": "How strongly the bar pushes the less compressed wheel's suspension down, in newtons per metre of difference.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				}
+			},
+			"additionalProperties": false
+		},
 		"Entity": {
 			"description": "One entity: its entity keys, then its components.",
 			"type": "object",
@@ -4264,6 +4784,9 @@
 						"PrefabLink": {
 							"$ref": "#/$defs/PrefabLink"
 						},
+						"Static": {
+							"$ref": "#/$defs/Static"
+						},
 						"MeshRenderer": {
 							"$ref": "#/$defs/MeshRenderer"
 						},
@@ -4281,6 +4804,9 @@
 						},
 						"Environment": {
 							"$ref": "#/$defs/Environment"
+						},
+						"Sky": {
+							"$ref": "#/$defs/Sky"
 						},
 						"PostProcess": {
 							"$ref": "#/$defs/PostProcess"
@@ -4308,6 +4834,9 @@
 						},
 						"ColliderSurface": {
 							"$ref": "#/$defs/ColliderSurface"
+						},
+						"MassProperties": {
+							"$ref": "#/$defs/MassProperties"
 						},
 						"AudioSource": {
 							"$ref": "#/$defs/AudioSource"
@@ -4434,6 +4963,12 @@
 						},
 						"FixedJoint": {
 							"$ref": "#/$defs/FixedJoint"
+						},
+						"WheeledVehicle": {
+							"$ref": "#/$defs/WheeledVehicle"
+						},
+						"VehicleWheel": {
+							"$ref": "#/$defs/VehicleWheel"
 						},
 						"RenderDistance": {
 							"$ref": "#/$defs/RenderDistance"

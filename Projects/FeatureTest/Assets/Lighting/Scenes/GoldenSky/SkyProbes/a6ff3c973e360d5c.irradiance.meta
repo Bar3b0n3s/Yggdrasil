@@ -1,0 +1,10 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "70a582b5b2da185a",
+	"Type": "IrradianceVolume",
+	"Importer": "IrradianceVolume",
+	"ImporterVersion": 1,
+	"Settings": null,
+	"SubAssets": []
+}

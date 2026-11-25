@@ -7,6 +7,7 @@
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Result.h"
 #include "Engine/Graphics/HostImageUpload.h"
 
 #include <glm/glm.hpp>
@@ -29,6 +30,7 @@ namespace Engine {
 
 	class AssetManager;
 	class GraphicsDevice;
+	struct RenderStaticSet;
 
 	// One submesh of a GPU mesh (MeshSubmesh without the CPU data). M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md
 	// decisions 3E and 3L): Lods holds its range of each further level (MeshData::Lods[k].Submeshes[submesh]) into the one
@@ -146,7 +148,11 @@ namespace Engine {
 
 	// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16, stream Q-B): an irradiance volume's GPU mirror
 	// (Asset/IrradianceVolumeData.h): its probes' SH9 coefficients as a structured buffer of CountX * CountY * CountZ * 9
-	// float4 (xyz the coefficient, w 0), probes in the asset's order, which Common/Probes.slang reads trilinearly.
+	// float4 (xyz the coefficient, w 0), probes in the asset's order, which Common/Probes.slang reads trilinearly. M45
+	// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, "Relit probes"): a relightable volume's relight block too, as a
+	// structured buffer of SkyRelightProbeVectors float4 a probe (Shared/SkyConstants.h's layout), which the view's ProbeRelight
+	// row reads (Passes/Sky.slang's CSProbeRelight), and its probes' baked constant terms (SH9[0]), from which the view's
+	// reflection probes' relit scale is taken; null and empty for a volume without one.
 	struct GpuIrradianceVolume
 	{
 		nvrhi::BufferHandle Probes{};
@@ -154,6 +160,8 @@ namespace Engine {
 		uint32_t CountY = 0;
 		uint32_t CountZ = 0;
 		uint64_t Version = 0;
+		nvrhi::BufferHandle Relight{};
+		std::vector<glm::vec3> ConstantTerms{};
 	};
 
 	// M26 (C26.1, R-LUT; decision 15, stream X-B): a LUT's GPU mirror: its table as a Size^3 3D texture, RGBA16_FLOAT (rgb
@@ -190,6 +198,11 @@ namespace Engine {
 		size_t IrradianceVolumeCount = 0;
 		size_t LutCount = 0;
 		size_t HeightfieldCount = 0;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static cells holding a range of the static record
+		// buffer, the records those ranges hold, and the buffer's capacity in records (0 without one).
+		size_t StaticCellCount = 0;
+		size_t StaticRecordCount = 0;
+		size_t StaticRecordCapacity = 0;
 	};
 
 	// Owns every asset GPU mirror (§8.14 item 1), keyed by (handle, version): a hot reload bumps the asset's version, the
@@ -265,14 +278,41 @@ namespace Engine {
 		[[nodiscard]] const GpuLut* GetLut(AssetHandle handle);
 		[[nodiscard]] const GpuHeightfield* GetHeightfield(AssetHandle handle);
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; §8.14's third place): the GPU-resident instance records of
+		// the static sets the renderers draw (Renderer/RenderStaticSet.h), in one device-local structured buffer of
+		// InstanceRecord (t21 of set 0, StaticInstances), shared by every renderer and scene of the cache. Each cell, keyed by
+		// its object (which the cache holds while the cell has its range), takes a range of consecutive records, one per item
+		// in item order, written once when the cell takes it and never rewritten: a changed cell is a new object with a range of
+		// its own. A record is MakeMeshInstanceRecord's (RenderPrepare.h) of its item with DrawFlagReceiveShadows for an item that
+		// receives shadows, its PreviousWorld its World (a static item has no motion) and its EntityId StaticPickIdBase plus
+		// its index in the buffer, the static pick id the renderer resolves against the cell's PickTable (AsyncPicker.h).
+		// AcquireStaticRecords gives `set`'s cells their ranges (new ones written through one command list executed at once,
+		// as the mirrors' uploads are) and returns each cell's first record, in the set's order; a range kept from an earlier
+		// call stays where it is. The buffer grows geometrically (at least StaticRecordMinimumCapacity records), a grown one
+		// rewritten whole with every range at its place, and never shrinks but through TrimUnused, Clear and
+		// ReleaseGpuObjects, which drop it with every range (the next call writes the ranges it needs again; a renderer that
+		// recorded with the old buffer holds it until its command list completes). The creation and the writes go through
+		// RetryAfterTrim (Graphics/GpuOutOfMemory.h), whose trim is this cache's TrimUnused among others: called by a render's
+		// Prepare stage, before it holds a mirror reference. Errors: OutOfMemory after the trim and retry (Gpu on a lost
+		// device), with every range as it was; InvalidArgument when the set holds more records than a static pick id can
+		// number (2^31).
+		[[nodiscard]] Result<std::vector<uint32_t>> AcquireStaticRecords(const RenderStaticSet& set);
+		// M43: the static record buffer AcquireStaticRecords' last success left, null before it and after a TrimUnused, Clear
+		// or ReleaseGpuObjects.
+		[[nodiscard]] nvrhi::IBuffer* GetStaticRecordBuffer() const;
+		// M43: the smallest capacity, in records, of the static record buffer (256 records, 52 KiB).
+		static constexpr uint32_t StaticRecordMinimumCapacity = 256;
+
 		// Releases mirrors (meshes, textures, materials, environments, irradiance volumes, LUTs, heightfields) whose version
 		// is older than their asset's current version, and those not used through Get since the previous CollectStale when
 		// `releaseUnused` is true (scene unload: "GpuResourceCache: live counts return to baseline after unloading a scene",
 		// M8). Every host that renders calls it once per frame, and with `releaseUnused` after the first frame of a newly
-		// opened scene (SceneRenderer.h, "Stale mirrors").
+		// opened scene (SceneRenderer.h, "Stale mirrors"). M43: also frees the static record ranges of the cells no
+		// AcquireStaticRecords used since the previous CollectStale, whatever `releaseUnused` says, so a later call may reuse
+		// them: called when the frame's renders were submitted, so no recorded command list reads a range it frees.
 		void CollectStale(bool releaseUnused = false);
 
-		// Releases every mirror, placeholders included.
+		// Releases every mirror, placeholders included (M43: and the static record buffer with its ranges).
 		void Clear();
 
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 27): the cache's Release hook in the recreation
@@ -288,7 +328,8 @@ namespace Engine {
 		// it) when a request ran out of GPU memory: releases what CollectStale() releases (the mirrors of replaced versions)
 		// and the mirrors of assets the asset manager no longer has loaded (AssetManager::GetState is Unloaded: released or
 		// unknown), placeholders and built-in assets excepted. A mirror of a loaded, current asset stays, since the next
-		// Render would upload it again at once; a dropped one is uploaded again by its next Get. Keeps the material
+		// Render would upload it again at once; a dropped one is uploaded again by its next Get. M43: drops the static record
+		// buffer with every range (rebuilt by the next AcquireStaticRecords from the cells, compacted). Keeps the material
 		// generation counter and GetStats().UploadFailures, as ReleaseGpuObjects does. Like CollectStale it ends the validity
 		// of the references Get handed out, so it runs only between recordings (GraphicsDevice::TrimUnused). Main thread.
 		void TrimUnused();

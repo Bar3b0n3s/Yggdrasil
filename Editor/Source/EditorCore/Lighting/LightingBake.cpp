@@ -14,6 +14,7 @@
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Renderer/ProbeCapture.h"
+#include "Engine/Renderer/ProbeRelight.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
@@ -22,6 +23,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
+#include <array>
 #include <format>
 #include <optional>
 #include <string>
@@ -53,9 +55,10 @@ namespace Engine {
 			glm::mat4 World = glm::mat4(1.0f);
 			IrradianceVolumeComponent Volume{};
 			ReflectionProbeComponent Reflection{};
-			// The baked file: its path and bytes.
+			// The baked file: its path and bytes, and whether it is a relightable volume's (M45).
 			VfsPath Path{};
 			Buffer Bytes{};
+			bool Relightable = false;
 		};
 
 		// The scene's snapshot as every capture renders it (the camera is the capture's own): the scene's meshes, lights,
@@ -167,10 +170,15 @@ namespace Engine {
 		}
 
 		// The irradiance volume of `probe` (IrradianceVolumeData.h's grid: the probes span the box of the component's Size
-		// centred on the entity, in its axes, its scale included, x fastest), one capture per probe.
-		[[nodiscard]] static Result<IrradianceVolumeData> BakeVolume(ProbeCapture& capture, const RenderSnapshot& snapshot, const PendingProbe& probe)
+		// centred on the entity, in its axes, its scale included, x fastest), one capture per probe. M45: with `relight` (the
+		// scene's enabled Sky, MakeRelightCaptureSnapshot of `snapshot`), each a relight capture, and the volume relightable
+		// (LightingBake.h).
+		[[nodiscard]] static Result<IrradianceVolumeData> BakeVolume(ProbeCapture& capture, const RenderSnapshot& snapshot, const RenderSnapshot* relight,
+			const PendingProbe& probe)
 		{
 			ENGINE_TRY_ASSIGN(IrradianceVolumeData volume, MakeVolumeGrid(probe));
+			if (relight != nullptr)
+				volume.Relight.resize(volume.Probes.size());
 			const glm::vec3 counts(static_cast<float>(volume.CountX - 1), static_cast<float>(volume.CountY - 1), static_cast<float>(volume.CountZ - 1));
 			for (uint32_t z = 0; z < volume.CountZ; ++z)
 			{
@@ -181,10 +189,23 @@ namespace Engine {
 						const glm::vec3 fraction = glm::vec3(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)) / counts;
 						const glm::vec3 local = -0.5f * volume.Size + volume.Size * fraction;
 						const glm::vec3 position = glm::vec3(probe.World * glm::vec4(local, 1.0f));
+						const size_t index = GetIrradianceProbeIndex(volume, x, y, z);
+						const std::string context = std::format("capturing probe ({}, {}, {}) of the IrradianceVolume of {}", x, y, z, probe.Entity.ToString());
+						if (relight == nullptr)
+						{
+							ENGINE_TRY_ASSIGN(const ProbeCubeCapture cube, WithContext(capture.Capture(snapshot, position, IrradianceProbeFaceSize), context));
+							volume.Probes[index].SH9 = ProjectCubeToIrradianceSH9(cube);
+							continue;
+						}
+						// M45: the probe's local light and sky transfer, and its coefficients under the bake's sky.
 						ENGINE_TRY_ASSIGN(const ProbeCubeCapture cube,
-							WithContext(capture.Capture(snapshot, position, IrradianceProbeFaceSize),
-								std::format("capturing probe ({}, {}, {}) of the IrradianceVolume of {}", x, y, z, probe.Entity.ToString())));
-						volume.Probes[GetIrradianceProbeIndex(volume, x, y, z)].SH9 = ProjectCubeToIrradianceSH9(cube);
+							WithContext(capture.Capture(*relight, position, IrradianceProbeFaceSize, ProbeCaptureMode::Relight), context));
+						ENGINE_CORE_VERIFY(cube.SkyRadianceTotals.has_value(), "a relight capture returned without its sky's totals");
+						IrradianceProbeRelight& block = volume.Relight[index];
+						block.Local = ProjectCubeToIrradianceSH9(cube);
+						block.Transfer = ProjectCubeToSkyTransfer(cube);
+						const std::array<glm::vec3, 9> sky = MakeSkyRadianceSH9(*cube.SkyRadianceTotals, snapshot.Sky.Intensity);
+						volume.Probes[index].SH9 = RelightIrradianceSH9(block.Local, block.Transfer, sky);
 					}
 				}
 			}
@@ -213,6 +234,7 @@ namespace Engine {
 			entry.Path = std::string(probe.Path.GetPath());
 			const Result<Buffer> existing = editor.GetVfs().ReadFile(probe.Path);
 			entry.Changed = !existing.has_value() || *existing != probe.Bytes;
+			entry.Relightable = probe.Relightable;
 			if (entry.Changed)
 				ENGINE_TRY(WithContext(editor.WriteProjectFile(probe.Path, probe.Bytes), std::format("writing '{}'", entry.Path)));
 
@@ -281,6 +303,10 @@ namespace Engine {
 
 		ENGINE_TRY_ASSIGN(const RenderSnapshot snapshot, Utils::ExtractBakeSnapshot(editor, bakedScene));
 		ENGINE_TRY_ASSIGN(const VfsPath folder, Utils::GetBakeFolder(*scenePath));
+		// M45: under an enabled Sky, the volumes' probes are relight captures of this snapshot.
+		std::optional<RenderSnapshot> relight;
+		if (snapshot.Sky.Enabled)
+			relight = MakeRelightCaptureSnapshot(snapshot);
 
 		// Every capture first: a failed one writes nothing.
 		for (Utils::PendingProbe& probe : probes)
@@ -288,8 +314,9 @@ namespace Engine {
 			const std::string id = probe.Entity.ToString();
 			if (probe.IsVolume)
 			{
-				ENGINE_TRY_ASSIGN(const IrradianceVolumeData volume, Utils::BakeVolume(*capture, snapshot, probe));
+				ENGINE_TRY_ASSIGN(const IrradianceVolumeData volume, Utils::BakeVolume(*capture, snapshot, relight.has_value() ? &*relight : nullptr, probe));
 				probe.Bytes = WriteIrradianceVolumeSource(volume);
+				probe.Relightable = !volume.Relight.empty();
 				ENGINE_TRY_ASSIGN(probe.Path, folder.Join(id + ".irradiance"));
 			}
 			else

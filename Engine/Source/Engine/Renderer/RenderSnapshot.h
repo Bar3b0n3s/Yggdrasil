@@ -47,8 +47,12 @@
 // enum replaces FxaaEnabled (decision 12). M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 4 and 12; ADR 0042's phase-5
 // ledger) added the fog (RenderFog, Fog) after the terrains and the half-resolution SSR trace to the quality settings after
 // SsaoHalfResolution. M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) added the planar
-// reflections (PlanarReflectionItem, PlanarReflections) after the fog. Additions are frozen-header changes reviewed by their
-// contract owner; no member here changes meaning.
+// reflections (PlanarReflectionItem, PlanarReflections) after the fog. M43 (Docs/Decisions/0061-m43-static-scenery.md
+// decision 3; phase 8's ledger) added the static set (StaticSet, Renderer/RenderStaticSet.h) after them: the meshes of the
+// scene's static entities, which Meshes then leaves out. M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3;
+// ADR 0060's phase-8 ledger: after M43's StaticSet) added the sky (RenderSky, Sky) and its two functions (ResolveSkyLights,
+// ApplySkyLightDriving). Additions are frozen-header changes reviewed by their contract owner; no member here changes
+// meaning.
 // A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
@@ -59,7 +63,8 @@
 // resource. SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh
 // item's Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list, a terrain item's Layers)
 // keep the default allocator; M26's ParticleEmitters, Particles, IrradianceVolumes, ReflectionProbes and Terrains and M42's
-// PlanarReflections are the snapshot's own containers and follow the rule.
+// PlanarReflections are the snapshot's own containers and follow the rule. M43's StaticSet is no container of the
+// snapshot's: it is shared, immutable data (Ref<const RenderStaticSet>) that snapshots of the same scene hold together.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
@@ -321,6 +326,8 @@ namespace Engine {
 		bool operator==(const MeshMaterialParameters&) const = default;
 	};
 
+	// M43: the scene's static set (Renderer/RenderStaticSet.h), which RenderSnapshot::StaticSet holds.
+	struct RenderStaticSet;
 	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3C): a MeshRenderer's RenderDistance component
 	// (Scene/Components/RenderDistanceComponent.h) as extraction copied it, the component's defaults without one. Each view
 	// chooses the item's level of detail and cull by its own camera (Renderer/MeshLod.h).
@@ -780,7 +787,9 @@ namespace Engine {
 		float HeightDensity = 0.0f; // per metre at BaseHeight
 		float HeightFalloff = 0.5f; // per metre of height
 		float BaseHeight = 0.0f;    // world metres
-		float SunGlow = 0.0f;       // a multiple of the first directional light's Color * Intensity
+		// A multiple of the glow light's Color * Intensity (GetSkyGlowLight: an enabled Sky's Sun, else the first directional
+		// light).
+		float SunGlow = 0.0f;
 		float SunGlowExponent = 8.0f;
 		bool FogSkybox = true;
 	};
@@ -808,6 +817,48 @@ namespace Engine {
 		float Offset = 0.0f;
 		float ResolutionScale = DefaultPlanarReflectionResolutionScale;
 		UUID Entity{};
+	};
+
+	// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the scene's Sky component (Scene/Components/SkyComponent.h),
+	// from render extraction (Scene/SkyExtraction.h): the scene's one effectively enabled Sky, with Enabled set, in every view (an
+	// edit scene's at SimulationTime 0); Enabled false (the defaults) when the scene has none, which renders exactly as a
+	// renderer without a sky did. The members up to CloudSpeed are the component's (colours linear, angles degrees); the rest
+	// are the resolved roles (ResolveSkyLights below):
+	//   - SunLight: the index in RenderSnapshot::Lights of the directional light whose Entity is Sun, or of the first directional
+	//     light for a null Sun; empty when there is none. SunLightColor: that light's Color as authored (with its Intensity, the
+	//     sun's illuminance the atmosphere scatters), which ApplySkyLightDriving starts from, so driving is idempotent.
+	//   - MoonLight and MoonLightColor: likewise for the directional light whose Entity is Moon (empty for a null Moon, a Moon
+	//     that is the Sun's entity, or one that holds no light). HasMoon and MoonDirection (unit, toward the moon: the Moon's
+	//     local +Z, the opposite of its light's Direction): a Moon entity that is enabled and not the Sun's, taken from its
+	//     light, else from its rendered world matrix by render extraction.
+	// The renderer draws the sky in a Lit view whose camera clears to the skybox and lights the view from it in the
+	// Environment's place (Renderer/SkyLighting.h); its Sun owns the fog's glow and its Sun and Moon the cascades
+	// (Renderer/SkyAtmosphere.h: GetSkyGlowLight, OrderShadowCandidates).
+	struct RenderSky
+	{
+		bool Enabled = false;
+		UUID Sun{};
+		UUID Moon{};
+		float Intensity = 1.0f;
+		bool DriveLights = true;
+		float Haze = 1.0f;
+		float Overcast = 0.0f;
+		glm::vec3 GroundAlbedo = glm::vec3(0.3f);
+		float SunDisc = 1.0f;
+		float MoonSize = 0.52f; // degrees
+		float Stars = 1.0f;
+		float Latitude = 45.0f;  // degrees
+		float NorthAngle = 0.0f; // degrees about +Y from -Z
+		float Clouds = 0.0f;
+		glm::vec2 CloudSpeed = glm::vec2(5.0f, 0.0f); // metres per second, world XZ
+		double SimulationTime = 0.0;                  // the request's (RenderExtractionRequest::SimulationTime), seconds; 0 in edit scenes
+		UUID Entity{};                                // the Sky's entity
+		std::optional<uint32_t> SunLight{};
+		glm::vec3 SunLightColor = glm::vec3(1.0f);
+		std::optional<uint32_t> MoonLight{};
+		glm::vec3 MoonLightColor = glm::vec3(1.0f);
+		bool HasMoon = false;
+		glm::vec3 MoonDirection = glm::vec3(0.0f, 1.0f, 0.0f);
 	};
 
 	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the scene's Wind component
@@ -908,6 +959,14 @@ namespace Engine {
 		// the view, each rendered by the Forward stage's PlanarReflections pass for a Lit view outside the wireframe, at most
 		// MaxPlanarReflectionsPerView of them (Renderer/PlanarReflections.h).
 		std::pmr::vector<PlanarReflectionItem> PlanarReflections{};
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; phase 8's ledger: after the planar reflections): the
+		// scene's static set (Renderer/RenderStaticSet.h), shared between snapshots and immutable; null when the scene holds no
+		// Static. Its items are not in Meshes, which keeps the dynamic items.
+		Ref<const RenderStaticSet> StaticSet{};
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger: after M43's StaticSet): the
+		// scene's sky, drawn by the Forward stage's Sky pass in the Skybox's place and lighting the view in the Environment's
+		// (Renderer/SkyLighting.h).
+		RenderSky Sky{};
 		// M46 (decision 3G; ADR 0060's phase-8 ledger: after M43's StaticSet and M45's Sky): the scene's wind.
 		RenderWind Wind{};
 	};
@@ -954,6 +1013,28 @@ namespace Engine {
 	// identical in every configuration.
 	[[nodiscard]] glm::mat4 ComputeReverseZProjection(RenderProjection projection, float verticalFovDegrees, float orthographicSize,
 		float nearClip, float farClip, uint32_t width, uint32_t height);
+
+	// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the roles of `snapshot.Sky` resolved against
+	// `snapshot.Lights` (RenderSky's comment): SunLight and SunLightColor, MoonLight and MoonLightColor, and, for a Moon that
+	// holds a light, HasMoon and MoonDirection from it (a Moon without one keeps what render extraction set). Nothing without an
+	// enabled Sky. Render extraction calls it once the lights are extracted; a snapshot built by hand calls it after setting
+	// Sun and Moon. Precondition: the lights hold their authored colours, so call it before ApplySkyLightDriving; on a driven
+	// snapshot (an extracted one) it would take the driven colours as authored and the next driving would dim them twice, so
+	// to resolve an extracted snapshot again, first restore Lights[*SunLight].Color = SunLightColor and
+	// Lights[*MoonLight].Color = MoonLightColor (a snapshot whose lights were only turned needs no resolving: driving again
+	// suffices). Implemented in Renderer/SkyAtmosphere.cpp. Pure, deterministic.
+	void ResolveSkyLights(RenderSnapshot& snapshot);
+
+	// M45 (decision 3): with an enabled Sky whose DriveLights is set, the rendered colours of its roles: the Sun light's Color
+	// becomes SunLightColor times the atmosphere's transmittance toward it, and the Moon light's MoonLightColor times the
+	// transmittance toward it times its illuminated fraction (Renderer/SkyAtmosphere.h: ComputeSkyTransmittance from the
+	// camera's altitude, ComputeMoonIlluminatedFraction; 1 without a Sun light); MoonDirection follows the Moon light's
+	// Direction. Every consumer of the light list (shading, culling, fog, mirror views, captures) then sees the driven
+	// colours, and the components keep theirs. Idempotent: it starts from the authored colours RenderSky keeps, so a snapshot
+	// whose Sun was turned is driven again by calling it again. Nothing without an enabled Sky or with DriveLights clear.
+	// Implemented in Renderer/SkyAtmosphere.cpp with Core/DetMath, not <cmath>, so render extraction (on the simulation
+	// path's lint scope, §4.12) may call it and the result is identical in every configuration.
+	void ApplySkyLightDriving(RenderSnapshot& snapshot);
 
 	struct RenderRayInterval
 	{

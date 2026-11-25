@@ -3,6 +3,8 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Scene/Components/NameComponent.h"
+#include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/ScriptLimits.h"
@@ -23,6 +25,14 @@ namespace Engine {
 	ScriptEngine::State::~State()
 	{
 		AssertOwner();
+		if (Lookup.Connected != nullptr)
+		{
+			entt::registry& registry = Lookup.Connected->GetRegistry();
+			registry.on_construct<NameComponent>().disconnect(&Lookup);
+			registry.on_update<NameComponent>().disconnect(&Lookup);
+			registry.on_construct<TagsComponent>().disconnect(&Lookup);
+			registry.on_update<TagsComponent>().disconnect(&Lookup);
+		}
 		Scheduler.reset();
 		if (Vm == nullptr)
 			return;
@@ -49,7 +59,7 @@ namespace Engine {
 	void ScriptEngine::State::RefreshLifecycleOrder()
 	{
 		const Scene& scene = Engine.GetHost().GetScene();
-		const uint64_t revision = scene.GetRevision();
+		const uint64_t revision = scene.GetStructureRevision();
 		if (Instances.empty())
 		{
 			LifecycleOrder.clear();
@@ -57,16 +67,25 @@ namespace Engine {
 			LifecycleDirty = false;
 			return;
 		}
-		// Every structural scene change increments the revision, and membership changes mark the order dirty.
+		// M43: only a structural scene change (creation, destruction, reparenting, sibling order, enabling or disabling)
+		// moves the canonical order or the entities in it, and it increments the structure revision; membership changes mark
+		// the order dirty. A data write changes neither.
 		if (!LifecycleDirty && revision == LifecycleRevision)
 			return;
-		const std::vector<UUID> members = SortedInstanceIDs();
-		// Every instance of an entity of the scene, in canonical entity order and slot order (the map's order per entity).
-		std::vector<InstanceKey> alive;
-		for (const UUID id : scene.GetCanonicalOrder())
+		// Every instance of an entity of the scene, in canonical entity order and slot order (the map's order per entity): the
+		// instances' live entities sorted by canonical key (Scene::SortCanonical), which is the canonical order restricted to
+		// them, so the refresh costs the instances, never the scene.
+		std::vector<entt::entity> handles;
+		for (const UUID id : SortedInstanceIDs())
 		{
-			if (!std::binary_search(members.begin(), members.end(), id))
-				continue;
+			if (const ConstEntity entity = scene.FindEntityByID(id); entity.IsValid())
+				handles.push_back(entity.GetHandle());
+		}
+		scene.SortCanonical(handles);
+		std::vector<InstanceKey> alive;
+		for (const entt::entity handle : handles)
+		{
+			const UUID id = ConstEntity(handle, &scene).GetUUID();
 			for (auto instance = Instances.lower_bound({ id, 0 }); instance != Instances.end() && instance->first.Entity == id; ++instance)
 				alive.push_back(instance->first);
 		}
@@ -125,6 +144,56 @@ namespace Engine {
 				result.push_back(key.Entity);
 		}
 		return result;
+	}
+
+	void ScriptEngine::State::SceneLookup::OnNameOrTagsWritten(entt::registry& /*registry*/, entt::entity /*entity*/)
+	{
+		Dirty = true;
+	}
+
+	std::span<const UUID> ScriptEngine::State::FindSceneEntities(std::string_view name, bool tags)
+	{
+		Scene& scene = Engine.GetHost().GetScene();
+		if (Lookup.Connected == nullptr)
+		{
+			entt::registry& registry = scene.GetRegistry();
+			registry.on_construct<NameComponent>().connect<&SceneLookup::OnNameOrTagsWritten>(Lookup);
+			registry.on_update<NameComponent>().connect<&SceneLookup::OnNameOrTagsWritten>(Lookup);
+			registry.on_construct<TagsComponent>().connect<&SceneLookup::OnNameOrTagsWritten>(Lookup);
+			registry.on_update<TagsComponent>().connect<&SceneLookup::OnNameOrTagsWritten>(Lookup);
+			Lookup.Connected = &scene;
+			Lookup.Dirty = true;
+		}
+		ENGINE_CORE_ASSERT(Lookup.Connected == &scene, "The script engine's host changed its scene; the VM's scene is fixed");
+		if (Lookup.Dirty || Lookup.StructureRevision != scene.GetStructureRevision())
+		{
+			// An entity is listed once under each key it holds, so a bucket's last entry tells whether it is listed already.
+			const auto add = [](std::map<std::string, std::vector<UUID>, std::less<>>& index, std::string_view key, UUID id)
+			{
+				auto entry = index.find(key);
+				if (entry == index.end())
+					entry = index.emplace(std::string(key), std::vector<UUID>{}).first;
+				if (entry->second.empty() || entry->second.back() != id)
+					entry->second.push_back(id);
+			};
+			Lookup.Names.clear();
+			Lookup.Tags.clear();
+			const Scene& entities = scene;
+			for (const UUID id : entities.GetCanonicalOrder())
+			{
+				const ConstEntity entity = entities.FindEntityByID(id);
+				add(Lookup.Names, entity.GetName(), id);
+				for (const std::string& tag : entity.GetTags())
+					add(Lookup.Tags, tag, id);
+			}
+			Lookup.StructureRevision = scene.GetStructureRevision();
+			Lookup.Dirty = false;
+		}
+		const std::map<std::string, std::vector<UUID>, std::less<>>& index = tags ? Lookup.Tags : Lookup.Names;
+		const auto found = index.find(name);
+		if (found == index.end())
+			return {};
+		return found->second;
 	}
 
 	std::vector<ScriptEngine::State::InstanceKey> ScriptEngine::State::InstancesOf(UUID entity) const

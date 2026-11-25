@@ -6,6 +6,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/SkeletonData.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Scene/AnimationSystem.h"
 #include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
@@ -27,16 +28,15 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
-#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
-#include "Engine/Scene/Components/WindComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/Scene.h"
@@ -49,6 +49,7 @@
 #include <format>
 #include <limits>
 #include <memory_resource>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -151,6 +152,29 @@ namespace Engine {
 			CHECK(snapshot->HasCamera);
 			CHECK(snapshot->Camera.Entity == primary.GetUUID());
 			CHECK(snapshot->Camera.ViewportWidth == 640);
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): FindPrimaryCamera reads the Camera view sorted by canonical
+		// key, so the camera it picks follows a reparent and a sibling move, whatever order the components were added in.
+		TEST_CASE("RenderExtraction: the primary camera follows a reparent and a sibling move")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity first = scene.CreateEntity("First");
+			Entity second = scene.CreateEntity("Second");
+			static_cast<void>(scene.CreateEntity("Unrelated"));
+			second.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			first.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(first));
+			REQUIRE(scene.SetParent(second, Entity{}, 0u).has_value());
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(second));
+			// Below a disabled entity the first camera is passed by.
+			Entity holder = scene.CreateEntity("Holder");
+			REQUIRE(scene.SetParent(holder, Entity{}, 0u).has_value());
+			REQUIRE(scene.SetParent(second, holder).has_value());
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(second));
+			holder.SetActive(false);
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(first));
 		}
 
 		TEST_CASE("RenderExtraction: a game view without a primary camera has no camera and is no error")
@@ -337,45 +361,6 @@ namespace Engine {
 			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
 			CHECK(snapshot->Fog.Enabled);
 			CHECK(snapshot->Fog.Density == 9.0f);
-		}
-
-		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3G): a MeshRenderer's RenderDistance
-		// rides on its item (the defaults without one), and the effectively enabled Wind reaches the snapshot with the request's
-		// SimulationTime as its Time (none without one).
-		TEST_CASE("RenderExtraction: a mesh's RenderDistance and the scene's Wind reach the snapshot at the request's time")
-		{
-			Test::SceneTestFixture fixture;
-			Scene& scene = fixture.GetScene();
-			Entity plain = scene.CreateEntity("Plain");
-			plain.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
-			Entity distant = scene.CreateEntity("Distant");
-			distant.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
-			distant.AddComponent<RenderDistanceComponent>(RenderDistanceComponent{ .CullDistance = 250.0f, .LodBias = 2.5f, .ShadowLodOffset = 3, .FadeWidth = 0.2f });
-			TransformSystem::Update(scene);
-			Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
-			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
-			REQUIRE(snapshot->Meshes.size() == 2);
-			CHECK(snapshot->Meshes[0].Distance == MeshDrawDistance{});
-			CHECK(snapshot->Meshes[1].Distance == MeshDrawDistance{ .CullDistance = 250.0f, .LodBias = 2.5f, .ShadowLodOffset = 3, .FadeWidth = 0.2f });
-			CHECK_FALSE(snapshot->Wind.Enabled);
-			CHECK(snapshot->Wind == RenderWind{});
-
-			Entity weather = scene.CreateEntity("Weather");
-			weather.AddComponent<WindComponent>(WindComponent{ .Direction = glm::vec3(0.0f, 0.0f, -3.0f), .Strength = 18.0f, .GustStrength = 6.0f, .GustFrequency = 0.4f, .Turbulence = 0.7f });
-			TransformSystem::Update(scene);
-			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
-			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
-			CHECK(snapshot->Wind == RenderWind{ .Enabled = true, .Direction = glm::vec3(0.0f, 0.0f, -3.0f), .Strength = 18.0f, .GustStrength = 6.0f, .GustFrequency = 0.4f, .Turbulence = 0.7f, .Time = 12.5 });
-			// An edit-time request (time 0) shows the wind without its sway's progress; a disabled Wind does not blow.
-			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
-			REQUIRE(snapshot.has_value());
-			CHECK(snapshot->Wind.Enabled);
-			CHECK(snapshot->Wind.Time == 0.0);
-			weather.SetActive(false);
-			TransformSystem::Update(scene);
-			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
-			REQUIRE(snapshot.has_value());
-			CHECK_FALSE(snapshot->Wind.Enabled);
 		}
 
 		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decision 12, stream X-A): every member of PostProcess version 2
@@ -1742,6 +1727,261 @@ namespace Engine {
 			REQUIRE(between->Meshes.size() == 1);
 			CHECK(between->PlanarReflections[0].World[3].z == doctest::Approx(-4.0f));
 			CHECK(between->PlanarReflections[0].World == between->Meshes[0].World);
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the MeshRenderers of effectively static entities are the
+		// static set's items, in their cells in canonical order, never in Meshes, whose items keep dense pick ids; skinned,
+		// mirrored-glass and scrolling items, NotStatic subtrees and an EntityOnly entity's children stay dynamic, and a static
+		// entity's other components extract as before.
+		TEST_CASE("RenderExtraction: a static subtree's meshes are in the snapshot's static set, not its mesh list")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			const auto addMesh = [&scene](std::string_view name, Entity parent, float x)
+			{
+				Entity entity = parent == Entity{} ? scene.CreateEntity(name) : scene.CreateEntity(name, parent);
+				entity.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+				SetTranslation(entity, glm::vec3(x, 0.0f, 0.0f));
+				return entity;
+			};
+			const Entity before = addMesh("Before", Entity{}, -1.0f);
+			Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			const Entity rock = addMesh("Rock", island, 1.0f);
+			Entity lamp = addMesh("Lamp", island, 2.0f);
+			lamp.AddComponent<PointLightComponent>();
+			Entity mill = addMesh("Mill", island, 3.0f);
+			mill.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::NotStatic });
+			const Entity sail = addMesh("Sail", mill, 1.0f);
+			Entity hut = addMesh("Hut", island, 5.0f);
+			hut.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::EntityOnly });
+			const Entity door = addMesh("Door", hut, 0.5f); // EntityOnly is passed by: the island's Subtree decides
+			Entity body = addMesh("Body", island, 6.0f);
+			body.AddComponent<SkinnedMeshComponent>();
+			Entity glass = addMesh("Glass", island, 7.0f);
+			glass.AddComponent<PlanarReflectionComponent>();
+			Entity banner = addMesh("Banner", island, 8.0f);
+			banner.AddComponent<MaterialParametersComponent>(MaterialParametersComponent{ .UVScroll = glm::vec2(0.5f, 0.0f) });
+			Entity crate = addMesh("Crate", Entity{}, 40.0f);
+			crate.AddComponent<StaticComponent>(StaticComponent{ .Scope = StaticScope::EntityOnly });
+			const Entity lid = addMesh("Lid", crate, 0.25f); // EntityOnly covers the crate alone
+			const Entity after = addMesh("After", Entity{}, 10.0f);
+			// A static entity's terrain stays pickable: its mesh makes no entry, so the terrain takes its own.
+			Entity plateau = addMesh("Plateau", island, 20.0f);
+			plateau.AddComponent<TerrainComponent>(TerrainComponent{ .Heightfield = TypedAssetHandle<AssetType::Heightfield>(AssetHandle(0x1a2c000000000001ull)) });
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 64, .Height = 64 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			// The dynamic items in canonical order, their pick ids dense from 1.
+			const std::vector<UUID> dynamic{ before.GetUUID(), mill.GetUUID(), sail.GetUUID(), body.GetUUID(), glass.GetUUID(), banner.GetUUID(),
+				lid.GetUUID(), after.GetUUID() };
+			REQUIRE(snapshot->Meshes.size() == dynamic.size());
+			REQUIRE(snapshot->PickTable.size() == dynamic.size() + 1);
+			for (size_t index = 0; index < dynamic.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(snapshot->Meshes[index].Entity == dynamic[index]);
+				CHECK(snapshot->Meshes[index].PickId == index + 1);
+				CHECK(snapshot->PickTable[index] == dynamic[index]);
+			}
+			// The static items in their cells (x then z), each in canonical order, without pick ids or previous matrices.
+			REQUIRE(snapshot->StaticSet != nullptr);
+			REQUIRE(snapshot->StaticSet->Cells.size() == 2);
+			const RenderStaticCell& nearCell = *snapshot->StaticSet->Cells[0];
+			CHECK(nearCell.Key == glm::ivec2(0, 0));
+			CHECK(nearCell.PickTable == std::vector<UUID>{ rock.GetUUID(), lamp.GetUUID(), hut.GetUUID(), door.GetUUID(), plateau.GetUUID() });
+			REQUIRE(nearCell.Items.size() == 5);
+			CHECK(nearCell.Items[3].World[3].x == 5.5f);
+			for (const MeshDrawItem& item : nearCell.Items)
+			{
+				CHECK(item.PickId == 0);
+				CHECK_FALSE(item.PreviousWorld.has_value());
+				CHECK(item.Mesh == BuiltinAssetHandles::CubeMesh);
+			}
+			const RenderStaticCell& farCell = *snapshot->StaticSet->Cells[1];
+			CHECK(farCell.Key == glm::ivec2(1, 0));
+			CHECK(farCell.PickTable == std::vector<UUID>{ crate.GetUUID() });
+			// The static lamp's light, and the glass's reflection, stay.
+			REQUIRE(snapshot->Lights.size() == 1);
+			CHECK(snapshot->Lights[0].Entity == lamp.GetUUID());
+			CHECK(snapshot->Lights[0].Position.x == 2.0f);
+			REQUIRE(snapshot->PlanarReflections.size() == 1);
+			CHECK(snapshot->PlanarReflections[0].Entity == glass.GetUUID());
+			REQUIRE(snapshot->Terrains.size() == 1);
+			CHECK(snapshot->Terrains[0].Entity == plateau.GetUUID());
+			CHECK(snapshot->Terrains[0].PickId == dynamic.size() + 1);
+			CHECK(snapshot->PickTable.back() == plateau.GetUUID());
+			// Every view of the scene shares the one set.
+			const Result<RenderSnapshot> editorView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .Width = 32, .Height = 32 });
+			REQUIRE_MESSAGE(editorView.has_value(), editorView.error().ToString());
+			CHECK(editorView->StaticSet == snapshot->StaticSet);
+			CHECK(editorView->Meshes.size() == dynamic.size());
+		}
+
+		// M43 (decision 6, W43.2): extraction visits the holders of the drawn and lit components in canonical order instead
+		// of every entity, and without Static the snapshot is what the whole-scene walk gave: the digest was taken from the walk
+		// before M43 and equals it in every configuration.
+		TEST_CASE("RenderExtraction: a scene without Static extracts as before")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			const auto place = [](Entity entity, const glm::vec3& translation)
+			{
+				SetTranslation(entity, translation);
+				return entity;
+			};
+			// Holders in an order that differs from their creation order and their components' order.
+			Entity world = place(scene.CreateEntity("World"), glm::vec3(0.0f));
+			Entity sun = place(scene.CreateEntity("Sun", world), glm::vec3(0.0f, 10.0f, 0.0f));
+			Entity lantern = place(scene.CreateEntity("Lantern", world), glm::vec3(1.0f, 2.0f, 3.0f));
+			Entity rock = place(scene.CreateEntity("Rock", lantern), glm::vec3(0.5f, 0.0f, 0.0f));
+			Entity hill = place(scene.CreateEntity("Hill"), glm::vec3(-4.0f, 0.0f, 2.0f));
+			Entity field = place(scene.CreateEntity("Field"), glm::vec3(4.0f, 0.0f, -2.0f));
+			Entity hud = scene.CreateEntity("Hud");
+			Entity sprites = scene.CreateEntity("Sprites");
+			Entity hero = place(scene.CreateEntity("Hero", sprites), glm::vec3(1.0f, 1.0f, 0.0f));
+			Entity ground = place(scene.CreateEntity("Ground", sprites), glm::vec3(0.0f, -1.0f, 0.0f));
+			Entity sky = place(scene.CreateEntity("Sky", sprites), glm::vec3(0.0f, 5.0f, 0.0f));
+			Entity effects = place(scene.CreateEntity("Effects"), glm::vec3(2.0f, 0.0f, 2.0f));
+			Entity glass = place(scene.CreateEntity("Glass"), glm::vec3(0.0f, 1.5f, -4.0f));
+			Entity off = scene.CreateEntity("Off");
+			Entity spot = place(scene.CreateEntity("Spot", hill), glm::vec3(0.0f, 3.0f, 0.0f));
+			static_cast<void>(scene.CreateEntity("Bystander")); // holds nothing drawn
+			// A tilemap and a sprite with equal keys, an entity that draws nothing between them in canonical order: the whole-scene
+			// walk counted it in their canonical positions and the component views do not, which must not change their order.
+			Entity banner = place(scene.CreateEntity("Banner"), glm::vec3(0.0f, 2.0f, 0.0f));
+			static_cast<void>(scene.CreateEntity("Spacer"));
+			Entity flag = place(scene.CreateEntity("Flag"), glm::vec3(0.0f, 3.0f, 0.0f));
+
+			// Components added in an order unrelated to the hierarchy.
+			spot.AddComponent<SpotLightComponent>(SpotLightComponent{ .Intensity = 4.0f });
+			glass.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::QuadMesh));
+			glass.AddComponent<PlanarReflectionComponent>(PlanarReflectionComponent{ .Offset = 0.25f });
+			const TypedAssetHandle<AssetType::Heightfield> heights(AssetHandle(0x1a2c000000000001ull));
+			field.AddComponent<TerrainComponent>(TerrainComponent{ .Heightfield = heights });
+			hill.AddComponent<TerrainComponent>(TerrainComponent{ .Heightfield = heights, .HeightScale = 12.0f });
+			hill.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::SphereMesh));
+			rock.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			rock.AddComponent<MaterialParametersComponent>(MaterialParametersComponent{ .Tint = glm::vec3(0.5f), .UVScroll = glm::vec2(0.25f, 0.0f) });
+			lantern.AddComponent<PointLightComponent>(PointLightComponent{ .Intensity = 2.0f, .Range = 6.0f });
+			lantern.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			lantern.AddComponent<TextComponent>(TextComponent{ .Text = "Lantern", .Font = {}, .Space = TextSpace::World });
+			sun.AddComponent<DirectionalLightComponent>(DirectionalLightComponent{ .Intensity = 3.0f });
+			world.AddComponent<FogComponent>(FogComponent{ .Density = 0.02f });
+			world.AddComponent<PostProcessComponent>(PostProcessComponent{ .ExposureEV = 1.5f });
+			world.AddComponent<EnvironmentComponent>(EnvironmentComponent{ .Environment = {}, .Intensity = 0.75f });
+			hud.AddComponent<TextComponent>(TextComponent{ .Text = "Score", .Font = {} });
+			sky.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .SortingLayer = "Background", .OrderInLayer = -5 });
+			ground.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(AssetHandle(0x7113000000000002ull)), .SortingLayer = "Background" });
+			hero.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .SortingLayer = "Foreground" });
+			hero.AddComponent<Light2DComponent>(Light2DComponent{ .Intensity = 2.0f });
+			flag.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .SortingLayer = "Foreground" });
+			banner.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(AssetHandle(0x7113000000000002ull)), .SortingLayer = "Foreground" });
+			effects.AddComponent<ParticleEmitterComponent>(ParticleEmitterComponent{ .SimulationSpace = ParticleSimulationSpace::Local });
+			effects.AddComponent<ParticleStateComponent>().State.Particles = { Particle{ .Position = glm::vec3(1.0f), .PreviousPosition = glm::vec3(0.5f), .Age = 0.25f, .Lifetime = 1.0f, .StartSize = 0.5f } };
+			effects.AddComponent<IrradianceVolumeComponent>(IrradianceVolumeComponent{ .Data = TypedAssetHandle<AssetType::IrradianceVolume>(AssetHandle(0x1a2b000000000001ull)) });
+			effects.AddComponent<ReflectionProbeComponent>(ReflectionProbeComponent{ .Data = TypedAssetHandle<AssetType::Environment>(AssetHandle(0x1a2b000000000002ull)) });
+			off.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			off.AddComponent<PointLightComponent>();
+			off.SetActive(false);
+			TransformSystem::Update(scene);
+			SnapshotPreviousPoses(scene);
+			SetTranslation(lantern, glm::vec3(2.0f, 2.0f, 3.0f));
+			TransformSystem::Update(scene);
+
+			RenderExtractionRequest request{ .Width = 64, .Height = 64, .Alpha = 0.5f, .SimulationTime = 2.0 };
+			request.SortingLayers = { "Default", "Background", "Foreground" };
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, request);
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			CHECK(scene.GetStaticCache() == nullptr);
+			CHECK(snapshot->StaticSet == nullptr);
+
+			// Every drawn component in canonical order, the meshes' pick ids dense and the terrains' after them.
+			const auto entities = [](const auto& items)
+			{
+				std::vector<UUID> ids;
+				for (const auto& item : items)
+					ids.push_back(item.Entity);
+				return ids;
+			};
+			CHECK(entities(snapshot->Meshes) == std::vector<UUID>{ lantern.GetUUID(), rock.GetUUID(), hill.GetUUID(), glass.GetUUID() });
+			for (size_t index = 0; index < snapshot->Meshes.size(); ++index)
+				CHECK(snapshot->Meshes[index].PickId == index + 1);
+			CHECK(std::vector<UUID>(snapshot->PickTable.begin(), snapshot->PickTable.end())
+				== std::vector<UUID>{ lantern.GetUUID(), rock.GetUUID(), hill.GetUUID(), glass.GetUUID(), field.GetUUID() });
+			CHECK(entities(snapshot->Lights) == std::vector<UUID>{ sun.GetUUID(), lantern.GetUUID(), spot.GetUUID() });
+			CHECK(entities(snapshot->Texts) == std::vector<UUID>{ lantern.GetUUID(), hud.GetUUID() });
+			CHECK(entities(snapshot->Sprites) == std::vector<UUID>{ sky.GetUUID(), hero.GetUUID(), flag.GetUUID() });
+			REQUIRE(snapshot->Tilemaps.size() == 2);
+			CHECK(snapshot->Tilemaps[0].Entity == ground.GetUUID());
+			CHECK(snapshot->Tilemaps[0].DrawPosition == 1);
+			// The banner draws after the hero and before the flag, whose key it shares.
+			CHECK(snapshot->Tilemaps[1].Entity == banner.GetUUID());
+			CHECK(snapshot->Tilemaps[1].DrawPosition == 2);
+			CHECK(entities(snapshot->Lights2D) == std::vector<UUID>{ hero.GetUUID() });
+			CHECK(entities(snapshot->ParticleEmitters) == std::vector<UUID>{ effects.GetUUID() });
+			CHECK(snapshot->Particles.size() == 1);
+			CHECK(entities(snapshot->IrradianceVolumes) == std::vector<UUID>{ effects.GetUUID() });
+			CHECK(entities(snapshot->ReflectionProbes) == std::vector<UUID>{ effects.GetUUID() });
+			CHECK(entities(snapshot->PlanarReflections) == std::vector<UUID>{ glass.GetUUID() });
+			REQUIRE(snapshot->Terrains.size() == 2);
+			CHECK(entities(snapshot->Terrains) == std::vector<UUID>{ hill.GetUUID(), field.GetUUID() });
+			CHECK(snapshot->Terrains[0].PickId == 3);
+			CHECK(snapshot->Terrains[1].PickId == 5);
+			CHECK(snapshot->Environment.Intensity == 0.75f);
+			CHECK(snapshot->Post.ExposureEV == 1.5f);
+			CHECK(snapshot->Fog.Enabled);
+
+			// The digest of what the whole-scene walk extracted before M43.
+			XXH64Hasher hasher;
+			const auto hashBytes = [&hasher](const auto& value)
+			{
+				hasher.Update(std::as_bytes(std::span(&value, 1)));
+			};
+			for (const MeshDrawItem& item : snapshot->Meshes)
+			{
+				hashBytes(item.Entity);
+				hashBytes(item.World);
+				hashBytes(item.Mesh);
+				hashBytes(item.PickId);
+				hashBytes(item.Parameters);
+			}
+			for (const UUID id : snapshot->PickTable)
+				hashBytes(id);
+			for (const LightData& light : snapshot->Lights)
+			{
+				hashBytes(light.Entity);
+				hashBytes(light.Position);
+				hashBytes(light.Direction);
+			}
+			for (const TextItem& text : snapshot->Texts)
+				hashBytes(text.World);
+			for (const SpriteItem& sprite : snapshot->Sprites)
+				hashBytes(sprite.World);
+			for (const TilemapItem& tilemap : snapshot->Tilemaps)
+			{
+				hashBytes(tilemap.World);
+				hashBytes(tilemap.DrawPosition);
+			}
+			for (const Light2DItem& light : snapshot->Lights2D)
+				hashBytes(light.Position);
+			for (const ParticleItem& particle : snapshot->Particles)
+				hashBytes(particle.Position);
+			for (const IrradianceVolumeItem& volume : snapshot->IrradianceVolumes)
+				hashBytes(volume.World);
+			for (const ReflectionProbeItem& probe : snapshot->ReflectionProbes)
+				hashBytes(probe.World);
+			for (const PlanarReflectionItem& reflection : snapshot->PlanarReflections)
+				hashBytes(reflection.World);
+			for (const TerrainItem& terrain : snapshot->Terrains)
+			{
+				hashBytes(terrain.World);
+				hashBytes(terrain.PickId);
+			}
+			CHECK(std::format("{:016x}", hasher.Digest()) == "7d98b55a01f1d4c6");
 		}
 	}
 

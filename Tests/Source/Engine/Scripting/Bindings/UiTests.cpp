@@ -471,7 +471,10 @@ return Script.Define("Kiosk", Kiosk)
 			Entity camera = scene.CreateEntity("Camera");
 			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
 			Entity kiosk = scene.CreateEntity("Kiosk");
-			kiosk.GetComponent<TransformComponent>().Translation = glm::vec3(100.0f, 0.0f, -5.0f);
+			kiosk.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(100.0f, 0.0f, -5.0f);
+			});
 			kiosk.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 64, .WorldHeight = 64, .PixelsPerUnit = 32.0f });
 			ScriptSlot slot{};
 			slot.Script.SetHandle(script);

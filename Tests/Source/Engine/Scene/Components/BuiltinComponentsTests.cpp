@@ -40,9 +40,12 @@ namespace Engine {
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
 			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, M37's four joints (Docs/Decisions/0054-m37-joints.md
 			// decision 1) 62, M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63, and M42's
-			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64, and M46's RenderDistance and Wind
-			// (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F) 66.
-			static_assert(BuiltinComponents::Size == 66);
+			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64; phase 8's in train order: M43's Static
+			// (Docs/Decisions/0061-m43-static-scenery.md decision 3) 65, then M44's MassProperties
+			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3) 66 and its WheeledVehicle and VehicleWheel 68, then M45's Sky
+			// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3) 69, then M46's RenderDistance and Wind
+			// (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F) 71.
+			static_assert(BuiltinComponents::Size == 71);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -59,6 +62,7 @@ namespace Engine {
 			static_assert(!TypeListContains<WorldTransformComponent, BuiltinComponents>);
 			static_assert(!TypeListContains<PreviousWorldTransformComponent, BuiltinComponents>);
 			static_assert(!TypeListContains<InterpolationResetTag, BuiltinComponents>);
+			static_assert(!TypeListContains<HierarchyStaticTag, BuiltinComponents>);
 			static_assert(!TypeListContains<HierarchyDisabledTag, BuiltinComponents>);
 			static_assert(!TypeListContains<PendingDestroyTag, BuiltinComponents>);
 			// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 29): an Animator's sampled pose is runtime state.
@@ -108,6 +112,7 @@ namespace Engine {
 			CHECK_FALSE(PrefabLinkComponent{}.PrefabEntityID.IsValid());
 			CHECK_FALSE(PrefabLinkComponent{}.InstanceRoot.IsValid());
 			CHECK_FALSE(PrefabLinkComponent{}.OuterPrefabEntityID.IsValid());
+			CHECK(StaticComponent{}.Scope == StaticScope::Subtree);
 		}
 
 		TEST_CASE("BuiltinComponents: rendering defaults follow the component table")
@@ -665,12 +670,15 @@ namespace Engine {
 				"Transform",
 				"Prefab",
 				"PrefabLink",
+				"Static",
 				"MeshRenderer",
 				"Camera",
 				"DirectionalLight",
 				"PointLight",
 				"SpotLight",
 				"Environment",
+				// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): in Rendering, after Environment.
+				"Sky",
 				"PostProcess",
 				"Text",
 				"RigidBody",
@@ -681,6 +689,8 @@ namespace Engine {
 				"CharacterController",
 				// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 1): in Physics, after CharacterController.
 				"ColliderSurface",
+				// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): in Physics, after ColliderSurface.
+				"MassProperties",
 				"AudioSource",
 				"AudioListener",
 				"Script",
@@ -737,6 +747,10 @@ namespace Engine {
 				"SliderJoint",
 				"DistanceJoint",
 				"FixedJoint",
+				// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): ADR 0060's phase-8 ledger's Vehicles category after
+				// Joints.
+				"WheeledVehicle",
+				"VehicleWheel",
 				"RenderDistance",
 				"Wind",
 			};
@@ -750,7 +764,8 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints", "RenderDistance", "Wind" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints", "Vehicles", "RenderDistance",
+				"Wind" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,

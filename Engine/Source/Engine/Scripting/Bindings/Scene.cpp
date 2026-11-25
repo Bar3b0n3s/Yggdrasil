@@ -10,6 +10,7 @@
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
 #include "Engine/Scripting/ScriptLimits.h"
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -158,26 +160,29 @@ namespace Engine {
 			return 1;
 		}
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): through the script engine's name and tag index
+		// (ScriptEngineAccess::FindSceneEntities), which lists what the canonical walk found: every live entity with the name
+		// or tag, disabled ones included, in canonical order.
 		template<bool Tags, bool All>
 		static int SceneFind(ScriptCall& call)
 		{
 			const auto name = SceneText(call, 1);
 			auto& host = call.Engine->GetHost();
+			const std::span<const UUID> found = Detail::ScriptEngineAccess::FindSceneEntities(*call.Engine, name, Tags);
 			if constexpr (All)
-				lua_newtable(call.State);
-			for (const auto id : host.GetScene().GetCanonicalOrder())
 			{
-				const auto entity = host.GetScene().FindEntityByID(id);
-				if (!entity || !(Tags ? entity.HasTag(name) : entity.GetName() == name))
-					continue;
-				Lua::Push(call, ScriptEntityIdentity{ id, host.GetSceneGeneration() });
-				if constexpr (All)
-					lua_rawseti(call.State, -2, lua_objlen(call.State, -2) + 1);
-				else
-					return 1;
+				lua_newtable(call.State);
+				int index = 1;
+				for (const UUID id : found)
+				{
+					Lua::Push(call, ScriptEntityIdentity{ id, host.GetSceneGeneration() });
+					lua_rawseti(call.State, -2, index++);
+				}
 			}
-			if constexpr (!All)
+			else if (found.empty())
 				Lua::PushNil(call);
+			else
+				Lua::Push(call, ScriptEntityIdentity{ found.front(), host.GetSceneGeneration() });
 			return 1;
 		}
 
@@ -206,18 +211,18 @@ namespace Engine {
 				return Lua::RaiseError(call, message);
 			}
 			const auto* operations = component->GetHostOps();
-			if (operations == nullptr || operations->Has == nullptr)
+			if (operations == nullptr || operations->Has == nullptr || operations->CollectCanonical == nullptr)
 				return Lua::RaiseError(call, "component has no scene operations");
+			// M43: the component's view in canonical order (ComponentHostOps::CollectCanonical), never a walk of the scene.
+			const Scene& scene = host.GetScene();
+			std::vector<entt::entity> holders;
+			operations->CollectCanonical(scene, holders);
 			lua_newtable(call.State);
 			int index = 1;
-			for (const auto id : host.GetScene().GetCanonicalOrder())
+			for (const entt::entity handle : holders)
 			{
-				const auto entity = host.GetScene().FindEntityByID(id);
-				if (entity && operations->Has(entity))
-				{
-					Lua::Push(call, ScriptEntityIdentity{ id, host.GetSceneGeneration() });
-					lua_rawseti(call.State, -2, index++);
-				}
+				Lua::Push(call, ScriptEntityIdentity{ ConstEntity(handle, &scene).GetUUID(), host.GetSceneGeneration() });
+				lua_rawseti(call.State, -2, index++);
 			}
 			return 1;
 		}
@@ -225,15 +230,16 @@ namespace Engine {
 		static int SceneCamera(ScriptCall& call)
 		{
 			auto& host = call.Engine->GetHost();
-			for (const auto id : host.GetScene().GetCanonicalOrder())
+			// M43: the Camera view in canonical order, never a walk of the scene.
+			const Scene& scene = host.GetScene();
+			std::vector<entt::entity> cameras;
+			scene.CollectCanonical<CameraComponent>(cameras);
+			for (const entt::entity handle : cameras)
 			{
-				const auto entity = host.GetScene().FindEntityByID(id);
-				if (!entity || !entity.IsActive())
-					continue;
-				const auto* camera = entity.TryGetComponent<CameraComponent>();
-				if (camera != nullptr && camera->Primary)
+				const ConstEntity entity(handle, &scene);
+				if (entity.IsActive() && entity.GetComponent<CameraComponent>().Primary)
 				{
-					Lua::Push(call, ScriptEntityIdentity{ id, host.GetSceneGeneration() });
+					Lua::Push(call, ScriptEntityIdentity{ entity.GetUUID(), host.GetSceneGeneration() });
 					return 1;
 				}
 			}

@@ -23,6 +23,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsComposition.h"
+#include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Private/Physics2DComposition.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
@@ -150,7 +151,7 @@ namespace Engine {
 				return false;
 			const RigidBodyComponent* body = owner.TryGetComponent<RigidBodyComponent>();
 			if (plan.Origin == PhysicsBodyOrigin::RigidBody && plan.MotionType == PhysicsMotionType::Dynamic && body != nullptr)
-				return (*shape)->CheckDynamicBody(body->Mass, GetRigidBodyDofs(*body)).has_value();
+				return (*shape)->CheckDynamicBody(body->Mass, GetRigidBodyDofs(*body), GetPhysicsMassOverride(owner)).has_value();
 			return true;
 		}
 

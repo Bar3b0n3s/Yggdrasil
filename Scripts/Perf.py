@@ -29,13 +29,37 @@ resolution (ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also 
 (Assets/Perf/Mirrors.scene: three built-in Quad mirrors on its walls at the default half resolution, facing a
 perspective camera across a floor of props lit by a shadowed sun and a shadowed point light; reflections/Mirrors3/gpuMs:
 the sum of the PlanarReflection<k> rows, each a mirror's whole view; budget 2.0 ms, World Tree's brief 23's target),
-captured only when the view drew all three; and (M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md
-decision 3K) the levels of detail of a generated forest (Assets/Perf/Forest.scene: 2,000 of LodTree.gltf's trees, its
-authored levels and _WIND, and 4,000 rocks, LodSphere.gltf's ball with its generated levels, both as MeshLods.jsonl
-imports them, over a 1 km plane under a gale and a sun with cascades, seen across the forest by a perspective camera;
-lod/Forest/gpuMs: the sum of the DepthNormal row, the Shadows pass's rows and the ForwardOpaque row; budget 3.0 ms, the
-Skerries brief S04's trees and rocks), captured only when the view drew a coarser level.
---only selects some of the parts (playCopy, scenes, navigation, replay, look), a development aid for one measurement.
+captured only when the view drew all three; and (M45, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3) the
+sky of a generated cove (Assets/Perf/Sky.scene: a Sky naming a shadowed Sun and a Moon light, with a cloud layer, over a
+ground of props in a relightable 8 x 4 x 8 IrradianceVolume baked by lighting.bake at the part's start, its camera
+showing the horizon): sky/Static/gpuMs, the SkyLuts, SkyIbl and Sky rows while the sun stands still (budget 0.3 ms),
+captured only when the view's sky light was not regenerated; and sky/Turning/gpuMs, the same rows and ProbeRelight with
+the sun turned every tick by the scene's script (Assets/Perf/SkySunTurner.luau; Skerries' brief S03's time-lapse, budget
+0.6 ms), captured only when the view regenerated the sky's light and relit the volume; and (M46,
+Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K) the levels of detail of a generated forest
+(Assets/Perf/Forest.scene: 2,000 of LodTree.gltf's trees, its authored levels and _WIND, and 4,000 rocks,
+LodSphere.gltf's ball with its generated levels, both as MeshLods.jsonl imports them, over a 1 km plane under a gale
+and a sun with cascades, seen across the forest by a perspective camera; lod/Forest/gpuMs: the sum of the DepthNormal
+row, the Shadows pass's rows and the ForwardOpaque row; budget 3.0 ms, the Skerries brief S04's trees and rocks),
+captured only when the view drew a coarser level; then (M43,
+Docs/Decisions/0061-m43-static-scenery.md decision 3 and its W43.3 record; the "staticScenery" part) another
+--headless-game-view editor at 1920 x 1080, with the copy's
+Simulation.MaxEntities raised to 32,768, measures on a generated Assets/Perf/StaticScenery.scene (10,000 pairs of a root
+and its built-in cube or sphere child, a 100 x 100 grid of 2 m under one Static root, so 20,000 static entities in 49
+cells, which a perspective camera sees whole, under a shadowed sun):
+  - staticScenery/20000Entities/cpuMs (budget 2.0 ms, S16's 2 ms for 20,000 static entities in one view): the CPU of a
+    tick and of the game view's render, without the state hash or a GPU wait. In a lockstep session, after a rendered
+    warm-up, each of 8 play.step calls of 30 ticks with render "None" (no extraction, no render), less the median
+    play.state round trip (the one state hash each call's result computes), per tick; plus the mean of the game view's
+    CPU recording time (stats.get's cpuMilliseconds) after 8 calls of 30 ticks with render "Every", and the mean
+    ExtractRenderSnapshot zone of a 30-frame profiler capture of the running session (every view's extraction);
+  - stateHash/20000Entities/ms: in the same lockstep session, the round trip of play.state (which computes the state
+    hash) less the median of the same round trip in a session of a generated empty scene (no budget);
+captured only when the game view's static set held the 10,000 meshes, it drew no dynamic mesh and the last tick rebuilt
+no static cell, with the tick's, the view's and the extraction's parts, the view's static cells, the visible ones and
+its shadow and ForwardOpaque draws printed.
+--only selects some of the parts (playCopy, scenes, navigation, replay, look, staticScenery), a development aid for one
+measurement.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
 (--gpu-optional: no frame or GPU times) makes the step a warning. Only a capture that cannot run fails it: a missing
@@ -55,6 +79,7 @@ the caller's directory, then main() makes the repository root of its own checkou
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import sys
@@ -90,7 +115,7 @@ for index = 0, 149 do
 end
 return stuck"""
 NAVIGATION_METRIC = "navigation/150Agents/tickMs"
-CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay", "look")
+CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay", "look", "staticScenery")
 GENERATED_SCENE = "Assets/Perf/Entities1000.scene"
 GENERATED_EMPTY_SCENE = "Assets/Perf/Empty.scene"
 GENERATED_ENTITIES = 1000
@@ -118,6 +143,37 @@ MIRROR_SCENE = "Assets/Perf/Mirrors.scene"
 MIRROR_METRIC = "reflections/Mirrors3/gpuMs"
 MIRROR_COUNT = 3
 MIRROR_PASSES = ("PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3")
+# M43: the static scenery's scenes, metrics and grid (module docstring).
+STATIC_SCENE = "Assets/Perf/StaticScenery.scene"
+STATIC_EMPTY_SCENE = "Assets/Perf/StaticSceneryEmpty.scene"
+STATIC_METRIC = "staticScenery/20000Entities/cpuMs"
+STATE_HASH_METRIC = "stateHash/20000Entities/ms"
+STATIC_COLUMNS = 100
+STATIC_PAIRS = STATIC_COLUMNS * STATIC_COLUMNS
+STATIC_SPACING = 2.0
+STATIC_MAX_ENTITIES = 32768  # FeatureTest holds 8,192; the scene holds 20,003
+STATE_HASH_SAMPLES = 8
+PROFILE_FRAMES = 30
+EXTRACTION_ZONE = "ExtractRenderSnapshot"
+EDIT_BATCH_OPS = 1000  # edit.batch's bound on its ops
+# M45: the sky's cove (module docstring), its sun's turner, its two metrics and the rows each sums.
+SKY_SCENE = "Assets/Perf/Sky.scene"
+SKY_TURNER = "Assets/Perf/SkySunTurner.luau"
+SKY_TURNER_SOURCE = """--!strict
+-- Turns the perf cove's Sun a quarter of a degree every tick (Scripts/Perf.py's sky/Turning/gpuMs).
+local SkySunTurner = {}
+
+function SkySunTurner.OnFixedUpdate(self: ScriptInstance, dt: number)
+\tself.Entity.Transform:Rotate(vector.create(0.25, 0, 0))
+end
+
+return Script.Define("SkySunTurner", SkySunTurner)
+"""
+SKY_STATIC_METRIC = "sky/Static/gpuMs"
+SKY_TURNING_METRIC = "sky/Turning/gpuMs"
+SKY_STATIC_PASSES = ("SkyLuts", "SkyIbl", "Sky")
+SKY_TURNING_PASSES = ("SkyLuts", "SkyIbl", "ProbeRelight", "Sky")
+SKY_PROBE_COUNTS = (8, 4, 8)
 # M46: the forest (module docstring), its meshes as MeshLods.jsonl imports them, and the rows its metric sums: the
 # DepthNormal row, the Shadows pass's rows (RenderPassDeclaration.h's ShadowRows) and the ForwardOpaque row.
 FOREST_SCENE = "Assets/Perf/Forest.scene"
@@ -424,6 +480,140 @@ class Capture:
         self.metrics.append(metric)
         self.console.print(f"  {MIRROR_METRIC}: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
 
+    def state_round_trips(self, client: Any) -> list[float]:
+        """STATE_HASH_SAMPLES play.state round trips of the playing session, in ms; each computes the state hash."""
+        samples: list[float] = []
+        for _ in range(STATE_HASH_SAMPLES):
+            started = time.perf_counter()
+            self.call(client, "play.state", {})
+            samples.append((time.perf_counter() - started) * 1000.0)
+        return samples
+
+    def extraction_ms(self, client: Any) -> float:
+        """The mean EXTRACTION_ZONE of a PROFILE_FRAMES-frame profiler capture of the active scene's running session."""
+        self.call(client, "play.start", {"lockstep": False}, timeout=STEP_TIMEOUT_SECONDS)
+        try:
+            trace = self.call(client, "profiler.capture", {"frames": PROFILE_FRAMES}, timeout=STEP_TIMEOUT_SECONDS)
+        finally:
+            self.call(client, "play.stop", {})
+        return mean_zone_ms(Path(trace["path"]), EXTRACTION_ZONE)
+
+    def played(self, client: Any, work: Any, scene: str | None = None) -> Any:
+        """work() in a lockstep session of `scene` (opened first), or of the active scene without one (the editor
+        refuses to open the active scene again); the session is stopped again."""
+        if scene is not None:
+            self.call(client, "scene.open", {"path": scene, "discardChanges": True}, timeout=STEP_TIMEOUT_SECONDS)
+        self.call(client, "play.start", {"lockstep": True}, timeout=STEP_TIMEOUT_SECONDS)
+        try:
+            return work()
+        finally:
+            self.call(client, "play.stop", {})
+
+    def static_scenery(self, client: Any) -> None:
+        """staticScenery/20000Entities/cpuMs and stateHash/20000Entities/ms (module docstring); an engine error, or a
+        game view that did not draw the generated static set alone, makes it a warning."""
+
+        def measure_static() -> tuple[list[float], list[float], dict[str, Any], list[float]]:
+            self.call(client, "play.step", {"ticks": WARM_UP_TICKS, "render": "Every"}, timeout=STEP_TIMEOUT_SECONDS)
+            recording: list[float] = []
+            stats: dict[str, Any] = {}
+            for _ in range(SCENE_CHUNKS):
+                self.call(client, "play.step", {"ticks": SCENE_CHUNK_TICKS, "render": "Every"},
+                          timeout=STEP_TIMEOUT_SECONDS)
+                stats = self.call(client, "stats.get", {})
+                view = game_view(stats)
+                if view.get("available"):
+                    recording.append(float(view.get("cpuMilliseconds", 0.0)))
+            return self.step_chunks(client, "None"), recording, stats, self.state_round_trips(client)
+
+        try:
+            self.call(client, "project.setSettings", {"patch": {"Simulation": {"MaxEntities": STATIC_MAX_ENTITIES}}})
+            self.call(client, "scene.new", {"path": STATIC_EMPTY_SCENE, "template": "Empty", "discardChanges": True})
+            self.call(client, "scene.save", {})
+            self.call(client, "scene.new", {"path": STATIC_SCENE, "template": "Empty", "discardChanges": True})
+            for index, ops in enumerate(static_scenery_batches()):
+                self.call(client, "edit.batch", {"label": f"Perf: static scenery {index + 1}", "ops": ops},
+                          timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {}, timeout=STEP_TIMEOUT_SECONDS)
+            ticks, recording, stats, static_hashes = self.played(client, measure_static)
+            extraction = self.extraction_ms(client)
+            empty_hashes = self.played(client, lambda: self.state_round_trips(client), STATIC_EMPTY_SCENE)
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"{STATIC_METRIC}: {detail}; not captured")
+            return
+        view = game_view(stats)
+        drawn = (view.get("staticItems", 0), view.get("dynamicItems", 0), stats.get("staticCellRebuilds", 0))
+        if drawn != (STATIC_PAIRS, 0, 0):
+            self.warnings.append(f"{STATIC_METRIC}: the game view drew {drawn[0]} static and {drawn[1]} dynamic "
+                                 f"meshes and its last frame rebuilt {drawn[2]} static cells, not the scene's "
+                                 f"{STATIC_PAIRS} static meshes alone; not captured")
+            return
+        if not recording:
+            self.warnings.append(f"{STATIC_METRIC}: the game view reported no CPU recording time; not captured")
+            return
+        per_call = perf.summarize("stateHashRoundTrip", "ms", static_hashes).median / SCENE_CHUNK_TICKS
+        tick = [max(sample - per_call, 0.0) for sample in ticks]
+        view_ms = sum(recording) / len(recording)
+        cpu = perf.summarize(STATIC_METRIC, "ms", [sample + view_ms + extraction for sample in tick])
+        state = perf.summarize(STATE_HASH_METRIC, "ms", cost_samples(static_hashes, empty_hashes))
+        self.metrics += [cpu, state]
+        forward = next((entry.get("drawCalls", 0) for entry in view.get("passes", [])
+                        if isinstance(entry, dict) and entry.get("name") == "ForwardOpaque"), 0)
+        self.console.print(f"  {STATIC_METRIC}: median {cpu.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT} (the tick "
+                           f"{perf.summarize('tick', 'ms', tick).median:.3f} ms without the state hash's "
+                           f"{per_call:.3f}, the game view's recording {view_ms:.3f} ms, an extraction "
+                           f"{extraction:.3f} ms); {view.get('staticCellsVisible', 0)} of "
+                           f"{view.get('staticCells', 0)} static cells visible, {view.get('shadowDraws', 0)} shadow "
+                           f"and {forward} ForwardOpaque draws")
+        self.console.print(f"  {STATE_HASH_METRIC}: median {state.median:.3f} ms over an empty scene's play.state")
+
+    def sky_cost(self, client: Any) -> None:
+        """sky/Static/gpuMs and sky/Turning/gpuMs (module docstring); an engine error, a bake that is not relightable, a
+        view without GPU times, a still sky whose light was regenerated or a turning one whose light was not regenerated
+        with its volume relit makes the metric a warning."""
+        both = f"{SKY_STATIC_METRIC} and {SKY_TURNING_METRIC} not captured"
+        try:
+            self.call(client, "script.write", {"path": SKY_TURNER, "source": SKY_TURNER_SOURCE})
+            self.call(client, "scene.new", {"path": SKY_SCENE, "template": "Empty", "discardChanges": True})
+            self.call(client, "edit.batch", {"label": "Perf: sky", "ops": sky_cove_ops()}, timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            baked = self.call(client, "lighting.bake", {}, timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            volumes = baked.get("irradianceVolumes", []) if isinstance(baked, dict) else []
+            if len(volumes) != 1 or not volumes[0].get("relightable"):
+                self.warnings.append(f"sky: the cove's IrradianceVolume did not bake relightable; {both}")
+                return
+            still, still_view = self.play_samples(client, SKY_STATIC_PASSES)
+            # The scene stays open with its Sun's turner added, unsaved, as the fog's cost leaves its scene.
+            self.call(client, "entity.update",
+                      {"entity": "/Sun", "components": {"Script": {"Scripts": [{"Script": SKY_TURNER}]}}})
+            turning, turning_view = self.play_samples(client, SKY_TURNING_PASSES)
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"sky: {detail}; {both}")
+            return
+        if still_view.get("skyUpdates", 0) != 0:
+            self.warnings.append(f"{SKY_STATIC_METRIC}: the still sky's light was regenerated; not captured")
+        else:
+            self.sky_metric(SKY_STATIC_METRIC, still)
+        if turning_view.get("skyUpdates", 0) != 1 or turning_view.get("relitIrradianceVolumes", 0) != 1:
+            self.warnings.append(f"{SKY_TURNING_METRIC}: the turning sky's light was not regenerated with its volume "
+                                 f"relit; not captured")
+        else:
+            self.sky_metric(SKY_TURNING_METRIC, turning)
+
+    def sky_metric(self, name: str, samples: list[float]) -> None:
+        """The sky's metric `name` from `samples`; a warning without any."""
+        if not samples:
+            self.warnings.append(f"{name}: the game view reported no GPU times; not captured")
+            return
+        metric = perf.summarize(name, "ms", samples)
+        self.metrics.append(metric)
+        self.console.print(f"  {name}: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
+
     def forest_cost(self, client: Any) -> None:
         """lod/Forest/gpuMs (module docstring); an engine error, a view without GPU times or a view that drew no coarser
         level makes it a warning."""
@@ -575,6 +765,22 @@ def summed_gpu_time(view: dict[str, Any], passes: tuple[str, ...]) -> float | No
                if isinstance(entry, dict) and entry.get("name") in passes and entry.get("gpuAvailable"))
 
 
+def mean_zone_ms(trace: Path, name: str) -> float:
+    """The mean duration, in ms, of the complete CPU zones named `name` of a profiler.capture trace (Chrome trace JSON).
+    Raises ValueError for a trace that cannot be read or holds no such zone."""
+    try:
+        document = json.loads(trace.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"the profiler trace {trace} cannot be read: {error}") from None
+    events = document.get("traceEvents", []) if isinstance(document, dict) else document
+    durations = [float(event["dur"]) / 1000.0 for event in events
+                 if isinstance(event, dict) and event.get("ph") == "X" and event.get("name") == name
+                 and isinstance(event.get("dur"), (int, float))]
+    if not durations:
+        raise ValueError(f"the profiler trace {trace} holds no {name} zone")
+    return sum(durations) / len(durations)
+
+
 def cost_samples(with_effect: list[float], without: list[float]) -> list[float]:
     """Each sample with an effect less the median of the samples without it: the effect's cost, sample by sample."""
     baseline = perf.summarize("baseline", "ms", without).median
@@ -644,6 +850,72 @@ def mirror_room_ops() -> list[dict[str, Any]]:
             "Transform": {"Translation": translation, "EulerAngles": [0, turn, 0], "Scale": [3, 2, 1]},
             "MeshRenderer": {"Mesh": "engine://Meshes/Quad", "Materials": ["Assets/Perf/Mirror.material"]},
             "PlanarReflection": {}}}})
+    return ops
+
+
+def static_scenery_ops() -> list[dict[str, Any]]:
+    """entity.create ops of the static scenery (module docstring): the Static root, a perspective camera that sees the
+    whole grid, a shadowed sun and the STATIC_PAIRS pairs under the root, each a root at its grid place and its child
+    holding a built-in cube or sphere (alternating, so two keys)."""
+    centre = (STATIC_COLUMNS - 1) * STATIC_SPACING / 2.0
+    ops: list[dict[str, Any]] = [
+        {"method": "entity.create", "params": {"name": "Scenery", "components": {"Static": {}}}},
+        {"method": "entity.create", "params": {"name": "Camera", "components": {
+            "Transform": {"Translation": [centre, 60, centre + 170], "EulerAngles": [-20, 0, 0]},
+            "Camera": {"Primary": True, "Projection": "Perspective", "VerticalFov": 60, "FarClip": 500}}}},
+        {"method": "entity.create", "params": {"name": "Sun", "components": {
+            "Transform": {"EulerAngles": [-50, 30, 0]}, "DirectionalLight": {"Intensity": 2, "CastShadows": True}}}},
+    ]
+    for index in range(STATIC_PAIRS):
+        row, column = divmod(index, STATIC_COLUMNS)
+        name = f"Pair{index:05}"
+        mesh = "engine://Meshes/Sphere" if (row + column) % 2 else BUILTIN_CUBE_MESH
+        ops.append({"method": "entity.create", "params": {"name": name, "parent": "/Scenery", "components": {
+            "Transform": {"Translation": [column * STATIC_SPACING, 0, row * STATIC_SPACING]}}}})
+        ops.append({"method": "entity.create", "params": {"name": "Mesh", "parent": f"/Scenery/{name}", "components": {
+            "Transform": {"Translation": [0, 0.5, 0]}, "MeshRenderer": {"Mesh": mesh}}}})
+    return ops
+
+
+def static_scenery_batches() -> list[list[dict[str, Any]]]:
+    """static_scenery_ops in order, in edit.batch calls of at most EDIT_BATCH_OPS ops."""
+    ops = static_scenery_ops()
+    return [ops[start:start + EDIT_BATCH_OPS] for start in range(0, len(ops), EDIT_BATCH_OPS)]
+
+
+def sky_cove_ops() -> list[dict[str, Any]]:
+    """edit.batch ops of the sky's cove: a perspective camera at (0, 2, 9) looking a little above the horizon, so the
+    sky fills about half the view, a 40 m ground with 8 props, a shadowed Sun 40 degrees up and a Moon light, a Sky
+    naming them with a cloud layer (Clouds 0.35), automatic exposure, and a 16 x 4 x 16 m IrradianceVolume of 8 x 4 x 8
+    probes over the props."""
+    ops: list[dict[str, Any]] = [
+        {"method": "entity.create", "params": {"name": "Rendering", "components": {
+            "PostProcess": {"ExposureMode": "Auto", "SsaoEnabled": False}}}},
+        {"method": "entity.create", "params": {"name": "Camera", "components": {
+            "Transform": {"Translation": [0, 2, 9], "EulerAngles": [4, 0, 0]},
+            "Camera": {"Primary": True, "Projection": "Perspective", "VerticalFov": 60, "Clear": "Skybox"}}}},
+        {"method": "entity.create", "params": {"name": "Sun", "components": {
+            "Transform": {"EulerAngles": [-40, -30, 0]},
+            "DirectionalLight": {"Intensity": 4, "LightAngle": 0.53, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Moon", "components": {
+            "Transform": {"EulerAngles": [-35, 150, 0]},
+            "DirectionalLight": {"Color": [0.75, 0.82, 1], "Intensity": 0.02, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Sky", "components": {
+            "Sky": {"Sun": "/Sun", "Moon": "/Moon", "Clouds": 0.35}}}},
+        {"method": "entity.create", "params": {"name": "Ground", "components": {
+            "Transform": {"Scale": [40, 1, 40]}, "MeshRenderer": {"Mesh": "engine://Meshes/Plane"}}}},
+        {"method": "entity.create", "params": {"name": "Volume", "components": {
+            "Transform": {"Translation": [0, 2, 0]},
+            "IrradianceVolume": {"Size": [16, 4, 16], "ProbeCountX": SKY_PROBE_COUNTS[0],
+                                 "ProbeCountY": SKY_PROBE_COUNTS[1], "ProbeCountZ": SKY_PROBE_COUNTS[2]}}}},
+    ]
+    for index in range(8):
+        row, column = divmod(index, 4)
+        mesh = "engine://Meshes/Sphere" if index % 2 else BUILTIN_CUBE_MESH
+        ops.append({"method": "entity.create", "params": {"name": f"Prop{index}", "components": {
+            "Transform": {"Translation": [-4.5 + column * 3.0, 0.5, -3.0 + row * 3.0],
+                          "EulerAngles": [0, index * 20.0, 0]},
+            "MeshRenderer": {"Mesh": mesh}}}})
     return ops
 
 
@@ -780,9 +1052,18 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
                     capture.fog_cost(client)
                     capture.ssr_cost(client)
                     capture.mirror_cost(client)
+                    capture.sky_cost(client)
                     capture.forest_cost(client)
 
                 run_editor(capture, editor, project_file, renderer, root / "LookUserData", look,
+                           ("--headless-game-view",))
+            if "staticScenery" in parts and renderer == "vulkan":
+                def static_scenery(client: Any, _pid: int) -> None:
+                    capture.call(client, "project.setSettings",
+                                 {"patch": {"Window": {"Width": LOOK_WIDTH, "Height": LOOK_HEIGHT}}})
+                    capture.static_scenery(client)
+
+                run_editor(capture, editor, project_file, renderer, root / "StaticUserData", static_scenery,
                            ("--headless-game-view",))
     except CaptureError as error:
         return Step(name, Status.FAILED, f"the capture could not run: {error}", time.perf_counter() - started,

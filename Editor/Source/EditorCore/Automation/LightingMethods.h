@@ -17,6 +17,8 @@
 // Frozen by the M26 contract C26.1: the wire format below. The types and the method are written here; stream Q-A implements
 // the handler and calls the registration functions from RegisterMethods.cpp, together with its C++ round trip, its Python
 // test (Tests/Automation/test_lighting.py), its scene-target inventory entry and the regenerated references and catalogue.
+// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3, a reviewed change of the frozen format) appends
+// LightingBakeProbe's relightable.
 
 namespace Engine {
 
@@ -38,7 +40,8 @@ namespace Engine {
 		EntitySummary Entity{};
 		std::string Path{}; // the written source, project-relative
 		AssetSummary Asset{};
-		bool Changed = false; // whether the file's bytes changed
+		bool Changed = false;     // whether the file's bytes changed
+		bool Relightable = false; // M45: an IrradianceVolume baked under an enabled Sky (relit by the sky at run time)
 	};
 
 	struct LightingBakeMethodResult

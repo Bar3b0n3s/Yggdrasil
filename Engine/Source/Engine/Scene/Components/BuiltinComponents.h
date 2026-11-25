@@ -22,6 +22,7 @@
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
+#include "Engine/Scene/Components/MassPropertiesComponent.h"
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
@@ -44,11 +45,13 @@
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
+#include "Engine/Scene/Components/SkyComponent.h"
 #include "Engine/Scene/Components/SliderJointComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TerrainColliderComponent.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
@@ -67,6 +70,8 @@
 #include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
+#include "Engine/Scene/Components/VehicleWheelComponent.h"
+#include "Engine/Scene/Components/WheeledVehicleComponent.h"
 #include "Engine/Scene/Components/WindComponent.h"
 
 namespace Engine {
@@ -80,14 +85,16 @@ namespace Engine {
 	using BuiltinComponents = TypeList<
 		// Core (Registration/CoreRegistration.cpp)
 		IDComponent, NameComponent, TagsComponent, RelationshipComponent, TransformComponent, PrefabInstanceComponent,
-		PrefabLinkComponent,
-		// Rendering (Registration/RenderingRegistration.cpp)
+		PrefabLinkComponent, StaticComponent,
+		// Rendering (Registration/RenderingRegistration.cpp). M45's Sky follows the Environment
+		// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger, the components row).
 		MeshRendererComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent,
-		EnvironmentComponent, PostProcessComponent, TextComponent,
+		EnvironmentComponent, SkyComponent, PostProcessComponent, TextComponent,
 		// Physics (Registration/PhysicsRegistration.cpp). M36's ColliderSurface follows CharacterController
-		// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1; ADR 0052's phase-6 ledger, the categories row).
+		// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1; ADR 0052's phase-6 ledger, the categories row), and M44's
+		// MassProperties follows it (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; ADR 0060's phase-8 ledger).
 		RigidBodyComponent, BoxColliderComponent, SphereColliderComponent, CapsuleColliderComponent, MeshColliderComponent,
-		CharacterControllerComponent, ColliderSurfaceComponent,
+		CharacterControllerComponent, ColliderSurfaceComponent, MassPropertiesComponent,
 		// Audio (Registration/AudioRegistration.cpp)
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)
@@ -129,6 +136,9 @@ namespace Engine {
 		// Joints (Registration/JointsRegistration.cpp; M37, Docs/Decisions/0054-m37-joints.md decision 1). ADR 0052's phase-6
 		// ledger: a sixteenth category after Navigation, in landing order.
 		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent,
+		// Vehicles (Registration/VehiclesRegistration.cpp; M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3). ADR
+		// 0060's phase-8 ledger: a seventeenth category after Joints, the first of phase 8's four new categories.
+		WheeledVehicleComponent, VehicleWheelComponent,
 		// RenderDistance (Registration/RenderDistanceRegistration.cpp) and Wind (Registration/WindRegistration.cpp; M46,
 		// Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F). ADR 0060's phase-8 ledger: each in
 		// a category of its own, appended after M44's Vehicles in train order (M47's Water follows).
@@ -162,12 +172,14 @@ namespace Engine {
 	void RegisterNavigationComponents(TypeRegistry& registry);
 	// M37 (Docs/Decisions/0054-m37-joints.md decision 1), after Navigation, in ADR 0052's phase-6 ledger's landing order.
 	void RegisterJointsComponents(TypeRegistry& registry);
+	// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), after Joints, in ADR 0060's phase-8 ledger's order.
+	void RegisterVehiclesComponents(TypeRegistry& registry);
 	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3F), after M44's Vehicles, in ADR
 	// 0060's phase-8 ledger's train order.
 	void RegisterRenderDistanceComponents(TypeRegistry& registry);
 	void RegisterWindComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the eighteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the nineteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

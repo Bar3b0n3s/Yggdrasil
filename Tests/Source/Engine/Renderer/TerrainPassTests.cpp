@@ -13,6 +13,7 @@
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/SkyAtmosphere.h"
 #include "Engine/Renderer/TerrainLod.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Shared/EnvironmentConstants.h"
@@ -319,7 +320,7 @@ namespace Engine {
 			snapshot.FrameIndex += 1;
 			fixture.Submit(snapshot);
 			const Image fogged = readSceneColor();
-			const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+			const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
 			uint32_t mismatched = 0;
 			for (uint32_t y = 4; y < 60; ++y)
 			{
