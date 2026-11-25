@@ -3284,9 +3284,9 @@ Reads host and displayed-view statistics without waiting for the GPU or advancin
 | `deviceLosses` | `UInt32` | The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none. |
 | `activeBodies` | `UInt32` | Awake physics bodies of the play session, the 3D world's and the 2D world's together; 0 without a session. |
 | `particles` | `UInt32` | Live particles of the play session after its last Particles phase; 0 without a session. |
-| `transformsUpdated` | `UInt32` | World matrices the play session's last tick and the frame phase after it recomputed: only the entities whose transforms changed and their descendants; 0 without a session. |
-| `entitiesVisited` | `UInt32` | Entities the per-entity passes of the play session's last tick visited (physics, audio, UI, animation, particles and scripts), summed: 0 a tick in which nothing changes; 0 without a session. |
-| `staticCellRebuilds` | `UInt32` | Static cells the session scene's last render extraction rebuilt or removed: a write to a static entity rebuilds its cell at the next extracted frame, so this counts per rendered frame, not per tick; 0 without a session. |
+| `transformsUpdated` | `UInt32` | World matrices the play session's last tick and the frame phase after it recomputed: the subtrees of the transforms written since the previous update, physics' write-back of every awake or parented dynamic body and every character included; 0 for a tick that writes no transform; 0 without a session. |
+| `entitiesVisited` | `UInt32` | Entities the per-tick passes of the play session's last tick visited, summed: the owners of kinematic, dynamic and character bodies, the bodies whose transforms were written, scripted entities, audio sources, animators, skinned meshes, emitters, sprite animators, bone attachments and UI canvas trees. Static scenery adds none, so the count does not grow with the static entities; 0 without a session. |
+| `staticCellRebuilds` | `UInt32` | Static cells the play session's last tick's frame-phase extraction rebuilt or removed (a write to a static entity rebuilds its cell there); 0 when that frame phase did not extract; an editor view's, a capture's or a query's extraction never counts; 0 without a session. |
 
 Example: Inspect current host and renderer observations.
 

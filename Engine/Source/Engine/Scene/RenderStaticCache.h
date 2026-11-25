@@ -90,10 +90,10 @@ namespace Engine {
 
 		// The items of the last Refresh's set.
 		[[nodiscard]] size_t GetItemCount() const { return m_Items.size() - m_FreeItems.size(); }
-		// StaticCellRebuilds: the cells the last Refresh rebuilt or removed.
+		// The cells the last Refresh rebuilt or removed, whichever reader refreshed.
 		[[nodiscard]] uint32_t GetLastCellRebuilds() const { return m_LastCellRebuilds; }
-		// The cells every Refresh rebuilt or removed, summed over the cache's life (monotonic), so a play session can count
-		// those of a tick.
+		// The cells every Refresh rebuilt or removed, summed over the cache's life (monotonic), so a play session counts those
+		// of a tick's window (PlaySessionTickWork::StaticCellRebuilds, the readout's StaticCellRebuilds).
 		[[nodiscard]] uint64_t GetStaticCellRebuilds() const { return m_CellRebuilds; }
 	private:
 		static constexpr uint32_t NoItem = std::numeric_limits<uint32_t>::max();

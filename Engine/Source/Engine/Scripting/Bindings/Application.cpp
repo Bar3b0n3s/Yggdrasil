@@ -81,7 +81,7 @@ namespace Engine {
 			if (!read)
 				return Lua::RaiseError(call, read.error());
 			const ScriptPerformanceStats& stats = *read;
-			lua_createtable(call.State, 0, 22);
+			lua_createtable(call.State, 0, 29);
 			const auto field = [&call](const char* name, const auto& value)
 			{
 				Lua::Push(call, value);
@@ -300,10 +300,13 @@ namespace Engine {
 					"the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and "
 					"SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of "
 					"4 or whose GPU objects, or the view's probe constants, could not be created), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies "
-					"(both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated and "
-					"EntitiesVisited, the world matrices the last tick recomputed and the entities its per-entity passes visited (0 a tick in "
-					"which nothing changes), StaticCellRebuilds and StaticItems, the static cells the last extracted frame rebuilt and its "
-					"static items (in every mode), and StaticCellsVisible, the static cells the game view's camera did not cull (0 without a "
+					"(both worlds), its Entities and the script heap in bytes; and the static scenery's counters: TransformsUpdated, the "
+					"world matrices the last tick recomputed (the subtrees of the transforms written, physics' write-back of awake or "
+					"parented dynamic bodies and of characters included; 0 for a tick that writes no transform), EntitiesVisited, the "
+					"entities its per-tick passes visited (body owners, characters, scripted entities, audio sources, animators, emitters "
+					"and UI trees, never static scenery), StaticCellRebuilds, the static cells its frame phase's extraction rebuilt (an "
+					"editor view's extraction never counts), StaticItems, the static items of the last extraction's set (these four in "
+					"every mode), and StaticCellsVisible, the static cells the game view's camera did not cull whole (0 without a "
 					"renderer). Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step "
 					"gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, "
 					"OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.",

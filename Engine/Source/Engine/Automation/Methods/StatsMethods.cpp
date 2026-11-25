@@ -199,8 +199,8 @@ namespace Engine {
 			.Field("planarReflectionEntities", &StatsViewSummary::PlanarReflectionEntities,
 				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.")
 			.Field("staticItems", &StatsViewSummary::StaticItems,
-				"Mesh items of the frame's static set: the MeshRenderers of entities a Static makes static scenery, which render extraction "
-				"does not visit and the renderer prepares once per cell.")
+				"Mesh items of the frame's static set: the MeshRenderers of entities a Static makes static scenery (skinned, mirrored-glass "
+				"and scrolling items stay dynamic), which render extraction does not visit and the renderer prepares once per cell.")
 			.Field("staticCells", &StatsViewSummary::StaticCells, "Cells of the frame's static set: 32 m squares on the XZ plane, each holding the static items whose origin lies in it.")
 			.Field("staticCellsVisible", &StatsViewSummary::StaticCellsVisible,
 				"Static cells the view's camera did not cull whole: the view's static work follows them, testing only their items.")
@@ -238,14 +238,18 @@ namespace Engine {
 			.Field("activeBodies", &StatsGetResult::ActiveBodies, "Awake physics bodies of the play session, the 3D world's and the 2D world's together; 0 without a session.")
 			.Field("particles", &StatsGetResult::Particles, "Live particles of the play session after its last Particles phase; 0 without a session.")
 			.Field("transformsUpdated", &StatsGetResult::TransformsUpdated,
-				"World matrices the play session's last tick and the frame phase after it recomputed: only the entities whose transforms "
-				"changed and their descendants; 0 without a session.")
+				"World matrices the play session's last tick and the frame phase after it recomputed: the subtrees of the transforms written "
+				"since the previous update, physics' write-back of every awake or parented dynamic body and every character included; 0 for a "
+				"tick that writes no transform; 0 without a session.")
 			.Field("entitiesVisited", &StatsGetResult::EntitiesVisited,
-				"Entities the per-entity passes of the play session's last tick visited (physics, audio, UI, animation, particles and "
-				"scripts), summed: 0 a tick in which nothing changes; 0 without a session.")
+				"Entities the per-tick passes of the play session's last tick visited, summed: the owners of kinematic, dynamic and "
+				"character bodies, the bodies whose transforms were written, scripted entities, audio sources, animators, skinned meshes, "
+				"emitters, sprite animators, bone attachments and UI canvas trees. Static scenery adds none, so the count does not grow "
+				"with the static entities; 0 without a session.")
 			.Field("staticCellRebuilds", &StatsGetResult::StaticCellRebuilds,
-				"Static cells the session scene's last render extraction rebuilt or removed: a write to a static entity rebuilds its cell "
-				"at the next extracted frame, so this counts per rendered frame, not per tick; 0 without a session.");
+				"Static cells the play session's last tick's frame-phase extraction rebuilt or removed (a write to a static entity rebuilds "
+				"its cell there); 0 when that frame phase did not extract; an editor view's, a capture's or a query's extraction never "
+				"counts; 0 without a session.");
 	}
 
 	void RegisterStatsMethods(MethodRegistry& methods)

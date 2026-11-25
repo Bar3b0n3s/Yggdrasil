@@ -428,6 +428,7 @@ namespace Engine {
 		// whether a frame phase has closed that tick's window, and the last closed window.
 		uint64_t TickWorkTransformsStart = 0;
 		uint64_t TickWorkVisitsStart = 0;
+		uint64_t TickWorkRebuildsStart = 0;
 		bool TickWorkOpen = false;
 		PlaySessionTickWork LastTickWork{};
 		// Run state.
@@ -1505,7 +1506,8 @@ namespace Engine {
 		if (TickWorkOpen)
 		{
 			LastTickWork = PlaySessionTickWork{ .TransformsUpdated = scene.GetTransformsUpdated() - std::min(TickWorkTransformsStart, scene.GetTransformsUpdated()),
-				.EntitiesVisited = scene.GetEntitiesVisited() - std::min(TickWorkVisitsStart, scene.GetEntitiesVisited()) };
+				.EntitiesVisited = scene.GetEntitiesVisited() - std::min(TickWorkVisitsStart, scene.GetEntitiesVisited()),
+				.StaticCellRebuilds = scene.GetStaticCellRebuilds() - std::min(TickWorkRebuildsStart, scene.GetStaticCellRebuilds()) };
 			TickWorkOpen = false;
 		}
 		ConsumeRequests();
@@ -1983,6 +1985,7 @@ namespace Engine {
 		// M43: the tick counters' window opens here and closes at the end of the frame phase after this step.
 		state.TickWorkTransformsStart = state.RuntimeScene->GetTransformsUpdated();
 		state.TickWorkVisitsStart = state.RuntimeScene->GetEntitiesVisited();
+		state.TickWorkRebuildsStart = state.RuntimeScene->GetStaticCellRebuilds();
 		state.TickWorkOpen = true;
 		const bool completedBoundary = state.PreviousStepFrame != state.FrameIndex;
 		state.PreviousStepFrame = state.FrameIndex;

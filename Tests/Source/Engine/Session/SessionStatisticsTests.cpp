@@ -1,8 +1,8 @@
 #include "TestsPCH.h"
 #include "Engine/Session/SessionStatistics.h"
 
-#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
@@ -238,9 +238,10 @@ return Script.Define("Readout", Readout)
 			CHECK(staticCounters->Value.Get() == Json::array({ 0, 0, 0, 0, 0 }));
 		}
 
-		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the readout's StaticItems and StaticCellRebuilds are the
-		// session scene's static set as its last render extraction refreshed it, so they move per extracted frame.
-		TEST_CASE("SessionStatistics: the static counters are the session scene's last extraction's set")
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the readout's StaticItems is the session scene's static
+		// set as its last render extraction refreshed it, any extraction's; its StaticCellRebuilds is the last tick's (the lead's
+		// W43.3 review), so a view's extraction outside a tick rebuilds the cells without counting them.
+		TEST_CASE("SessionStatistics: the static items are the session scene's last extraction's set")
 		{
 			Test::ScriptTestFixture fixture;
 			Entity root = fixture.GetScene().CreateEntity("Scenery");
@@ -268,11 +269,72 @@ return Script.Define("Readout", Readout)
 			REQUIRE(session->ExtractView(request).has_value());
 			const SessionStatistics first = ReadSessionStatistics(*session);
 			CHECK(first.StaticItems == 3);
-			CHECK(first.StaticCellRebuilds == 3); // the first refresh builds the three cells
+			CHECK(first.StaticCellRebuilds == 0); // the first refresh built the three cells, outside any tick
+			CHECK(session->GetScene().GetStaticCellRebuilds() == 3);
 			REQUIRE(session->ExtractView(request).has_value());
 			const SessionStatistics second = ReadSessionStatistics(*session);
 			CHECK(second.StaticItems == 3);
 			CHECK(second.StaticCellRebuilds == 0);
+		}
+
+		// M43 (the lead's W43.3 review, finding 1): the readout's StaticCellRebuilds is the static cells the last tick's own
+		// frame phase rebuilt (PlaySessionTickWork), so the editor's Scene view, which extracts a test run's session once per
+		// editor frame between ticks, takes nothing out of it, and a quiet tick reports 0.
+		TEST_CASE("SessionStatistics: the static cell rebuilds are the last tick's, whatever extracts the session's scene between ticks")
+		{
+			Test::ScriptTestFixture fixture;
+			Entity root = fixture.GetScene().CreateEntity("Scenery");
+			root.AddComponent<StaticComponent>();
+			for (int index = 0; index < 3; ++index)
+			{
+				Entity rock = fixture.GetScene().CreateEntity("Rock" + std::to_string(index), root);
+				rock.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+				rock.Patch<TransformComponent>([index](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(40.0f * static_cast<float>(index), 0.0f, 0.0f);
+				});
+			}
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			auto created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE(created);
+			auto session = std::move(*created);
+			// The Scene view's request (an explicit camera), and a tick with its frame phase, which extracts the game view.
+			const RenderExtractionRequest view{ .Camera = RenderCameraSource::Explicit, .Width = 64, .Height = 64, .Alpha = 0.0f };
+			uint64_t frameIndex = 0;
+			const auto tick = [&session, &frameIndex]()
+			{
+				session->FixedStep();
+				const double delta = session->GetFixedDelta();
+				session->FrameUpdate(FrameTime{ .DeltaTime = delta, .UnscaledDeltaTime = delta, .Alpha = 1.0f, .FrameIndex = ++frameIndex });
+			};
+
+			// The first tick's frame phase builds the three cells; the Scene view's extraction after it changes nothing.
+			tick();
+			CHECK(ReadSessionStatistics(*session).StaticCellRebuilds == 3);
+			REQUIRE(session->ExtractView(view).has_value());
+			CHECK(ReadSessionStatistics(*session).StaticCellRebuilds == 3);
+
+			// A rock moved: the next tick's frame phase rebuilds its cell, and the Scene view's extraction after it keeps the 1.
+			Entity rock = session->GetScene().FindEntityByPath("/Scenery/Rock1");
+			REQUIRE(rock);
+			rock.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = 2.0f;
+			});
+			tick();
+			REQUIRE(session->ExtractView(view).has_value());
+			CHECK(ReadSessionStatistics(*session).StaticCellRebuilds == 1);
+			CHECK(ReadSessionStatistics(*session).TransformsUpdated == 1);
+
+			// A quiet tick between two of the view's extractions rebuilds nothing.
+			REQUIRE(session->ExtractView(view).has_value());
+			tick();
+			REQUIRE(session->ExtractView(view).has_value());
+			CHECK(ReadSessionStatistics(*session).StaticCellRebuilds == 0);
+			CHECK(ReadSessionStatistics(*session).StaticItems == 3);
 		}
 	}
 

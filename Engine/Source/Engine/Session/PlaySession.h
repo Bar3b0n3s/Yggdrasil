@@ -347,6 +347,10 @@ namespace Engine {
 		// physics, audio, UI layout, animation, particles, sprite animation, bone attachments, script instance
 		// synchronization; render extraction is counted by the snapshot's static and dynamic item counts instead).
 		uint64_t EntitiesVisited = 0;
+		// The static cells the scene's RenderStaticCache rebuilt or removed in the window (Scene::GetStaticCellRebuilds): those
+		// of the frame phase's game-view extraction, 0 when it did not extract; an editor view's, a capture's or a query's
+		// extraction between ticks never counts.
+		uint64_t StaticCellRebuilds = 0;
 	};
 
 	// One play session. Not copyable or movable; main thread only (§4.11).

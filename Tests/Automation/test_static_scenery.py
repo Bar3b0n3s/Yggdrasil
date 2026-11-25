@@ -1,12 +1,13 @@
 """Static scenery through automation (Docs/Decisions/0061-m43-static-scenery.md decision 3; Docs/Architecture.md
 §5.2, §8.3, §13.7): a scenery root made Static through entity.update makes its subtree's meshes the static set. A
-lockstep session's tick in which nothing moves recomputes no world matrix and visits no entity (stats.get's
-transformsUpdated and entitiesVisited), and the frame after it rebuilds no static cell (staticCellRebuilds), as for the
-same scenery without Static; a write to a static entity of the play scene recomputes its matrices and rebuilds its one
-cell at the next extracted frame. The script readout (Application.GetStats) counts the static items in every mode; a
-rendering editor's Scene view reports them, its cells and its dynamic items (staticItems, staticCells,
-staticCellsVisible, dynamicItems). The two sessions agree on every position; their state hashes differ by the
-component.
+lockstep session's tick in which nothing moves recomputes no world matrix and visits no entity in this scene of no body
+or script (stats.get's transformsUpdated and entitiesVisited), and its frame phase rebuilds no static cell
+(staticCellRebuilds), as for the same scenery without Static; a write to a static entity of the play scene recomputes
+its matrices and rebuilds its one cell at the next tick's frame phase. The script readout (Application.GetStats) counts
+the static items in every mode; a rendering editor's Scene view reports them, its cells and its dynamic items
+(staticItems, staticCells, staticCellsVisible, dynamicItems), and its pass rows show the static draws following the
+keys: one ForwardOpaque draw and at most one DirectionalShadows draw a cascade (S16's shadow-draws check). The two
+sessions agree on every position; their state hashes differ by the component.
 
 The Scene view renders at the editor's frames, so the rendering test waits, bounded by FRAME_WAIT_SECONDS, for the frame
 after a change to reach stats.get; no passing outcome depends on how long that takes.
@@ -25,6 +26,12 @@ PAIRS = 12
 SEED = 4300
 # The rocks lie in four static cells of 32 m: x in {-6, -2} or {2, 6} and z in {-4} or {0, 4}.
 CELLS = 4
+MAX_SHADOW_CASCADES = 4  # Renderer/ShadowCascades.h
+
+
+def pass_draws(view: dict[str, Any], name: str) -> int:
+    """The draw calls of the pass row `name` of a stats.get view, 0 when the view did not record it."""
+    return next((int(entry["drawCalls"]) for entry in view["passes"] if entry["name"] == name), 0)
 
 
 def scenery_ops() -> list[dict[str, Any]]:
@@ -137,6 +144,15 @@ class StaticSceneryTests(AutomationTestCase):
         self.assertEqual(static["dynamicItems"], 0)
         self.assertEqual(static["staticCells"], CELLS)
         self.assertEqual(static["staticCellsVisible"], CELLS)
+        # S16's check, as the game reads it: the static view's draws follow its keys, not its items. The one key (the
+        # built-in cube with its default material) draws once in ForwardOpaque, and its casters at most once a cascade
+        # in DirectionalShadows, so the shadow draws are of ForwardOpaque's order and never more than the dynamic
+        # layout's.
+        self.assertEqual(pass_draws(static, "ForwardOpaque"), 1)
+        self.assertLessEqual(pass_draws(static, "ForwardOpaque"), pass_draws(dynamic, "ForwardOpaque"))
+        self.assertGreater(pass_draws(static, "DirectionalShadows"), 0)
+        self.assertLessEqual(pass_draws(static, "DirectionalShadows"), MAX_SHADOW_CASCADES)
+        self.assertLessEqual(pass_draws(static, "DirectionalShadows"), pass_draws(dynamic, "DirectionalShadows"))
 
         # Looking away, the view culls every cell whole.
         client.call("viewport.camera", {"position": [0, 6, 18], "target": [0, 6, 40]})

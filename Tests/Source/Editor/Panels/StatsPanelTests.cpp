@@ -91,6 +91,22 @@ namespace Engine {
 			CHECK(Utils::HasStatsMetricRow(text, "Dropped point shadows", 2));
 		}
 
+		TEST_CASE("StatsPanel: a displayed view shows its static scenery")
+		{
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the "Static scenery" row lists the view's static items,
+			// then its visible static cells over all of them (stats.get's staticItems, staticCellsVisible and staticCells).
+			Test::UtilityPanelFixture fixture;
+			fixture.SetHostViews({ StatsViewSummary{ .Name = "scene", .Available = true, .Frame = "12", .Width = 640, .Height = 360, .StaticItems = 9, .StaticCells = 4, .StaticCellsVisible = 3 } });
+			fixture.OpenProject();
+			StatsPanel panel;
+			fixture.Draw(panel);
+			fixture.Pump();
+			const std::string text = fixture.Draw(panel);
+			INFO(text);
+			CHECK(text.contains("Static scenery"));
+			CHECK(text.contains("9 items, 3 / 4 cells"));
+		}
+
 		TEST_CASE("StatsPanel: a project change discards the pending statistics action")
 		{
 			Test::UtilityPanelFixture fixture;

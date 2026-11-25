@@ -19,8 +19,9 @@ namespace Engine {
 		uint32_t ActiveBodies = 0; // the awake bodies of both physics worlds
 		uint32_t Particles = 0;    // the live particles after the last Particles phase (ParticleSystem::GetStats)
 		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the last tick's work (PlaySession::GetLastTickWork, each
-		// saturating at the uint32 range) and the session scene's static set as its last render extraction refreshed it
-		// (Scene::GetStaticCache: the cells rebuilt or removed, the items; 0 without a cache).
+		// saturating at the uint32 range: the static cells rebuilt or removed are its frame phase's extraction's, never an
+		// editor view's) and the items of the session scene's static set as its last render extraction refreshed it
+		// (Scene::GetStaticCache; 0 without a cache).
 		uint32_t TransformsUpdated = 0;
 		uint32_t EntitiesVisited = 0;
 		uint32_t StaticCellRebuilds = 0;

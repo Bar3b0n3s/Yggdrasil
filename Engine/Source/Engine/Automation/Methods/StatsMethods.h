@@ -121,10 +121,9 @@ namespace Engine {
 		uint32_t ActiveBodies = 0;
 		uint32_t Particles = 0;
 		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; first of phase 8's top-level fields): the play session's
-		// last tick's work (PlaySession::GetLastTickWork: the world matrices recomputed in it and its frame phase, and the
-		// entities its per-entity passes visited) and the static cells the session scene's last render extraction rebuilt or
-		// removed (RenderStaticCache::GetLastCellRebuilds: per extraction, so per rendered frame, not per tick); 0 without a
-		// session.
+		// last tick's work (PlaySession::GetLastTickWork: the world matrices recomputed in it and its frame phase, the
+		// entities its per-tick passes visited, and the static cells its frame phase's extraction rebuilt or removed, never an
+		// editor view's); 0 without a session.
 		uint32_t TransformsUpdated = 0;
 		uint32_t EntitiesVisited = 0;
 		uint32_t StaticCellRebuilds = 0;

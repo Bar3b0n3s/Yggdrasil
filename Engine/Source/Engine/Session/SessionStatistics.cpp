@@ -25,7 +25,8 @@ namespace Engine {
 		result.ActiveBodies = session.GetPhysics().GetStats().ActiveBodyCount + (physics2D != nullptr ? physics2D->GetStats().ActiveBodyCount : 0);
 		if (const ParticleSystem* particles = session.GetParticles(); particles != nullptr)
 			result.Particles = particles->GetStats().Particles;
-		// M43: the last tick's work and the static set of the scene's last extraction.
+		// M43: the last tick's work (its static cell rebuilds those of its own frame phase, never an editor view's) and the
+		// static set of the scene's last extraction.
 		const auto clamp = [](uint64_t value)
 		{
 			return static_cast<uint32_t>(std::min<uint64_t>(value, std::numeric_limits<uint32_t>::max()));
@@ -33,11 +34,9 @@ namespace Engine {
 		const PlaySessionTickWork work = session.GetLastTickWork();
 		result.TransformsUpdated = clamp(work.TransformsUpdated);
 		result.EntitiesVisited = clamp(work.EntitiesVisited);
+		result.StaticCellRebuilds = clamp(work.StaticCellRebuilds);
 		if (const RenderStaticCache* cache = session.GetScene().GetStaticCache(); cache != nullptr)
-		{
-			result.StaticCellRebuilds = cache->GetLastCellRebuilds();
 			result.StaticItems = clamp(cache->GetItemCount());
-		}
 		return result;
 	}
 

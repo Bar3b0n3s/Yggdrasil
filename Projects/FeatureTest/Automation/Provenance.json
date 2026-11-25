@@ -7924,7 +7924,7 @@
 		},
 		{
 			"Path": "Assets/Tests/StaticScenery/StaticScenery.test.luau",
-			"XXH64": "bc451f674d22de54",
+			"XXH64": "f815575b5d748a5a",
 			"Method": "script.write",
 			"RequestId": 5,
 			"Client": "batch",
