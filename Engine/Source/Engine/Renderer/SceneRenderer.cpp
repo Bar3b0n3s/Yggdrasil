@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -1136,16 +1137,18 @@ namespace Engine {
 				{
 					if (transparentDraws)
 					{
+						// M46 (W46.4): with its view's fade.
 						const uint32_t record = draw.Instance;
 						draw.Instance = static_cast<uint32_t>(InstanceIndices.size());
-						InstanceIndices.push_back({ .Record = record });
+						InstanceIndices.push_back({ .Record = record, .Reserved = std::bit_cast<uint32_t>(draw.LodFade) });
 					}
 					draw.Batch = 1;
 					keys.push_back({ .Pipeline = draw.ForwardVariant,
 						.Material = draw.MaterialHandle,
 						.Mesh = draw.Mesh,
 						.Submesh = draw.Submesh,
-						.VertexStream = Detail::StaticVertexStream });
+						.VertexStream = Detail::StaticVertexStream,
+						.Lod = draw.Lod });
 					continue;
 				}
 				const MeshDrawItem& item = snapshot.Meshes[draw.SnapshotIndex];
@@ -1244,6 +1247,12 @@ namespace Engine {
 			if (draw.StaticInstances != 0)
 			{
 				constants.Flags = DrawConstantsStaticInstances;
+				// M46 (W46.4): a static draw carries its material's wind (a batch's draws share their key).
+				if (draw.Wind)
+				{
+					constants.Flags |= DrawConstantsWind;
+					constants.WindResponse = draw.WindResponse;
+				}
 				instances = 0;
 				for (uint32_t member = 0; member < draw.Batch; ++member)
 					instances += draws[index + member].StaticInstances;
@@ -1996,7 +2005,7 @@ namespace Engine {
 			else
 				frame.KeepFirstError(std::unexpected(std::move(casters).error()));
 			// M43: the static casters, culled and grouped by key per face (one draw per key and face).
-			PrepareStaticShadows(frame);
+			PrepareStaticShadows(frame, casterView);
 		}
 		if (frame.Selection)
 		{

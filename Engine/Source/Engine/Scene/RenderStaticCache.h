@@ -27,7 +27,7 @@
 // extraction's MeshRenderer item at the entity's current world matrix (its WorldTransformComponent, or
 // TransformSystem::ComputeWorldMatrix before the first TransformSystem::Update gave it one), with no interpolation and no
 // PreviousWorld, its MaterialParameters resolved at time 0 (ResolveMaterialParameters: without a scroll they are the same
-// at any time), and PickId 0.
+// at any time), (M46) its RenderDistance (MeshDrawItem::Distance, the defaults without one), and PickId 0.
 //
 // Cells. Each item lies in the cell of its world origin: (floor(x / StaticCellSize), floor(z / StaticCellSize)) of its
 // matrix's translation, a non-finite coordinate in cell 0 and a huge one clamped to the int32 range. The set lists its cells
@@ -35,8 +35,8 @@
 // item's entity at the same index of the cell's PickTable.
 //
 // Change feed. The cache opens a world-change list (Scene::OpenWorldChangeList) for the transforms, and listens to EnTT's
-// on_construct, on_update and on_destroy of MeshRenderer, MaterialParameters, SkinnedMesh, PlanarReflection,
-// HierarchyStaticTag and HierarchyDisabledTag, and to PendingDestroyTag's on_construct, marking the entity dirty when it is
+// on_construct, on_update and on_destroy of MeshRenderer, MaterialParameters, SkinnedMesh, PlanarReflection, (M46)
+// RenderDistance, HierarchyStaticTag and HierarchyDisabledTag, and to PendingDestroyTag's on_construct, marking the entity dirty when it is
 // static or its item is held (a dynamic entity's changes cost a tag lookup and are not recorded). A component
 // written past those signals (through a mutable reference; no engine path writes these components so) is missed, which the
 // Debug check below reports. Dirty marks beyond four an entity of the scene (at least 4,096) between two refreshes are

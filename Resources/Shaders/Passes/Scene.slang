@@ -72,6 +72,8 @@
 // render's wind and PreviousWorld); a draw without the flag runs exactly its earlier arithmetic. The Mask variants also
 // clip by the record's signed LodFade with Opacity's threshold (Common/LodFade.slang), and a Blend material's alpha drops
 // to 0 where the fade removes a pixel, so two levels cross-fading split their pixels exactly.
+// W46.4: a static instance's fade is its view's entry's and its wind its draw's, both returned by Common/Instances.slang's
+// LoadInstanceRecord, so a static item fades and sways exactly as its dynamic twin does.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
@@ -200,8 +202,8 @@ struct VertexOutput
 	// The instance record's draw flags (a fragment shader has no instance index to read the record with).
 	nointerpolation uint Flags : DRAWFLAGS;
 	// M31: the instance record's index in Instances, whose material parameters the fragment shaders read with
-	// DrawFlagMaterialParameters (M43: its instance index, StaticInstanceIndexBit set for a static record, which the fragment
-	// shaders read through LoadInstanceRecord, Common/Instances.slang).
+	// DrawFlagMaterialParameters (M43: its instance index, StaticInstanceIndexBit set for a static instance, M46's its
+	// InstanceIndices entry's, which the fragment shaders read through LoadInstanceRecord, Common/Instances.slang).
 	nointerpolation uint Instance : INSTANCE;
 };
 

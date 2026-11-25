@@ -66,7 +66,9 @@ namespace Engine {
 	// of set 0 of the Scene and Shadow programs): a static draw (DrawConstants::Flags with DrawConstantsStaticInstances)
 	// reads instance i's record at StaticInstances[InstanceIndices[FirstInstance + i].Record], StaticInstances (t21) being the
 	// GPU-resident records of the scene's static set. Reserved is 0 and unread at M43, kept for M46's per-view fade of a
-	// static entry (ADR 0060's ledger), so M46 changes no layout of M43's.
+	// static entry (ADR 0060's ledger), so M46 changes no layout of M43's. M46 (W46.4): Reserved holds the bits of the entry's
+	// signed level fade (InstanceRecord::LodFade's meaning, 0 for none), which Common/Instances.slang's LoadInstanceRecord
+	// returns in the static record, since a static record is shared by every view.
 	struct InstanceIndex
 	{
 		uint32_t Record = 0;

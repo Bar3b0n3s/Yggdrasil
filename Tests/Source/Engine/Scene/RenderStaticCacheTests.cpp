@@ -8,6 +8,7 @@
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PlanarReflectionComponent.h"
+#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/StaticComponent.h"
@@ -689,6 +690,55 @@ namespace Engine {
 			});
 			CHECK_FALSE(scene.RefreshStaticSet()->Cells[0]->Items[0].CastShadows);
 #endif
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E, W46.4): a static item carries its
+		// entity's RenderDistance, as a dynamic item does, and a RenderDistance added, written or removed rebuilds its cell alone,
+		// a write of the same bits nothing.
+		TEST_CASE("RenderStaticCache: a RenderDistance added, written or removed rebuilds its item's cell, which holds the distance")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity island = CreateStaticRoot(scene, "Island");
+			const Entity tree = CreateMesh(scene, "Tree", island, glm::vec3(1.0f, 0.0f, 1.0f));
+			const Entity rock = CreateMesh(scene, "Rock", island, glm::vec3(40.0f, 0.0f, 1.0f));
+			const glm::ivec2 origin(0, 0);
+			const glm::ivec2 east(1, 0);
+			const Ref<const RenderStaticSet> first = UpdateAndRefresh(scene);
+			REQUIRE(first != nullptr);
+			const RenderStaticCache* cache = scene.GetStaticCache();
+			REQUIRE(cache != nullptr);
+			CHECK(FindCell(*first, origin)->Items[0].Distance == MeshDrawDistance{});
+
+			const MeshDrawDistance far{ .CullDistance = 300.0f, .LodBias = 1.5f, .ShadowLodOffset = 2, .FadeWidth = 0.25f };
+			tree.AddComponent<RenderDistanceComponent>(RenderDistanceComponent{ .CullDistance = 300.0f, .LodBias = 1.5f, .ShadowLodOffset = 2, .FadeWidth = 0.25f });
+			const Ref<const RenderStaticSet> added = UpdateAndRefresh(scene);
+			CHECK(cache->GetLastCellRebuilds() == 1);
+			CHECK(FindCell(*added, origin)->Items[0].Distance == far);
+			CHECK(FindCell(*added, east) == FindCell(*first, east));
+
+			tree.Patch<RenderDistanceComponent>([](RenderDistanceComponent& distance)
+			{
+				distance.LodBias = 0.5f;
+			});
+			const Ref<const RenderStaticSet> written = UpdateAndRefresh(scene);
+			CHECK(cache->GetLastCellRebuilds() == 1);
+			CHECK(FindCell(*written, origin)->Items[0].Distance.LodBias == 0.5f);
+			CHECK(FindCell(*added, origin)->Items[0].Distance.LodBias == 1.5f); // copy on write
+
+			tree.Patch<RenderDistanceComponent>([](RenderDistanceComponent& distance)
+			{
+				distance.LodBias = 0.5f;
+			});
+			CHECK(UpdateAndRefresh(scene) == written);
+			CHECK(cache->GetLastCellRebuilds() == 0);
+
+			tree.RemoveComponent<RenderDistanceComponent>();
+			const Ref<const RenderStaticSet> removed = UpdateAndRefresh(scene);
+			CHECK(cache->GetLastCellRebuilds() == 1);
+			CHECK(FindCell(*removed, origin)->Items[0].Distance == MeshDrawDistance{});
+			CHECK(FindCell(*removed, east) == FindCell(*first, east));
+			CHECK(FindCell(*removed, east)->PickTable == std::vector<UUID>{ rock.GetUUID() });
 		}
 	}
 

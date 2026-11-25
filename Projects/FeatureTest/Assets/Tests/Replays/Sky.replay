@@ -84,7 +84,7 @@
 				"Handle": "a3f9d55839416de7",
 				"Path": "Assets/Materials/Sky/Ground.material",
 				"Type": "Material",
-				"Hash": "9fa8fc47c6fab429"
+				"Hash": "fddfea2fbc638e03"
 			},
 			{
 				"Handle": "cc2723c3d96b44cc",
@@ -96,7 +96,7 @@
 				"Handle": "f5dd4869409d0341",
 				"Path": "Assets/Materials/Sky/Hut.material",
 				"Type": "Material",
-				"Hash": "8577f089ed7b7bcc"
+				"Hash": "1c4dd186d7bd1573"
 			}
 		]
 	},

@@ -17,6 +17,8 @@
 // M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): instance i of a static draw is the static set's record
 // StaticInstances[InstanceIndices[Draw.FirstInstance + i].Record] (t21 and t22), every record read through
 // Common/Instances.slang, as Scene.slang reads them.
+// M46 (W46.4): a static wind caster's draw carries its material's wind (DrawConstantsWind), which LoadInstanceRecord gives
+// its record, so it sways as a dynamic one; a static caster is never faded (its entry's fade is 0).
 
 #include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"

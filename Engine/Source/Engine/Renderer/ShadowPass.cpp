@@ -24,6 +24,7 @@
 #include <format>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <span>
 #include <tuple>
 
@@ -197,7 +198,10 @@ namespace Engine {
 
 		// M43: the face's draws, one per key, appended to `set` with their indices appended to `indices`, and, when `hashed`
 		// (a face M29's cache holds: a spot tile or a point face), its signature; `buckets` is left empty for the next face.
-		[[nodiscard]] static StaticShadowFace FinishStaticFace(StaticShadowBuckets& buckets, bool hashed, StaticShadowSet& set, std::vector<InstanceIndex>& indices)
+		// M46 (W46.4): a hashed face whose visible casters hold a wind caster also hashes `wind`, the render's wind (none without
+		// one), whose phases move every frame.
+		[[nodiscard]] static StaticShadowFace FinishStaticFace(StaticShadowBuckets& buckets, bool hashed, StaticShadowSet& set, std::vector<InstanceIndex>& indices,
+			const WindFrame* wind)
 		{
 			StaticShadowFace face{ .FirstDraw = static_cast<uint32_t>(set.Draws.size()) };
 			XXH64Hasher signature;
@@ -214,8 +218,11 @@ namespace Engine {
 				bucket.clear();
 			}
 			face.DrawCount = static_cast<uint32_t>(buckets.Touched.size());
+			if (hashed && buckets.Wind && wind != nullptr)
+				HashShadowValue(signature, *wind);
 			face.Signature = hashed && face.DrawCount != 0 ? FinishShadowSignature(signature) : 0;
 			buckets.Touched.clear();
+			buckets.Wind = false;
 			return face;
 		}
 
@@ -240,9 +247,10 @@ namespace Engine {
 
 		// M43: one face's visible static casters into `buckets`: of each candidate cell not outside the face's frustum, each
 		// caster the dynamic path's tests keep (ShadowBoxesOverlap with `light`, then IsOutsideShadow), a test the cell's
-		// classification settles for all its casters skipped.
+		// classification settles for all its casters skipped. M46 (W46.4): each at the level `camera` gives it (PrepareCasters'
+		// SelectViewShadowLod; level 0 without a camera), none beyond its CullDistance or at a level where it has no indices.
 		static void CullStaticFace(std::span<const StaticShadowCell> cells, std::span<const StaticFaceCandidate> candidates, const ShadowBox* light,
-			const glm::mat4& viewProjection, bool pancake, StaticShadowBuckets& buckets)
+			const glm::mat4& viewProjection, bool pancake, const CameraData* camera, StaticShadowBuckets& buckets)
 		{
 			// The face's frustum's centre bounds the magnitudes its clip coordinates are computed from (InflateStaticCellBox); a
 			// degenerate face's falls back to the origin, so no margin is ever non-finite.
@@ -262,7 +270,17 @@ namespace Engine {
 						continue;
 					if (frustum != StaticCellVisibility::Inside && IsOutsideShadow(caster.Bounds, viewProjection * caster.World, pancake))
 						continue;
-					AddStaticFaceCaster(buckets, caster.Key, cell.FirstRecord + caster.Item, caster.Signature);
+					const std::optional<uint32_t> level = camera != nullptr
+						? SelectViewShadowLod(std::span<const float>(caster.LodScreenSizes.data(), caster.LodCount), caster.MeshBounds, caster.World,
+							  caster.Distance, *camera)
+						: std::optional<uint32_t>(0U);
+					if (!level.has_value())
+						continue;
+					const StaticShadowLevel chosen = *level == 0 ? StaticShadowLevel{ .Key = caster.Key, .Signature = caster.Signature } : caster.Levels[*level - 1];
+					if (chosen.Key == NoStaticShadowKey)
+						continue;
+					AddStaticFaceCaster(buckets, chosen.Key, cell.FirstRecord + caster.Item, chosen.Signature);
+					buckets.Wind = buckets.Wind || caster.Wind;
 				}
 			}
 		}
@@ -658,29 +676,35 @@ namespace Engine {
 		return set;
 	}
 
-	void ShadowPass::AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, std::vector<ShadowCasterDraw>& draws,
-		std::vector<RenderStaticDrawKey>& keys)
+	void ShadowPass::AppendStaticItemCasters(GpuResourceCache& cache, const MeshDrawItem& item, uint32_t level, std::vector<StaticCasterDraw>& draws)
 	{
 		ENGINE_CORE_ASSERT(Utils::IsFiniteShadowWorld(item.World), "a static caster's world matrix must be finite");
 		if (!item.CastShadows || !item.Mesh.IsValid())
 			return;
 		// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
 		const GpuMesh mesh = cache.GetMesh(item.Mesh);
-		if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer || !mesh.WindBuffer)
+		if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer || !mesh.WindBuffer || level > mesh.LodScreenSizes.size())
 			return;
+		// M46 (W46.4): with its material's wind whatever the render's (the draws carry it, StaticShadowSet::Wind), and no
+		// render's wind in its signature (its face's hashes it).
 		std::vector<Utils::ShadowCasterCandidate> candidates;
-		Utils::AppendCasterCandidates(cache, mesh, item, DeformedVertexSource{}, 0, false, nullptr, candidates);
+		Utils::AppendCasterCandidates(cache, mesh, item, DeformedVertexSource{}, level, true, nullptr, candidates);
 		for (Utils::ShadowCasterCandidate& candidate : candidates)
 		{
-			keys.push_back({ .Pipeline = candidate.Key.Pipeline, .Material = candidate.Key.Material, .Mesh = candidate.Key.Mesh, .Submesh = candidate.Key.Submesh });
-			draws.push_back(std::move(candidate.Draw));
+			const bool wind = (candidate.Record.Flags & DrawFlagWind) != 0;
+			draws.push_back({ .Draw = std::move(candidate.Draw),
+				.Key = { .Pipeline = candidate.Key.Pipeline, .Material = candidate.Key.Material, .Mesh = candidate.Key.Mesh, .Submesh = candidate.Key.Submesh, .Lod = level },
+				.Wind = wind,
+				.WindResponse = candidate.Record.WindResponse });
 		}
 	}
 
 	StaticShadowSet ShadowPass::PrepareStaticFaces(std::span<const StaticShadowCell> cells, size_t keyCount, const ShadowCascadeSet* cascades,
-		const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices)
+		const SpotShadowAtlas* spots, const PointShadowSet* points, bool depthClamp, StaticShadowBuckets& buckets, std::vector<InstanceIndex>& indices,
+		const ShadowCasterView& view)
 	{
 		StaticShadowSet set;
+		set.Wind = view.Wind != nullptr;
 		if (cells.empty())
 			return set;
 		ENGINE_CORE_ASSERT(buckets.Touched.empty(), "the static shadow buckets must be empty between faces");
@@ -694,8 +718,8 @@ namespace Engine {
 			Utils::SelectStaticFaceCandidates(cells, nullptr, candidates);
 			for (uint32_t index = 0; index < cascades->Count; ++index)
 			{
-				Utils::CullStaticFace(cells, candidates, nullptr, cascades->Cascades[index].ViewProjection, depthClamp, buckets);
-				set.Cascades[index] = Utils::FinishStaticFace(buckets, false, set, indices); // cascades are drawn every frame
+				Utils::CullStaticFace(cells, candidates, nullptr, cascades->Cascades[index].ViewProjection, depthClamp, view.Camera, buckets);
+				set.Cascades[index] = Utils::FinishStaticFace(buckets, false, set, indices, view.Wind); // cascades are drawn every frame
 			}
 		}
 		if (spots != nullptr)
@@ -705,8 +729,8 @@ namespace Engine {
 			{
 				const ShadowBox light = Utils::GetShadowFrustumBox(spots->Tiles[index].ViewProjection);
 				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
-				Utils::CullStaticFace(cells, candidates, &light, spots->Tiles[index].ViewProjection, false, buckets);
-				set.Spots[index] = Utils::FinishStaticFace(buckets, true, set, indices);
+				Utils::CullStaticFace(cells, candidates, &light, spots->Tiles[index].ViewProjection, false, view.Camera, buckets);
+				set.Spots[index] = Utils::FinishStaticFace(buckets, true, set, indices, view.Wind);
 			}
 		}
 		if (points != nullptr)
@@ -720,8 +744,8 @@ namespace Engine {
 				Utils::SelectStaticFaceCandidates(cells, &light, candidates);
 				for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
 				{
-					Utils::CullStaticFace(cells, candidates, &light, planned.FaceViewProjections[face], false, buckets);
-					set.Points[index][face] = Utils::FinishStaticFace(buckets, true, set, indices);
+					Utils::CullStaticFace(cells, candidates, &light, planned.FaceViewProjections[face], false, view.Camera, buckets);
+					set.Points[index][face] = Utils::FinishStaticFace(buckets, true, set, indices, view.Wind);
 				}
 			}
 		}
@@ -861,11 +885,20 @@ namespace Engine {
 				state.bindings.push_back(materialSets[draw.Key]);
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Vertices).setSlot(0));
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
+			// M46 (W46.4): slot 2 holds the vertices again, unread, as RecordView's draws bind it, and slot 3 the wind stream.
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Vertices).setSlot(Utils::PreviousPositionSlot));
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(key.Wind).setSlot(Utils::MeshWindStreamSlot));
 			state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(key.Indices).setFormat(nvrhi::Format::R32_UINT));
 			commandList.setGraphicsState(state);
 			DrawConstants push{};
 			push.FirstInstance = draw.First;
 			push.Flags = DrawConstantsStaticInstances;
+			// M46 (W46.4): a wind caster's key carries its material's response in a render with a Wind.
+			if (key.WindCaster && inputs.StaticDraws->Wind)
+			{
+				push.Flags |= DrawConstantsWind;
+				push.WindResponse = key.WindResponse;
+			}
 			commandList.setPushConstants(&push, sizeof(push));
 			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(key.IndexCount).setInstanceCount(draw.Count).setStartIndexLocation(key.IndexOffset));
 			++counters.DrawCalls;

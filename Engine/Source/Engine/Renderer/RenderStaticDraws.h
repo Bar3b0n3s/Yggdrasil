@@ -20,7 +20,7 @@
 
 namespace Engine {
 
-	// M43's static grouping key (ADR 0060's ledger: (pipeline, material, mesh, submesh), as a struct; M46 appends its level):
+	// M43's static grouping key (ADR 0060's ledger: (pipeline, material, mesh, submesh), as a struct; M46 appends its level, Lod):
 	// the draws of one key share their vertices, indices, pipeline variant and material set, so a view draws every visible
 	// static instance of a key with one indexed draw. Pipeline is the forward variant of the camera's passes, or a shadow
 	// caster's variant (Material null for an Opaque caster, which binds none). Ordered as the opaque sort orders draws.
@@ -30,6 +30,9 @@ namespace Engine {
 		AssetHandle Material{};
 		AssetHandle Mesh{};
 		uint32_t Submesh = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E, W46.4): the level of detail whose index
+		// range the key's draws draw, so two levels of one submesh never share an indexed draw.
+		uint32_t Lod = 0;
 
 		auto operator<=>(const RenderStaticDrawKey&) const = default;
 	};

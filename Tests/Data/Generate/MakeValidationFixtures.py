@@ -86,8 +86,8 @@ COMPONENT_ORDER = [
     "Animator", "SkinnedMesh", "BoneAttachment", "ParticleEmitter", "ParticleLook", "IrradianceVolume",
     "ReflectionProbe", "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation",
     "NavModifier",
-    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "WheeledVehicle", "VehicleWheel", "RenderDistance", "Wind",
-    "ValidatorTarget",
+    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "WheeledVehicle", "VehicleWheel", "RenderDistance",
+    "Wind", "ValidatorTarget",
     "ValidatorFollower",
 ]
 

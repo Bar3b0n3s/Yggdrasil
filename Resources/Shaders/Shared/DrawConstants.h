@@ -30,6 +30,7 @@ namespace Engine {
 	// record's WindResponse (Common/Wind.slang); without it no entry reads either, and the instance draws as before M46.
 #if defined(ENGINE_SHADER)
 	static const uint DrawConstantsStaticInstances = 1; // M43: DrawConstants::Flags, not an InstanceRecord draw flag
+	static const uint DrawConstantsWind = 2;            // M46: DrawConstants::Flags (W46.4)
 	static const uint DrawFlagMirrored = 1;
 	static const uint DrawFlagReceiveShadows = 2;
 	static const uint DrawFlagPreviousPositions = 4;
@@ -38,6 +39,7 @@ namespace Engine {
 	static const uint DrawFlagWind = 32;
 #else
 inline constexpr uint32_t DrawConstantsStaticInstances = 1; // M43: DrawConstants::Flags, not an InstanceRecord draw flag
+inline constexpr uint32_t DrawConstantsWind = 2;            // M46: DrawConstants::Flags (W46.4)
 inline constexpr uint32_t DrawFlagMirrored = 1;
 inline constexpr uint32_t DrawFlagReceiveShadows = 2;
 inline constexpr uint32_t DrawFlagPreviousPositions = 4;
@@ -77,16 +79,23 @@ inline constexpr uint32_t SceneDebugViewEmissive = 5;
 	// DrawConstants bits. With DrawConstantsStaticInstances, the draw is a static draw: instance i is
 	// StaticInstances[InstanceIndices[FirstInstance + i].Record] (t21 and t22 of set 0, Shared/InstanceRecord.h's
 	// InstanceIndex) instead of Instances[FirstInstance + i]; 0 keeps every draw on the dynamic path.
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md, the W46.4 record; Padding1.x's place, the size
+	// unchanged): with DrawConstantsWind, a static draw whose material has wind in a scene with a Wind, WindResponse is that
+	// material's (InstanceRecord::WindResponse's packing): Common/Instances.slang's load of a static record ORs DrawFlagWind into
+	// it and takes this WindResponse, since a static item's one record serves every submesh of it, whose materials' wind
+	// differs (a tree's bark and leaves). 0 for every dynamic draw, whose records carry their own.
 	struct DrawConstants
 	{
 		uint32_t FirstInstance = 0;
 		uint32_t Flags = 0;
-		UInt2 Padding1;
+		uint32_t WindResponse = 0;
+		uint32_t Padding1 = 0;
 	};
 
 #if !defined(ENGINE_SHADER)
 	static_assert(sizeof(DrawConstants) == 16, "DrawConstants must match its 16-byte push-constant layout (§8.4)");
-	static_assert(offsetof(DrawConstants, Flags) == 4 && offsetof(DrawConstants, Padding1) == 8,
+	static_assert(offsetof(DrawConstants, Flags) == 4 && offsetof(DrawConstants, WindResponse) == 8
+			&& offsetof(DrawConstants, Padding1) == 12,
 		"DrawConstants members must sit where the push-constant layout puts them");
 
 }

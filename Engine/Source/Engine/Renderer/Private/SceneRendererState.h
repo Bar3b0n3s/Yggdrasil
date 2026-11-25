@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include "Engine/Asset/MeshData.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/AsyncPicker.h"
@@ -151,24 +152,47 @@ namespace Engine {
 			uint32_t IndexCount = 0;
 			uint32_t PrepassVariant = 0;
 			bool Blend = false;
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E and its W46.4 record): the mesh's wind
+			// stream (GpuMesh::WindBuffer, vertex binding 3), and whether the key's material has wind, with its WindResponse: a
+			// static record serves every submesh of its item, so the key's draws carry the response (DrawConstantsWind) in a
+			// render whose snapshot has a Wind.
+			nvrhi::BufferHandle WindBuffer{};
+			bool Wind = false;
+			uint32_t WindResponse = 0;
 		};
 
-		// M43: one submesh draw of a prepared static cell's item: its key (into StaticKeys) and its submesh's local bounds.
+		// M46 (W46.4): a SceneRendererStaticDraw's key at a level where its submesh has no indices (it draws nothing there).
+		inline constexpr uint32_t NoStaticDrawKey = std::numeric_limits<uint32_t>::max();
+
+		// M43: one submesh draw of a prepared static cell's item: its keys (into StaticKeys) and its submesh's local bounds
+		// (GpuSubmesh::Bounds, which cover every level). M46 (W46.4): its key at each level of its mesh, Levels of them (Keys[0]
+		// level 0's), unfaded and while the level fades (FadeKeys: SelectMeshAlphaMode's variants for a fading draw, the Mask
+		// variants for an Opaque material), NoStaticDrawKey where the submesh has no indices at the level.
 		struct SceneRendererStaticDraw
 		{
-			uint32_t Key = 0;
+			std::array<uint32_t, MaxMeshLods> Keys{};
+			std::array<uint32_t, MaxMeshLods> FadeKeys{};
+			uint32_t Levels = 1;
 			uint32_t Submesh = 0;
 			Aabb Bounds{};
 		};
 
 		// M43: one item of a prepared static cell: its world matrix, whether it is finite (a non-finite one draws nothing and
-		// is the render's error, as a dynamic item's), and its draws (Draws[FirstDraw, FirstDraw + DrawCount)).
+		// is the render's error, as a dynamic item's), and its draws (Draws[FirstDraw, FirstDraw + DrawCount)). M46 (W46.4):
+		// whether its mesh's buffers exist (Drawable: what the dynamic path measures, culls by distance and counts), and what
+		// chooses its levels in a view (SelectViewMeshLod: its mesh's switch sizes, LodCount of them, its mesh's level 0 bounds
+		// and its RenderDistance).
 		struct SceneRendererStaticItem
 		{
 			glm::mat4 World = glm::mat4(1.0f);
 			uint32_t FirstDraw = 0;
 			uint32_t DrawCount = 0;
 			bool Finite = true;
+			bool Drawable = false;
+			std::array<float, MaxMeshLods - 1> LodScreenSizes{};
+			uint32_t LodCount = 0;
+			Aabb MeshBounds{};
+			MeshDrawDistance Distance{};
 		};
 
 		// M43: a mirror a prepared cell depends on: a mesh's GpuMesh at its Version with its vertex buffer (held, so the
@@ -192,6 +216,14 @@ namespace Engine {
 		{
 			Ref<const RenderStaticCell> Cell{};
 			std::vector<SceneRendererStaticItem> Items{};
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E, W46.4): its drawable items, those of
+			// them with a CullDistance, the largest CullDistance of its drawable items (infinite when one has none) and the box of
+			// their level spheres' centres (MeshLod.h's ComputeMeshLodSphere), so a view whose camera is beyond that distance from
+			// every centre culls the cell's items by distance before it looks at them.
+			uint32_t DrawableItems = 0;
+			uint32_t DistanceItems = 0;
+			float MaxCullDistance = 0.0f;
+			Aabb Centres{};
 			std::vector<SceneRendererStaticDraw> Draws{};
 			std::vector<StaticShadowCaster> Casters{};
 			Aabb Box{};
@@ -986,7 +1018,7 @@ namespace Engine {
 		std::map<RenderStaticDrawKey, uint32_t> StaticCasterKeyIndex{};
 		std::vector<uint32_t> StaticCasterKeyUses{};
 		size_t StaticKeysInUse = 0;
-		std::vector<std::vector<uint32_t>> StaticBuckets{};
+		std::vector<std::vector<InstanceIndex>> StaticBuckets{}; // M46: each entry with its view's fade (InstanceIndex::Reserved)
 		std::vector<uint32_t> StaticTouched{};
 		StaticShadowBuckets StaticFaceBuckets{};
 		std::vector<InstanceIndex> InstanceIndices{};
@@ -1076,13 +1108,16 @@ namespace Engine {
 		// (ClassifyStaticCell, the mirror's clip plane), a culled one adding its submesh draws to CulledSubmeshes (main view)
 		// and keeping its materials' sets (R-MATSET), the draws of a partial cell tested one by one with IsOutsideView (and
 		// the clip plane), as the dynamic path tests them. `materials` and `culledMaterials` are PrepareViewDraws'; `status`
-		// takes the first error (a non-finite item, a material set's creation).
+		// takes the first error (a non-finite item, a material set's creation). M46 (W46.4): each visible item's levels are the
+		// view's (SelectViewMeshLod by its camera, a mirror view's own), one draw per level and its fade in the item's entries;
+		// a cell beyond every item's CullDistance is culled by distance whole; the counters follow the dynamic path's.
 		void AppendStaticViewDraws(Detail::SceneRendererFrame& frame, const CameraData& camera, const Detail::SceneRendererMirrorCull* mirror,
 			std::vector<Detail::SceneRendererDraw>& opaque, std::vector<Detail::SceneRendererDraw>& transparent,
 			std::map<AssetHandle, Detail::SceneRendererMaterial>& materials, std::set<AssetHandle>& culledMaterials, Status& status);
 		// M43: the static casters' draws of every shadow face the frame plans (ShadowPass::PrepareStaticFaces), their indices
-		// appended to InstanceIndices, into frame.StaticShadows.
-		void PrepareStaticShadows(Detail::SceneRendererFrame& frame);
+		// appended to InstanceIndices, into frame.StaticShadows. M46 (W46.4): `view`, the dynamic casters' (its camera chooses
+		// the casters' levels, its wind the faces' wind).
+		void PrepareStaticShadows(Detail::SceneRendererFrame& frame, const ShadowCasterView& view);
 		// M43: copies of the static set's items whose entity the snapshot selects, in cell order then item order (the
 		// selection mask's static items, SelectionPass::PrepareDraws).
 		[[nodiscard]] std::vector<MeshDrawItem> CollectSelectedStaticItems(const Detail::SceneRendererFrame& frame) const;

@@ -474,6 +474,7 @@ namespace Engine {
 				.Fields = {
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, FirstInstance),
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, Flags),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, WindResponse),
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding1),
 				},
 				.Program = "Scene",
